@@ -16,6 +16,7 @@ PRISM.store = (function () {
     godBrainVersion: 1,
     clones: [],
     tasks: [],
+    queue: [],
     systemMemory: [],
     lastAudit: null,
     pendingUpgrade: null,
@@ -212,6 +213,42 @@ PRISM.store = (function () {
     save();
   }
 
+  /* ---------------- broadcast queue ---------------- */
+  function addQueueItem(input) {
+    const q = {
+      id: uid("bq"),
+      cloneId: input.cloneId || null,
+      title: input.title,
+      text: input.text,
+      dueAt: input.dueAt,
+      status: "queued",
+      createdAt: Date.now(),
+      postedAt: null
+    };
+    state.queue.push(q);
+    logMemory("queue", `Scheduled for X: "${q.title}" — ${new Date(q.dueAt).toLocaleString()}.`);
+    save();
+    return q;
+  }
+
+  function markPosted(queueId) {
+    const q = state.queue.find(x => x.id === queueId);
+    if (!q) return;
+    q.status = "posted";
+    q.postedAt = Date.now();
+    logMemory("queue", `Posted to X: "${q.title}".`);
+    save();
+  }
+
+  function deleteQueueItem(queueId) {
+    state.queue = state.queue.filter(q => q.id !== queueId);
+    save();
+  }
+
+  function dueQueue() {
+    return state.queue.filter(q => q.status === "queued" && q.dueAt <= Date.now());
+  }
+
   /* ---------------- system memory ---------------- */
   function logMemory(kind, text) {
     state.systemMemory.push({ id: uid("sm"), at: Date.now(), kind, text });
@@ -364,6 +401,7 @@ PRISM.store = (function () {
     addClone, replicate, deleteClone, topPerformer,
     addTask, rateTask, setTaskFlag,
     addVaultItem, deleteVaultItem,
+    addQueueItem, markPosted, deleteQueueItem, dueQueue,
     logMemory, runAudit, confirmUpgrade, dismissUpgrade, auditDue,
     runWeeklyRepeats, trainDNA, completeOnboarding, seedDemoClones,
     setSettings, exportJSON, importJSON, reset

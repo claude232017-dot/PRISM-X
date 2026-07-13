@@ -28,6 +28,7 @@ inherits that DNA. Opening `index.html` directly from disk also works.
 | **Task console** | Give any clone a mission: task type, topic/product/goal, target outcome, plus optional objection / niche / urgency targeting. It returns the finished artifact + an execution plan + a CTA. Rate it 1–5 ★, toggle **Learn from This** (commits to the clone's memory), **Send to GOD CORE** (broadcasts the logic to every clone), or **Repeat Weekly** (auto re-runs every 7 days). Clones can **collaborate** — e.g. your Copywriter drafts, your DM Closer executes. |
 | **Evolve system** | The weekly audit analyzes every rated task, surfaces your best clone / tone / logic, and proposes system-wide upgrades ("This CTA converted 38% above network average — push it to all clones?"). Confirm & Push bumps the network brain version, and every clone visibly enters a LEARNING state. Every change is logged in **System Memory**. |
 | **Clone Vaults** | Everything a clone produces is archived by category — Content, Offers, Sales Data, Objection Scripts, Lessons Learned — and exportable: copy as Markdown (paste into Notion), local PDF, email, or post straight to X. |
+| **Broadcast Queue** | Schedule any task output or vault item for X: pick a fire time, and due posts surface with a badge, dashboard banner and toast. One click opens the pre-filled X composer and marks the item posted. (The app is serverless by design — nothing ever posts without you.) |
 
 ## Generation engines
 
@@ -50,6 +51,14 @@ inherits that DNA. Opening `index.html` directly from disk also works.
   during onboarding or from Settings — delete them anytime.
 - Simulated performance: rating a task attributes leads/earnings to the clone based
   on its role economics, which feeds the dashboards and the weekly audit.
+
+## Bundled Claude Code skills
+
+`.claude/skills/` ships with installed skill packs for working on this repo with
+Claude Code: `karpathy-guidelines` (multica-ai), the `ui-ux-pro-max` suite
+(nextlevelbuilder), and seven curated skills from `affaan-m/ECC` — the full
+197-skill ECC collection is vendored in `.claude/skills-library/ecc/` (see the
+README there for how to activate more).
 
 ## Stack
 

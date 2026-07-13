@@ -413,6 +413,37 @@ select.input { appearance: auto; }
   border-radius: 0 7px 7px 0; padding: 8px 11px;
 }
 
+/* ---------------- broadcast queue ---------------- */
+.q-badge {
+  display: inline-grid; place-items: center; min-width: 17px; height: 17px;
+  padding: 0 4px; margin-left: 3px; border-radius: 999px;
+  background: var(--accent); color: #1a1405;
+  font: 800 10px/1 var(--mono); vertical-align: 1px;
+}
+.q-badge[hidden] { display: none; }
+.queue-row {
+  display: flex; gap: 14px; align-items: flex-start;
+  padding: 12px 10px; border-bottom: 1px solid var(--line);
+}
+.queue-row:last-child { border-bottom: none; }
+.queue-row.due { background: rgba(245, 197, 66, 0.05); border-radius: 8px; }
+.queue-row.posted { opacity: .65; }
+.q-when { flex: none; width: 128px; }
+.q-due {
+  font: 700 10.5px/1.5 var(--mono); letter-spacing: .5px; color: var(--ink-muted);
+}
+.q-due.hot {
+  color: var(--accent); text-shadow: var(--glow);
+  animation: blink 1.6s ease-in-out infinite;
+}
+.q-main { flex: 1; min-width: 0; }
+.q-title { font-weight: 700; font-size: 13.5px; }
+.q-snippet {
+  color: var(--ink-muted); font-size: 12px; margin-top: 3px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.q-actions { flex: none; display: flex; gap: 6px; flex-wrap: wrap; }
+
 /* ---------------- system memory log ---------------- */
 .log-list { display: flex; flex-direction: column; gap: 3px; }
 .log-row {

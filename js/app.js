@@ -16,6 +16,7 @@
     main.innerHTML = "";
     if (view === "forge") renderForge(main);
     else if (view === "clone" && parts[1]) renderClone(main, parts[1]);
+    else if (view === "queue") renderQueue(main);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
     else renderDashboard(main);
@@ -38,6 +39,12 @@
     }
     const bv = $("#brain-version");
     if (bv) bv.textContent = "BRAIN v" + S.state.godBrainVersion;
+    const qb = $("#queue-badge");
+    if (qb) {
+      const due = S.dueQueue().length;
+      qb.textContent = due;
+      qb.hidden = due === 0;
+    }
   }
 
   /* =============================== helpers =============================== */
@@ -105,6 +112,15 @@
         el("button", { class: "btn gold-btn", text: "◉ Run Weekly Audit", onclick: doAudit })
       ])
     ]));
+
+    /* ---- due broadcasts banner ---- */
+    const due = S.dueQueue();
+    if (due.length) {
+      wrap.appendChild(el("div", { class: "banner" }, [
+        el("span", { html: `⌁ <b>${due.length} scheduled post${due.length > 1 ? "s are" : " is"} due.</b> Open the Broadcast Queue to fire.` }),
+        el("button", { class: "btn small gold-btn", text: "Open Queue", onclick: () => go("#/queue") })
+      ]));
+    }
 
     /* ---- audit due banner ---- */
     if (S.auditDue()) {
@@ -508,6 +524,7 @@
             el("button", { class: "btn tiny", text: "PDF", onclick: () => U.pdfExport(`${clone.name} — ${item.title}`, item.body) }),
             el("button", { class: "btn tiny", text: "Email", onclick: () => U.emailExport(`[PRISM-X] ${item.title}`, item.body) }),
             el("button", { class: "btn tiny", text: "Post ↗", title: "Share to X", onclick: () => U.shareToX(item.body) }),
+            el("button", { class: "btn tiny", text: "⌁", title: "Schedule for X (Broadcast Queue)", onclick: () => scheduleModal(clone, item.title, firstArtifactChunk(item.body)) }),
             el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { S.deleteVaultItem(clone.id, item.id); drawVault(); } })
           ])
         ]));
@@ -640,7 +657,8 @@
       el("button", { class: "btn tiny", text: "Copy for Notion", onclick: () => U.copyText(taskMarkdown(clone, task), "Copied as markdown — paste into Notion.") }),
       el("button", { class: "btn tiny", text: "Local PDF", onclick: () => U.pdfExport(`${clone.name} — ${task.type}: ${task.topic}`, task.output) }),
       el("button", { class: "btn tiny", text: "Email", onclick: () => U.emailExport(`[PRISM-X] ${task.type} — ${task.topic}`, task.output) }),
-      el("button", { class: "btn tiny", text: "Post to X ↗", onclick: () => U.shareToX(firstArtifactChunk(task.output)) })
+      el("button", { class: "btn tiny", text: "Post to X ↗", onclick: () => U.shareToX(firstArtifactChunk(task.output)) }),
+      el("button", { class: "btn tiny gold-btn", text: "⌁ Schedule", title: "Add to Broadcast Queue", onclick: () => scheduleModal(clone, `${task.type} — ${task.topic}`, firstArtifactChunk(task.output)) })
     ]));
 
     box.appendChild(card);
@@ -694,6 +712,136 @@
     });
   }
 
+  /* =============================== broadcast queue =============================== */
+  function dtLocalValue(ts) {
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function fmtDue(ts) {
+    return new Date(ts).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function scheduleModal(clone, title, text) {
+    const ta = el("textarea", { class: "input", rows: 5, maxlength: 270 });
+    ta.value = text.slice(0, 270);
+    const tomorrow9 = new Date();
+    tomorrow9.setDate(tomorrow9.getDate() + 1);
+    tomorrow9.setHours(9, 0, 0, 0);
+    const when = el("input", { class: "input", type: "datetime-local", value: dtLocalValue(tomorrow9.getTime()) });
+    const body = el("div", { class: "modal-body" }, [
+      el("p", { text: "Post text (X limit, editable):" }), ta,
+      el("p", { style: "margin-top:12px", text: "Fire at:" }), when
+    ]);
+    U.modal({
+      title: `⌁ Schedule for X — <span class="gold">${esc(title)}</span>`,
+      body,
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        {
+          label: "Add to Broadcast Queue", cls: "gold-btn", keepOpen: true, onClick: () => {
+            const t = ta.value.trim();
+            const dueAt = when.value ? new Date(when.value).getTime() : NaN;
+            if (!t) { toast("Post text is empty.", "err"); return; }
+            if (!isFinite(dueAt)) { toast("Pick a valid date and time.", "err"); return; }
+            U.closeModal();
+            S.addQueueItem({ cloneId: clone ? clone.id : null, title, text: t, dueAt });
+            U.sfx("click");
+            toast(`Queued for ${fmtDue(dueAt)}.`, "ok");
+            $$navActive("queue-refresh");
+          }
+        }
+      ]
+    });
+  }
+
+  function renderQueue(main) {
+    const st = S.state;
+    const wrap = el("div", { class: "page narrow" });
+    const queued = st.queue.filter(q => q.status === "queued").sort((a, b) => a.dueAt - b.dueAt);
+    const posted = st.queue.filter(q => q.status === "posted").sort((a, b) => b.postedAt - a.postedAt).slice(0, 10);
+
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `BROADCAST QUEUE <span class="dim">// scheduled posts</span>` }),
+        el("p", { class: "page-sub", text: `${queued.length} queued · ${posted.length} recently posted. Due posts fire to X in one click — this app is serverless, so nothing posts without you.` })
+      ])
+    ]));
+
+    const qPanel = el("div", { class: "panel" });
+    qPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⌁ Queued" })]));
+    if (!queued.length) {
+      qPanel.appendChild(el("p", { class: "empty-note", text: "Nothing scheduled. Use “Schedule ↗” on any task output or vault item." }));
+    }
+    queued.forEach(q => {
+      const isDue = q.dueAt <= Date.now();
+      const clone = st.clones.find(c => c.id === q.cloneId);
+      qPanel.appendChild(el("div", { class: "queue-row" + (isDue ? " due" : "") }, [
+        el("div", { class: "q-when" }, [
+          el("span", { class: "q-due" + (isDue ? " hot" : ""), text: isDue ? "DUE NOW" : fmtDue(q.dueAt) })
+        ]),
+        el("div", { class: "q-main" }, [
+          el("div", { class: "q-title", text: q.title + (clone ? ` · ${clone.name}` : "") }),
+          el("div", { class: "q-snippet", text: q.text })
+        ]),
+        el("div", { class: "q-actions" }, [
+          el("button", {
+            class: "btn tiny" + (isDue ? " gold-btn" : ""), text: "Post to X ↗", onclick: () => {
+              U.shareToX(q.text);
+              S.markPosted(q.id);
+              U.sfx("evolve");
+              toast("Fired — marked as posted.", "ok");
+              route();
+            }
+          }),
+          el("button", {
+            class: "btn tiny ghost", text: "Reschedule", onclick: () => {
+              const when = el("input", { class: "input", type: "datetime-local", value: dtLocalValue(q.dueAt) });
+              U.modal({
+                title: "Reschedule",
+                body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(when); return b; })(),
+                actions: [
+                  { label: "Cancel", cls: "ghost" },
+                  {
+                    label: "Save", cls: "gold-btn", keepOpen: true, onClick: () => {
+                      const t2 = when.value ? new Date(when.value).getTime() : NaN;
+                      if (!isFinite(t2)) { toast("Pick a valid date and time.", "err"); return; }
+                      U.closeModal();
+                      q.dueAt = t2; S.save(); route();
+                    }
+                  }
+                ]
+              });
+            }
+          }),
+          el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { S.deleteQueueItem(q.id); route(); } })
+        ])
+      ]));
+    });
+    wrap.appendChild(qPanel);
+
+    if (posted.length) {
+      const pPanel = el("div", { class: "panel" });
+      pPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Posted" })]));
+      posted.forEach(q => {
+        pPanel.appendChild(el("div", { class: "queue-row posted" }, [
+          el("div", { class: "q-when" }, [el("span", { class: "q-due", text: fmtDue(q.postedAt) })]),
+          el("div", { class: "q-main" }, [
+            el("div", { class: "q-title", text: q.title }),
+            el("div", { class: "q-snippet", text: q.text })
+          ]),
+          el("div", { class: "q-actions" }, [
+            el("button", { class: "btn tiny ghost", text: "Repost ↗", onclick: () => U.shareToX(q.text) }),
+            el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { S.deleteQueueItem(q.id); route(); } })
+          ])
+        ]));
+      });
+      wrap.appendChild(pPanel);
+    }
+
+    main.appendChild(wrap);
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -728,7 +876,7 @@
     /* log */
     const logPanel = el("div", { class: "panel" });
     logPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Evolution log" })]));
-    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲" };
+    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲", queue: "⌁" };
     const list = el("div", { class: "log-list" });
     const entries = st.systemMemory.slice().reverse();
     if (!entries.length) list.appendChild(el("p", { class: "empty-note", text: "Nothing logged yet." }));
@@ -952,6 +1100,8 @@
       S.runWeeklyRepeats().then(ran => {
         if (ran.length) toast(`⟲ ${ran.length} weekly task(s) re-executed while you were away — outputs saved to vaults.`, "ok");
       }).catch(() => {});
+      const due = S.dueQueue();
+      if (due.length) toast(`⌁ ${due.length} scheduled post${due.length > 1 ? "s" : ""} due — open the Broadcast Queue.`, "info");
     }
   }
 
