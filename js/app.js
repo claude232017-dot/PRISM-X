@@ -860,11 +860,13 @@
     dnaPanel.appendChild(field("Your voice / tone", f, "tone", el("textarea", { class: "input", rows: 2, text: st.dna.tone })));
     dnaPanel.appendChild(field("Your mindset", f, "mindset", el("textarea", { class: "input", rows: 3, text: st.dna.mindset })));
     dnaPanel.appendChild(field("Your strategy / logic", f, "logic", el("textarea", { class: "input", rows: 3, text: st.dna.logic })));
+    dnaPanel.appendChild(field("Decision framework", f, "decision", el("textarea", { class: "input", rows: 3, placeholder: "e.g. Prioritize long-term value over short-term gains. Explain uncertainty. Protect user trust. Optimize for leverage, not vanity.", text: st.dna.decision || "" })));
+    dnaPanel.appendChild(el("p", { class: "dna-note", text: "These principles become the decision-making laws inherited by every intelligence created inside PRISM-X." }));
     dnaPanel.appendChild(field("Signature CTA", f, "cta", el("input", { class: "input", value: st.dna.cta })));
     dnaPanel.appendChild(el("div", { class: "form-actions" }, [
       el("button", {
         class: "btn gold-btn", text: "⟳ Retrain GOD CORE", onclick: () => {
-          S.trainDNA({ tone: f.tone.value.trim(), mindset: f.mindset.value.trim(), logic: f.logic.value.trim(), cta: f.cta.value.trim() });
+          S.trainDNA({ tone: f.tone.value.trim(), mindset: f.mindset.value.trim(), logic: f.logic.value.trim(), decision: f.decision.value.trim(), cta: f.cta.value.trim() });
           U.evolveFlash(); U.sfx("evolve");
           toast(`GOD CORE retrained — brain v${S.state.godBrainVersion}. DNA-linked clones are updating.`, "ok");
           route();
@@ -1044,6 +1046,8 @@
         rootBox.appendChild(field("Your voice / tone", f, "tone", el("textarea", { class: "input", rows: 2, placeholder: `e.g. "Direct, confident, a little dry. Short sentences. No emojis in serious posts."`, text: f._tone || "" })));
         rootBox.appendChild(field("Your mindset", f, "mindset", el("textarea", { class: "input", rows: 2, placeholder: `e.g. "Systems over hustle. Never chase — attract. Proof beats promises."`, text: f._mindset || "" })));
         rootBox.appendChild(field("Your strategy / logic", f, "logic", el("textarea", { class: "input", rows: 2, placeholder: `e.g. "Content pulls leads → DMs qualify → one offer closes. One channel at a time."`, text: f._logic || "" })));
+        rootBox.appendChild(field("Decision framework", f, "decision", el("textarea", { class: "input", rows: 2, placeholder: "e.g. Prioritize long-term value over short-term gains. Explain uncertainty. Protect user trust. Optimize for leverage, not vanity.", text: f._decision || "" })));
+        rootBox.appendChild(el("p", { class: "dna-note", text: "These principles become the decision-making laws inherited by every intelligence created inside PRISM-X." }));
         rootBox.appendChild(field("Signature CTA", f, "cta", el("input", { class: "input", placeholder: `e.g. "DM me 'SYSTEM' and I'll send the playbook."`, value: f._cta || "" })));
         rootBox.appendChild(el("div", { class: "form-actions" }, [
           el("button", { class: "btn ghost", text: "← Back", onclick: () => { saveRefs(); step = 0; draw(); } }),
@@ -1064,7 +1068,8 @@
               S.setSettings({ sound: soundChk.checked });
               S.completeOnboarding({
                 tone: onboardRefs._tone || "", mindset: onboardRefs._mindset || "",
-                logic: onboardRefs._logic || "", cta: onboardRefs._cta || ""
+                logic: onboardRefs._logic || "", decision: onboardRefs._decision || "",
+                cta: onboardRefs._cta || ""
               }, demoChk.checked);
               U.sfx("evolve"); U.evolveFlash();
               overlay.classList.remove("show");
@@ -1082,6 +1087,7 @@
       if (onboardRefs.tone) onboardRefs._tone = onboardRefs.tone.value;
       if (onboardRefs.mindset) onboardRefs._mindset = onboardRefs.mindset.value;
       if (onboardRefs.logic) onboardRefs._logic = onboardRefs.logic.value;
+      if (onboardRefs.decision) onboardRefs._decision = onboardRefs.decision.value;
       if (onboardRefs.cta) onboardRefs._cta = onboardRefs.cta.value;
     }
 

@@ -16,8 +16,11 @@ npx serve .          # or: python3 -m http.server 8000
 ```
 
 Open the URL, and PRISM-X boots into the **onboarding sequence**: you train GOD CORE
-once with your tone, mindset, strategy and signature CTA — every clone you forge
-inherits that DNA. Opening `index.html` directly from disk also works.
+once across five DNA layers — voice/tone, mindset, strategy/logic, **decision
+framework**, and signature CTA — and every clone you forge inherits that DNA.
+The decision framework is special: it holds the non-negotiable operating laws
+that bind *every* PRISM-X intelligence before any decision executes, regardless
+of the clone's learning source, unless explicitly overridden. Opening `index.html` directly from disk also works.
 
 ## The system
 

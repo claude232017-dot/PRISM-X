@@ -399,6 +399,8 @@ PRISM.engine = (function () {
     const out = gen(ctx, tone, r);
 
     const notes = ctxLines(ctx);
+    /* Decision Framework binds every clone, whatever its learning source */
+    if (dna && dna.decision) notes.push(`Decision framework honored: ${firstLine(dna.decision)}`);
     if (usesDNA && dna.mindset) notes.push(`GOD CORE DNA applied: ${firstLine(dna.mindset)}`);
     if (clone.learningSource === "Train on Past Performance" && clone.memory.length) {
       notes.push(`Applied lesson: ${clone.memory[clone.memory.length - 1]}`);
@@ -456,6 +458,14 @@ PRISM.engine = (function () {
     if (clone.learningSource === "Train on Past Performance" && clone.memory.length) {
       lines.push(`Lessons learned from past performance (apply them):`);
       clone.memory.slice(-5).forEach(m => lines.push(`- ${m}`));
+    }
+    /* The Decision Framework is inherited by EVERY PRISM-X intelligence,
+       independent of learning source, unless explicitly overridden. */
+    if (dna && dna.decision) {
+      lines.push(
+        `Decision Framework — non-negotiable operating laws for every PRISM-X intelligence. Weigh every decision against these BEFORE executing; they take precedence over convenience and may only be overridden by an explicit operator instruction:`,
+        dna.decision
+      );
     }
     lines.push(
       `Output format (plain text, no markdown headings):`,

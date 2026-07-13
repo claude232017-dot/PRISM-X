@@ -11,7 +11,7 @@ PRISM.store = (function () {
   const defaults = () => ({
     version: 1,
     onboarded: false,
-    dna: { tone: "", mindset: "", logic: "", cta: "" },
+    dna: { tone: "", mindset: "", logic: "", decision: "", cta: "" },
     settings: { engine: "local", apiKey: "", model: "claude-opus-4-8", sound: false },
     godBrainVersion: 1,
     clones: [],
@@ -30,7 +30,11 @@ PRISM.store = (function () {
       const raw = localStorage.getItem(KEY);
       if (!raw) return defaults();
       const parsed = JSON.parse(raw);
-      return Object.assign(defaults(), parsed);
+      const merged = Object.assign(defaults(), parsed);
+      /* deep-merge nested objects so saves from older versions gain new fields */
+      merged.dna = Object.assign(defaults().dna, parsed.dna || {});
+      merged.settings = Object.assign(defaults().settings, parsed.settings || {});
+      return merged;
     } catch (e) {
       console.warn("PRISM-X: state reset (corrupt save)", e);
       return defaults();
