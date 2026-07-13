@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>PRISM-X — GOD CORE</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◈</text></svg>">
+  <link rel="stylesheet" href="css/prism.css">
+</head>
+<body>
+  <div id="bg-grid" aria-hidden="true"></div>
+
+  <header id="topbar">
+    <a class="brand" href="#/dashboard">
+      <span class="brand-glyph">◈</span>
+      <span class="brand-name">PRISM<span class="gold">-X</span></span>
+      <span class="brand-sub">GOD CORE</span>
+    </a>
+    <nav id="nav">
+      <a class="nav-link" data-view="dashboard" href="#/dashboard">Dashboard</a>
+      <a class="nav-link" data-view="forge" href="#/forge">Forge Clone</a>
+      <a class="nav-link" data-view="memory" href="#/memory">System Memory</a>
+      <a class="nav-link" data-view="settings" href="#/settings">Settings</a>
+    </nav>
+    <div class="topbar-right">
+      <span id="brain-version" class="brain-tag">BRAIN v1</span>
+      <span id="engine-pill" class="engine-pill local">◉ LOCAL CORTEX</span>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <footer id="foot">
+    <span>PRISM-X · a personal multi-agent intelligence system · all data stays in this browser</span>
+  </footer>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" aria-live="polite"></div>
+  <div id="viz-tip" role="tooltip"></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
