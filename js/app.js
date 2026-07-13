@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -17,6 +17,9 @@
     if (view === "forge") renderForge(main);
     else if (view === "clone" && parts[1]) renderClone(main, parts[1]);
     else if (view === "queue") renderQueue(main);
+    else if (view === "ghosts") renderGhostDeck(main);
+    else if (view === "ghost-forge") renderGhostForge(main);
+    else if (view === "ghost" && parts[1]) renderGhostView(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
     else renderDashboard(main);
@@ -27,7 +30,11 @@
 
   function $$navActive(view) {
     U.$$(".nav-link").forEach(a => {
-      a.classList.toggle("active", a.dataset.view === view || (view === "clone" && a.dataset.view === "dashboard"));
+      const ghostViews = view === "ghost" || view === "ghost-forge" || view === "ghosts";
+      a.classList.toggle("active",
+        a.dataset.view === view ||
+        (view === "clone" && a.dataset.view === "dashboard") ||
+        (ghostViews && a.dataset.view === "ghosts"));
     });
     const s = S.state.settings;
     const pill = $("#engine-pill");
@@ -196,6 +203,24 @@
     }
     grid.appendChild(an);
     wrap.appendChild(grid);
+
+    /* ---- Phase 2 strip: product ghosts ---- */
+    const gs = G.stats();
+    wrap.appendChild(el("div", { class: "panel ghost-strip" }, [
+      el("div", { class: "gs-left" }, [
+        el("span", { class: "gs-glyph", text: "👻" }),
+        el("div", {}, [
+          el("div", { class: "panel-title", text: "Product Ghosts — Phase 2" }),
+          el("p", { class: "dim small-note", text: gs.ghosts
+            ? `${gs.ghosts} autonomous ghost(s) · ${gs.launched} product(s) launched · ${G.money(gs.revenue)} simulated revenue · ${gs.hitRate}% hit rate`
+            : "Autonomous agents that detect niche gaps, build digital products, launch and evolve — without you." })
+        ])
+      ]),
+      el("div", { class: "cc-actions" }, [
+        el("button", { class: "btn small violet-btn", text: "👻 Launch Ghost", onclick: () => go("#/ghost-forge") }),
+        el("button", { class: "btn small", text: "Open Ghost Deck", onclick: () => go("#/ghosts") })
+      ])
+    ]));
 
     /* ---- clone grid ---- */
     wrap.appendChild(el("div", { class: "panel-head standalone" }, [
@@ -842,6 +867,425 @@
     main.appendChild(wrap);
   }
 
+  /* =============================== PHASE 2: PRODUCT GHOSTS =============================== */
+  let forgePrefill = null;
+
+  function ghostBadge(g) {
+    const st = G.ghostStatus(g);
+    return el("span", { class: "badge " + st.cls, text: st.label });
+  }
+
+  function renderGhostDeck(main) {
+    const st = S.state;
+    const wrap = el("div", { class: "page" });
+    const stats = G.stats();
+    const offDays = Math.round((st.ghostSimOffset || 0) / 86400000);
+
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `PRODUCT GHOSTS <span class="dim">// phase 2 — autonomous product agents</span>` }),
+        el("p", { class: "page-sub", text: `${stats.ghosts} ghosts haunting ${new Set(st.ghosts.filter(g => g.merged !== "absorbed").map(g => g.niche)).size} niches · ${stats.launched} products launched` })
+      ]),
+      el("div", { class: "head-actions" }, [
+        el("button", { class: "btn violet-btn", text: "👻 Launch Product Ghost", onclick: () => go("#/ghost-forge") }),
+        el("button", { class: "btn", text: "🌀 Clone Best Seller", onclick: () => {
+          const sub = G.cloneBestSeller();
+          if (!sub) { toast("No best seller yet — a product has to hit its target first.", "err"); return; }
+          U.sfx("spawn"); U.evolveFlash();
+          toast(`Best seller cloned → sub-ghost ${sub.name} enters a fresh niche.`, "ok"); route();
+        } }),
+        el("button", { class: "btn", text: "📈 Auto-Relaunch Failed", onclick: async () => {
+          const done = await G.relaunchFailed();
+          if (!done.length) { toast("No retired products to relaunch.", "err"); return; }
+          U.sfx("evolve");
+          toast(`${done.length} product(s) relaunched with new angle + urgency headline.`, "ok"); route();
+        } }),
+        el("button", { class: "btn", text: "🚀 Launch Calendar", onclick: scheduleGhostCalendar }),
+        el("button", { class: "btn", text: "💡 Creation Report", onclick: ghostReportModal }),
+        el("button", { class: "btn", text: "🤖 Merge → SuperAgent", onclick: mergeModal })
+      ])
+    ]));
+
+    /* GOD CORE directive */
+    wrap.appendChild(el("div", { class: "directive-banner" }, [
+      el("div", { class: "directive-label", text: "GOD CORE DIRECTIVE" }),
+      el("p", { class: "directive-text", text: "“Every Product Ghost must generate, test, and launch at least one monetized digital product per week. Each must operate in a different niche, collect its own market data, and report back to the GOD CORE.”" })
+    ]));
+
+    /* KPIs + sim clock */
+    wrap.appendChild(el("div", { class: "kpi-row" }, [
+      kpiTile("Ghost revenue (simulated)", G.money(stats.revenue), null),
+      kpiTile("Products launched", String(stats.launched), null),
+      kpiTile("Hit rate", stats.launched ? stats.hitRate + "%" : "—", null),
+      kpiTile("Active ghosts", String(stats.ghosts), null)
+    ]));
+    wrap.appendChild(el("div", { class: "sim-clock" }, [
+      el("span", { class: "dim", text: `Market simulation clock: ${offDays ? "+" + offDays + " day(s)" : "real time"} · products track for ${G.TRACK_DAYS} days after launch` }),
+      el("span", {}, [
+        el("button", { class: "btn tiny", text: "⏩ +1 day", onclick: () => ffDays(1) }),
+        el("button", { class: "btn tiny", text: "⏭ +7 days", onclick: () => ffDays(7), style: "margin-left:6px" })
+      ])
+    ]));
+
+    if (!st.ghosts.length) {
+      wrap.appendChild(el("div", { class: "hero-empty violet-hero" }, [
+        el("div", { class: "hero-glyph violet", text: "👻" }),
+        el("h2", { text: "No ghosts in the machine — yet." }),
+        el("p", { text: "Product Ghosts detect niche pain points, build a digital product with full launch assets, ship it, track it for 7 days, and evolve on their own. Deploy one from a battle-tested template." }),
+        el("button", { class: "btn violet-btn big", text: "👻 Launch First Product Ghost", onclick: () => go("#/ghost-forge") })
+      ]));
+    } else {
+      const grid = el("div", { class: "clone-grid" });
+      st.ghosts.filter(g => g.merged !== "absorbed").forEach(g => grid.appendChild(ghostCard(g)));
+      const absorbed = st.ghosts.filter(g => g.merged === "absorbed");
+      wrap.appendChild(grid);
+      if (absorbed.length) {
+        wrap.appendChild(el("p", { class: "empty-note", text: `${absorbed.length} ghost(s) absorbed into SuperAgents.` }));
+      }
+    }
+
+    main.appendChild(wrap);
+
+    /* autonomous pass — evaluate matured products, enforce the directive */
+    G.process().then(events => {
+      if (events.length && location.hash.startsWith("#/ghosts")) {
+        events.slice(0, 4).forEach((e2, i) => setTimeout(() => toast(e2, "info"), i * 500));
+        route();
+      }
+    }).catch(err => console.error(err));
+  }
+
+  function ffDays(n) {
+    G.fastForward(n);
+    U.sfx("click");
+    G.process().then(events => {
+      events.slice(0, 4).forEach((e2, i) => setTimeout(() => toast(e2, "info"), i * 500));
+      route();
+    });
+  }
+
+  function ghostCard(g) {
+    const rev = G.ghostRevenue(g);
+    const products = G.ghostProducts(g);
+    return el("div", {
+      class: "clone-card ghost-card" + (g.super ? " super" : ""),
+      onclick: (e) => { if (e.target.closest("button")) return; go("#/ghost/" + g.id); }
+    }, [
+      el("div", { class: "cc-top" }, [
+        el("div", { class: "cc-ident" }, [
+          el("span", { class: "cc-icon ghost-icon", text: g.super ? "🤖" : "👻" }),
+          el("div", {}, [
+            el("div", { class: "cc-name", text: g.name + (g.generation > 1 ? ` · G${g.generation}` : "") }),
+            el("div", { class: "cc-role", text: g.focus + " · " + g.niche })
+          ])
+        ]),
+        ghostBadge(g)
+      ]),
+      el("div", { class: "cc-target", text: `◎ ${G.money(g.targetIncome)}/day · ${g.platform}` }),
+      el("div", { class: "cc-metrics" }, [
+        ccMetric("REVENUE", G.money(rev)),
+        ccMetric("PRODUCTS", String(products.length)),
+        ccMetric("HITS", String(products.filter(p => p.status === "hit").length)),
+        ccMetric("TONE", g.tone.split(" ")[0])
+      ]),
+      el("div", { class: "cc-foot" }, [
+        el("span", { class: "dim small-note", text: g.super ? "SUPERAGENT · +25% quality" : (g.template === "custom" ? "custom ghost" : "template: " + g.template) }),
+        el("div", { class: "cc-actions" }, [
+          el("button", { class: "btn small", text: "Open", onclick: () => go("#/ghost/" + g.id) }),
+          el("button", { class: "btn small danger ghost", text: "✕", onclick: () => U.modal({
+            title: `Decommission <span class="gold">${esc(g.name)}</span>?`,
+            body: `<p>The ghost and its ${products.length} product(s) will be deleted.</p>`,
+            actions: [
+              { label: "Cancel", cls: "ghost" },
+              { label: "Delete Ghost", cls: "danger", onClick: () => { G.deleteGhost(g.id); U.sfx("error"); route(); } }
+            ]
+          }) })
+        ])
+      ])
+    ]);
+  }
+
+  /* ---- ghost forge ---- */
+  function renderGhostForge(main) {
+    const wrap = el("div", { class: "page narrow" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("a", { class: "back-link", href: "#/ghosts", text: "← ghost deck" }),
+        el("h1", { class: "page-title", html: `GHOST FORGE <span class="dim">// deploy a product ghost</span>` }),
+        el("p", { class: "page-sub", text: "Pick a battle-tested template or build custom. Every ghost is auto-trained in: " + G.GHOST_SKILLS.join(" · ") + "." })
+      ])
+    ]));
+
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+
+    /* template picker */
+    const tRow = el("div", { class: "tpl-row" });
+    G.TEMPLATES.forEach(t => {
+      tRow.appendChild(el("button", {
+        class: "tpl-card", onclick: (ev) => {
+          f.name.value = t.name; f.niche.value = t.niche; f.type.value = t.type;
+          f.tone.value = t.tone; f._focus = t.focus;
+          const me = ev.currentTarget;
+          U.$$(".tpl-card", tRow).forEach(b => b.classList.toggle("on", b === me));
+          U.sfx("click");
+        }
+      }, [
+        el("div", { class: "tpl-name", text: t.name }),
+        el("div", { class: "tpl-focus", text: t.focus }),
+        el("div", { class: "tpl-example", text: t.example })
+      ]));
+    });
+    form.appendChild(el("div", { class: "field" }, [el("span", { class: "field-label", text: "Ghost templates" }), tRow]));
+
+    form.appendChild(field("Ghost name", f, "name", el("input", { class: "input", maxlength: 20, placeholder: "e.g. CASHSCRIPT", value: "GHOST-" + (S.state.ghosts.length + 1) })));
+    form.appendChild(field("Niche or topic", f, "niche", el("input", { class: "input", placeholder: `type a niche — or "random" to let the ghost pick` , value: "random" })));
+    form.appendChild(field("Target income ($/day)", f, "target", el("input", { class: "input", type: "number", min: 10, step: 10, value: 100 })));
+
+    const typeSel = el("select", { class: "input" });
+    G.PRODUCT_TYPES.forEach(t => typeSel.appendChild(el("option", { value: t, text: t })));
+    form.appendChild(field("Product type", f, "type", typeSel));
+
+    const platSel = el("select", { class: "input" });
+    G.PLATFORMS.forEach(p => platSel.appendChild(el("option", { value: p, text: p })));
+    form.appendChild(field("Platform", f, "platform", platSel));
+
+    const toneSel = el("select", { class: "input" });
+    Object.entries(D.TONES).forEach(([t, meta]) => toneSel.appendChild(el("option", { value: t, text: `${t} — ${meta.desc}` })));
+    form.appendChild(field("Tone", f, "tone", toneSel));
+
+    if (forgePrefill) {
+      if (forgePrefill.niche) f.niche.value = forgePrefill.niche;
+      if (forgePrefill.type) f.type.value = forgePrefill.type;
+      if (forgePrefill.name) f.name.value = forgePrefill.name;
+      forgePrefill = null;
+    }
+
+    const launchBtn = el("button", { class: "btn violet-btn big", text: "👻 Deploy Ghost & Run First Cycle" });
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn ghost", text: "Cancel", onclick: () => go("#/ghosts") }),
+      launchBtn
+    ]));
+
+    launchBtn.addEventListener("click", async () => {
+      const name = f.name.value.trim().toUpperCase();
+      if (!name) { toast("Name the ghost.", "err"); return; }
+      if (S.state.ghosts.some(g => g.name === name)) { toast("A ghost with that name already exists.", "err"); return; }
+      launchBtn.disabled = true;
+      launchBtn.textContent = "◈ DETECTING DEMAND…";
+      try {
+        const ghost = G.createGhost({
+          name, template: G.TEMPLATES.some(t => t.name === name) ? name.toLowerCase() : "custom",
+          focus: f._focus || f.type.value,
+          niche: f.niche.value, targetIncome: f.target.value,
+          productType: f.type.value, platform: f.platform.value, tone: f.tone.value
+        });
+        launchBtn.textContent = "◈ BUILDING ASSETS…";
+        const product = await G.runCycle(ghost);
+        U.sfx("spawn"); U.evolveFlash();
+        toast(`👻 ${ghost.name} launched "${product.name}" — tracking for ${G.TRACK_DAYS} days. Launch thread queued.`, "ok");
+        go("#/ghost/" + ghost.id);
+      } catch (err) {
+        console.error(err);
+        toast("Ghost deploy failed: " + err.message, "err");
+        launchBtn.disabled = false;
+        launchBtn.textContent = "👻 Deploy Ghost & Run First Cycle";
+      }
+    });
+
+    wrap.appendChild(form);
+    main.appendChild(wrap);
+  }
+
+  /* ---- ghost detail ---- */
+  function renderGhostView(main, id) {
+    const g = S.state.ghosts.find(x => x.id === id);
+    if (!g) { go("#/ghosts"); return; }
+    const wrap = el("div", { class: "page" });
+    const products = G.ghostProducts(g).slice().reverse();
+
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("a", { class: "back-link", href: "#/ghosts", text: "← ghost deck" }),
+        el("h1", { class: "page-title clone-title" }, [
+          el("span", { class: "cc-icon ghost-icon big", text: g.super ? "🤖" : "👻" }),
+          el("span", { text: ` ${g.name}${g.generation > 1 ? " · G" + g.generation : ""} ` }),
+          ghostBadge(g)
+        ]),
+        el("p", { class: "page-sub", text: `${g.focus} · ${g.niche} · ◎ ${G.money(g.targetIncome)}/day · ${g.platform} · ${g.tone}${g.merged && g.merged !== "absorbed" ? " · forged from " + g.merged.join(" + ") : ""}` })
+      ]),
+      el("div", { class: "head-actions" }, [
+        el("button", { class: "btn violet-btn", text: "⚡ Run Cycle Now", onclick: async (e) => {
+          e.target.disabled = true; e.target.textContent = "◈ BUILDING…";
+          const p = await G.runCycle(g);
+          toast(`"${p.name}" launched — tracking begins.`, "ok");
+          U.sfx("spawn"); route();
+        } }),
+        el("button", { class: "btn danger ghost", text: "✕ Delete", onclick: () => { G.deleteGhost(g.id); go("#/ghosts"); } })
+      ])
+    ]));
+
+    /* lifecycle strip */
+    const stage = products.length === 0 ? 0 : (products[0].status === "tracking" ? ((products[0].daily || []).length ? 4 : 3) : 4);
+    const steps = ["1 · Detect Demand", "2 · Ideate Product", "3 · Build Assets", "4 · Launch + Promote", "5 · Evolve"];
+    wrap.appendChild(el("div", { class: "lifecycle" }, steps.map((s2, i) =>
+      el("span", { class: "life-step" + (i <= stage ? " on" : ""), text: s2 })
+    )));
+
+    /* skills */
+    wrap.appendChild(el("div", { class: "g-skills" }, g.skills.map(s2 => el("span", { class: "g-skill", text: s2 }))));
+
+    /* products */
+    const list = el("div", {});
+    if (!products.length) list.appendChild(el("p", { class: "empty-note", text: "First cycle pending…" }));
+    products.forEach(p => list.appendChild(productCard(g, p)));
+    wrap.appendChild(list);
+
+    /* memory */
+    const memPanel = el("div", { class: "panel" });
+    memPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "◌ Ghost memory — reports to GOD CORE" })]));
+    const memList = el("div", { class: "mem-list" });
+    g.memory.slice(-8).reverse().forEach(m => memList.appendChild(el("div", { class: "mem-chip violet-chip", text: m })));
+    memPanel.appendChild(memList);
+    wrap.appendChild(memPanel);
+
+    main.appendChild(wrap);
+  }
+
+  function productCard(g, p) {
+    const rev = G.totalRev(p);
+    const days = (p.daily || []).length;
+    const stMeta = {
+      tracking:   { label: `TRACKING · DAY ${days}/${G.TRACK_DAYS}`, cls: "gst-track" },
+      hit:        { label: "🎯 HIT TARGET", cls: "gst-hit" },
+      relaunched: { label: "RELAUNCHED", cls: "gst-needs" },
+      retired:    { label: "RETIRED", cls: "gst-dormant" }
+    }[p.status] || { label: p.status.toUpperCase(), cls: "gst-scan" };
+
+    const card = el("div", { class: "panel product-card" });
+    card.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: `◆ ${p.name} — ${p.price > 0 ? G.money(p.price) : "affiliate"} · ${p.platform}` }),
+      el("span", { class: "badge " + stMeta.cls, text: stMeta.label })
+    ]));
+    if (p.urgencyHeadline) card.appendChild(el("p", { class: "urgency-line", text: "⚡ " + p.urgencyHeadline }));
+    card.appendChild(el("p", { class: "signal-line", text: p.signal }));
+    card.appendChild(el("p", { class: "dim small-note", text: `Angle: ${p.angle} · engine: ${p.engine === "neural" ? "Neural Link" : "Local Cortex"}${p.relaunchOf ? " · relaunch" : ""}` }));
+
+    /* tracking chart */
+    const chartBox = el("div", { class: "chart-box" });
+    if (days > 0) {
+      card.appendChild(el("div", { class: "prod-stats" }, [
+        ccMetric("REVENUE", G.money(rev)),
+        ccMetric("SALES", String(G.totalSales(p))),
+        ccMetric("AVG/DAY", G.money(days ? rev / days : 0)),
+        ccMetric("TARGET", G.money(p.targetIncome) + "/d")
+      ]));
+      U.barChart(chartBox, {
+        labels: p.daily.map((_, i) => "D" + (i + 1)),
+        values: p.daily.map(d => d.revenue),
+        seriesName: "Revenue (sim)",
+        format: G.money, height: 150
+      });
+      card.appendChild(chartBox);
+    } else {
+      card.appendChild(el("p", { class: "empty-note", text: "First simulated market day pending — fast-forward the sim clock on the Ghost Deck, or come back tomorrow." }));
+    }
+
+    /* assets */
+    const assets = p.assets || {};
+    [["Sales page", assets.salesPage], ["Launch thread", assets.thread], ["DM flow", assets.dmFlow]].forEach(([label, body]) => {
+      if (!body) return;
+      card.appendChild(el("details", { class: "asset-fold" }, [
+        el("summary", { text: label }),
+        el("pre", { class: "output-pre", text: body })
+      ]));
+    });
+
+    /* actions */
+    card.appendChild(el("div", { class: "export-row" }, [
+      el("button", { class: "btn tiny", text: "Copy sales page", onclick: () => U.copyText(assets.salesPage || "", "Sales page copied — paste into " + p.platform + ".") }),
+      el("button", { class: "btn tiny", text: "Copy listing", onclick: () => U.copyText(`${p.name}\nPrice: ${p.price > 0 ? "$" + p.price : "free (affiliate)"}\n\n${(assets.salesPage || "").slice(0, 600)}`, "Listing copied for " + p.platform + ".") }),
+      el("button", { class: "btn tiny", text: "Post thread ↗", onclick: () => U.shareToX((assets.thread || p.name).split("\n\n")[0]) }),
+      p.status === "retired" ? el("button", { class: "btn tiny gold-btn", text: "📈 Relaunch", onclick: async () => { await G.relaunchFailed(); toast("Relaunched with new angle + urgency.", "ok"); route(); } }) : null,
+      p.status === "hit" && !p.evolved ? el("button", { class: "btn tiny violet-btn", text: "🌀 Duplicate to sub-ghost", onclick: () => { p.evolved = true; const sub = G.spawnSubGhost(g, p); S.save(); toast(`Sub-ghost ${sub.name} spawned.`, "ok"); route(); } }) : null
+    ].filter(Boolean)));
+
+    return card;
+  }
+
+  /* ---- GOD CORE ghost commands ---- */
+  function scheduleGhostCalendar() {
+    const live = S.state.ghosts.filter(g => g.merged !== "absorbed");
+    if (!live.length) { toast("No ghosts to schedule.", "err"); return; }
+    let count = 0;
+    live.forEach((g, i) => {
+      const latest = G.ghostProducts(g).slice(-1)[0];
+      if (!latest || !latest.assets) return;
+      const d = new Date(); d.setDate(d.getDate() + 1 + i); d.setHours(9, 0, 0, 0);
+      S.addQueueItem({
+        cloneId: null,
+        title: `👻 ${g.name} — ${latest.name}`,
+        text: (latest.assets.thread || latest.name).split("\n\n")[0].slice(0, 270),
+        dueAt: d.getTime()
+      });
+      count++;
+    });
+    if (count) { toast(`🚀 Launch calendar built — ${count} thread(s) staggered across the next ${count} day(s). See Queue.`, "ok"); $$navActive("ghosts"); }
+    else toast("Ghosts have no launch assets yet.", "err");
+  }
+
+  function ghostReportModal() {
+    const r = G.weeklyReport();
+    const body = el("div", { class: "modal-body" });
+    body.appendChild(el("div", { class: "report-list" }, [
+      reportRow("👻", "Launches (last 7 sim days)", `${r.launches} product(s) · ${G.money(r.revenue)} simulated revenue`),
+      reportRow("🎯", "Hits", r.hits.length ? r.hits.map(p => `"${p.name}" — ${G.money(G.totalRev(p))}`).join(" · ") : "none yet"),
+      reportRow("♻", "Relaunched / retired", `${r.relaunched} relaunched · ${r.retired} retired`),
+      ...r.perGhost.map(x => reportRow("·", x.g.name, `${G.money(x.revenue)} across ${x.products} product(s) · ${x.g.niche}`))
+    ]));
+    body.appendChild(el("p", { class: "suggestion-line", text: `💡 New idea: Product Ghost suggests ${r.suggestion.idea}. Build?` }));
+    U.modal({
+      title: "💡 Ghost Creation Report",
+      cls: "wide",
+      body,
+      actions: [
+        { label: "🔨 Build It", cls: "violet-btn", onClick: () => { forgePrefill = { niche: r.suggestion.niche, type: r.suggestion.type }; go("#/ghost-forge"); } },
+        { label: "Close", cls: "ghost" }
+      ]
+    });
+  }
+
+  function mergeModal() {
+    const live = S.state.ghosts.filter(g => g.merged !== "absorbed");
+    if (live.length < 2) { toast("Need at least two active ghosts to merge.", "err"); return; }
+    const selA = el("select", { class: "input" });
+    const selB = el("select", { class: "input" });
+    live.forEach(g => {
+      selA.appendChild(el("option", { value: g.id, text: `${g.name} — ${g.focus}` }));
+      selB.appendChild(el("option", { value: g.id, text: `${g.name} — ${g.focus}` }));
+    });
+    selB.selectedIndex = 1;
+    const body = el("div", { class: "modal-body" }, [
+      el("p", { text: "Combine two ghosts into a hybrid SuperAgent: combined skill matrix, merged focus, +25% conversion quality on all future products. The originals are absorbed." }),
+      selA, el("p", { style: "text-align:center;margin:8px 0", html: "＋" }), selB
+    ]);
+    U.modal({
+      title: "🤖 Merge Ghosts into SuperAgent",
+      body,
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        {
+          label: "Fuse", cls: "violet-btn", keepOpen: true, onClick: () => {
+            if (selA.value === selB.value) { toast("Pick two different ghosts.", "err"); return; }
+            U.closeModal();
+            const sup = G.mergeGhosts(selA.value, selB.value);
+            if (sup) { U.evolveFlash(); U.sfx("evolve"); toast(`🤖 SuperAgent ${sup.name} is online.`, "ok"); go("#/ghost/" + sup.id); }
+          }
+        }
+      ]
+    });
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -878,7 +1322,7 @@
     /* log */
     const logPanel = el("div", { class: "panel" });
     logPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Evolution log" })]));
-    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲", queue: "⌁" };
+    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲", queue: "⌁", ghost: "👻" };
     const list = el("div", { class: "log-list" });
     const entries = st.systemMemory.slice().reverse();
     if (!entries.length) list.appendChild(el("p", { class: "empty-note", text: "Nothing logged yet." }));
@@ -1108,6 +1552,11 @@
       }).catch(() => {});
       const due = S.dueQueue();
       if (due.length) toast(`⌁ ${due.length} scheduled post${due.length > 1 ? "s" : ""} due — open the Broadcast Queue.`, "info");
+      /* wake-up digest: what the ghosts did while you were away */
+      G.process().then(events => {
+        events.slice(0, 4).forEach((e2, i) => setTimeout(() => toast(e2, "info"), 800 + i * 700));
+        if (events.length) $$navActive(location.hash.replace(/^#\//, "").split("/")[0] || "dashboard");
+      }).catch(() => {});
     }
   }
 

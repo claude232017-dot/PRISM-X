@@ -489,7 +489,8 @@ PRISM.engine = (function () {
     return parts.filter(Boolean).join("\n");
   }
 
-  async function generateNeural(clone, task, dna, settings) {
+  /* Low-level Neural Link call — shared by clone tasks and Product Ghosts. */
+  async function complete(system, prompt, settings) {
     const res = await fetch(API_URL, {
       method: "POST",
       headers: {
@@ -504,8 +505,8 @@ PRISM.engine = (function () {
       body: JSON.stringify({
         model: settings.model || MODELS[0],
         max_tokens: 4096,
-        system: systemPrompt(clone, dna),
-        messages: [{ role: "user", content: taskPrompt(task) }]
+        system,
+        messages: [{ role: "user", content: prompt }]
       })
     });
 
@@ -519,6 +520,11 @@ PRISM.engine = (function () {
 
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
     if (!text) throw new Error("Empty response from the API.");
+    return text;
+  }
+
+  async function generateNeural(clone, task, dna, settings) {
+    const text = await complete(systemPrompt(clone, dna), taskPrompt(task), settings);
     const ctaMatch = text.match(/^CTA:\s*(.+)$/m);
     return {
       engine: "neural",
@@ -695,7 +701,7 @@ PRISM.engine = (function () {
   }
 
   return {
-    MODELS, generate, generateLocal, systemPrompt,
+    MODELS, generate, generateLocal, systemPrompt, complete,
     recordOutcome, weeklySeries, combinedWeekly,
     effectiveStatus, runAudit, applyUpgrade, dateKey, rng, hashStr
   };
