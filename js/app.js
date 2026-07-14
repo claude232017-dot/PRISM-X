@@ -3,11 +3,12 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
   function route() {
+    U.closeModal(); /* navigation always dismisses any open modal */
     const hash = location.hash || "#/dashboard";
     const parts = hash.replace(/^#\//, "").split("/");
     const view = parts[0] || "dashboard";
@@ -23,6 +24,7 @@
     else if (view === "shells") renderShellDeck(main);
     else if (view === "shell-forge") renderShellForge(main);
     else if (view === "shell" && parts[1]) renderShellView(main, parts[1]);
+    else if (view === "matrix") renderMatrix(main);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
     else renderDashboard(main);
@@ -242,6 +244,23 @@
       el("div", { class: "cc-actions" }, [
         el("button", { class: "btn small cyan-btn", text: "🎭 Deploy Shell", onclick: () => go("#/shell-forge") }),
         el("button", { class: "btn small", text: "Open Shell Deck", onclick: () => go("#/shells") })
+      ])
+    ]));
+
+    /* ---- Phase 4 strip: the matrix merge ---- */
+    const ms = M.stats();
+    wrap.appendChild(el("div", { class: "panel ghost-strip matrix-strip" }, [
+      el("div", { class: "gs-left" }, [
+        el("span", { class: "gs-glyph matrix-glyph", text: "🧩" }),
+        el("div", {}, [
+          el("div", { class: "panel-title", text: "The Matrix Merge — Phase 4" }),
+          el("p", { class: "dim small-note", text: ms.executors
+            ? `${ms.executors} human executor(s) · ${ms.inFlight} task(s) in flight · ${M.money(ms.grossRouted)} routed · ${M.money(ms.vaultBalance)} in the main vault`
+            : "Bridge your agents to human executors: closers, editors, designers and VAs — fed by the system, not managed by you." })
+        ])
+      ]),
+      el("div", { class: "cc-actions" }, [
+        el("button", { class: "btn small blue-btn", text: "🧩 Open Matrix", onclick: () => go("#/matrix") })
       ])
     ]));
 
@@ -982,8 +1001,9 @@
     G.fastForward(n);
     U.sfx("click");
     const shellEvents = SH.process();
+    const matrixEvents = M.process();
     G.process().then(events => {
-      shellEvents.concat(events).slice(0, 5).forEach((e2, i) => setTimeout(() => toast(e2, "info"), i * 500));
+      shellEvents.concat(matrixEvents, events).slice(0, 5).forEach((e2, i) => setTimeout(() => toast(e2, "info"), i * 500));
       route();
     });
   }
@@ -1145,6 +1165,7 @@
           toast(`"${p.name}" launched — tracking begins.`, "ok");
           U.sfx("spawn"); route();
         } }),
+        el("button", { class: "btn " + (g.humanLoop ? "blue-btn" : ""), text: g.humanLoop ? "🤝 Human Loop: ON" : "🤝 Human Loop", onclick: () => humanLoopModal(g, "ghost") }),
         el("button", { class: "btn danger ghost", text: "✕ Delete", onclick: () => { G.deleteGhost(g.id); go("#/ghosts"); } })
       ])
     ]));
@@ -1560,6 +1581,7 @@
         el("button", { class: "btn", text: "⧉ Clone Shell", onclick: () => { const c = SH.cloneShell(shell.id); if (c) { U.sfx("spawn"); toast(`Cloned → ${c.name}.`, "ok"); go("#/shell/" + c.id); } } }),
         el("button", { class: "btn", text: "👻 Inject Ghost Offer", onclick: () => injectGhostOfferModal(shell) }),
         el("button", { class: "btn", text: "🎭 Change Persona", onclick: () => changePersonaModal(shell) }),
+        el("button", { class: "btn " + (shell.humanLoop ? "blue-btn" : ""), text: shell.humanLoop ? "🤝 Human Loop: ON" : "🤝 Human Loop", onclick: () => humanLoopModal(shell, "shell") }),
         el("button", { class: "btn " + (shell.autoUpload ? "cyan-btn" : ""), text: shell.autoUpload ? "⇪ Auto-Upload: ON" : "⇪ Auto-Upload: OFF", onclick: (e) => {
           shell.autoUpload = !shell.autoUpload; S.save();
           toast(shell.autoUpload ? "Auto-Upload ON — daily X drops flow into the Broadcast Queue. Other platforms await future API integrations." : "Auto-Upload OFF.", "info");
@@ -1792,6 +1814,389 @@
     });
   }
 
+  /* =============================== PHASE 4: THE MATRIX MERGE =============================== */
+  function renderMatrix(main) {
+    const st = S.state;
+    const stats = M.stats();
+    const wrap = el("div", { class: "page" });
+
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `THE MATRIX MERGE <span class="dim">// phase 4 — human executor bridge</span>` }),
+        el("p", { class: "page-sub", text: `${stats.executors} executor(s) in the network · ${stats.inFlight} task(s) in flight · ${stats.funnels} SuperFunnel(s) live` })
+      ]),
+      el("div", { class: "head-actions" }, [
+        el("button", { class: "btn blue-btn", text: "👤 Auto-Onboard Freelancer", onclick: onboardModal }),
+        el("button", { class: "btn", text: "⚡ Auto-Assign Work", onclick: () => {
+          if (!st.executors.length) { toast("Onboard an executor first.", "err"); return; }
+          const out = M.autoAssign();
+          if (!out.length) { toast("No assignable ops right now (or executors are at capacity).", "err"); return; }
+          out.forEach((e2, i) => setTimeout(() => toast(e2, "ok"), i * 400));
+          route();
+        } }),
+        el("button", { class: "btn", text: "🔗 Create SuperFunnel", onclick: superFunnelModal })
+      ])
+    ]));
+
+    /* KPIs */
+    wrap.appendChild(el("div", { class: "kpi-row" }, [
+      kpiTile("Human network", String(stats.executors), null),
+      kpiTile("Gross routed (sim)", M.money(stats.grossRouted), null),
+      kpiTile("Paid to humans", M.money(stats.paidHumans), null),
+      kpiTile("Main vault", M.money(stats.vaultBalance), null),
+      kpiTile("Reinvest pool", M.money(stats.reinvestPool), null)
+    ]));
+
+    /* ---- TASK GRID ---- */
+    const gridPanel = el("div", { class: "panel" });
+    const sortSel = el("select", { class: "input inline-select", "aria-label": "sort task grid" });
+    [["priority", "Priority"], ["roi", "ROI"], ["member", "Team member"], ["agent", "Agent"]].forEach(([v, l]) => sortSel.appendChild(el("option", { value: v, text: "Sort: " + l })));
+    gridPanel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "🎮 Task grid — real-time task map" }),
+      sortSel
+    ]));
+    gridPanel.appendChild(el("div", { class: "grid-legend" }, [
+      el("span", { class: "leg ai", text: "■ AI tasks" }),
+      el("span", { class: "leg human", text: "■ Human tasks" }),
+      el("span", { class: "leg joint", text: "■ Joint (hybrid)" })
+    ]));
+    const gridBox = el("div", { class: "task-grid" });
+    gridPanel.appendChild(gridBox);
+    function drawGrid() {
+      gridBox.innerHTML = "";
+      let tiles = M.taskGrid();
+      const w = { review: 0, live: 1, done: 2 };
+      if (sortSel.value === "priority") tiles.sort((a, b) => (w[a.status] - w[b.status]) || (b.value - a.value));
+      else if (sortSel.value === "roi") tiles.sort((a, b) => b.value - a.value);
+      else if (sortSel.value === "member") tiles.sort((a, b) => a.who.localeCompare(b.who));
+      else tiles.sort((a, b) => a.kind.localeCompare(b.kind) || a.who.localeCompare(b.who));
+      if (!tiles.length) gridBox.appendChild(el("p", { class: "empty-note", text: "The grid is dark — run tasks, launch ghosts, deploy shells, assign humans." }));
+      tiles.slice(0, 30).forEach(t => {
+        gridBox.appendChild(el("div", {
+          class: `grid-tile ${t.kind}` + (t.status === "review" ? " needs-review" : t.status === "done" ? " tile-done" : ""),
+          onclick: t.taskId ? () => reviewTaskModal(t.taskId) : null,
+          title: t.title
+        }, [
+          el("div", { class: "tile-top" }, [
+            el("span", { class: "tile-tag", text: t.tag }),
+            el("span", { class: "tile-status", text: t.status.toUpperCase() })
+          ]),
+          el("div", { class: "tile-title", text: t.title }),
+          el("div", { class: "tile-meta" }, [
+            el("span", { text: t.who }),
+            el("span", { class: "tile-val", text: t.value ? M.money(t.value) : "—" })
+          ])
+        ]));
+      });
+    }
+    sortSel.addEventListener("change", drawGrid);
+    drawGrid();
+    wrap.appendChild(gridPanel);
+
+    const cols = el("div", { class: "dash-grid" });
+
+    /* ---- executor roster ---- */
+    const roster = el("div", { class: "panel" });
+    roster.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "👤 Executor roster" })]));
+    if (!st.executors.length) {
+      roster.appendChild(el("p", { class: "empty-note", text: "No humans in the Matrix yet. Onboard a freelancer — DM closer, email closer, editor, designer or VA — and the agents start feeding them work." }));
+    }
+    st.executors.forEach(ex => {
+      const open = st.mtasks.filter(t => t.executorId === ex.id && t.status === "assigned").length;
+      const review = st.mtasks.filter(t => t.executorId === ex.id && t.status === "delivered").length;
+      roster.appendChild(el("div", { class: "exec-card" }, [
+        el("div", { class: "cc-top" }, [
+          el("div", { class: "cc-ident" }, [
+            el("span", { class: "cc-icon exec-icon", text: M.ROLES[ex.role] ? M.ROLES[ex.role].icon : "👤" }),
+            el("div", {}, [
+              el("div", { class: "cc-name", text: ex.name }),
+              el("div", { class: "cc-role", text: `${ex.role} · ${ex.permission} · ${ex.contact || "no contact"}` })
+            ])
+          ]),
+          el("span", { class: "badge " + (ex.streak >= 3 ? "gst-hit" : "gst-scan"), text: ex.streak >= 3 ? "TOP PERFORMER" : ex.payShare + "% PAYSHARE" })
+        ]),
+        el("div", { class: "exec-meter" }, [
+          el("div", { class: "meter-label" }, [el("span", { text: "PERFORMANCE" }), el("span", { class: "meter-val blue-val", text: ex.score + "/99" })]),
+          el("div", { class: "meter blue-track" }, [el("div", { class: "meter-fill blue-fill", style: `width:${ex.score}%` })])
+        ]),
+        el("div", { class: "cc-metrics" }, [
+          ccMetric("DONE", String(ex.tasksDone)),
+          ccMetric("OPEN", String(open)),
+          ccMetric("EARNED", M.money(ex.earnings)),
+          ccMetric("STREAK", ex.streak + "🔥")
+        ]),
+        el("div", { class: "cc-foot" }, [
+          el("span", { class: "dim small-note", text: M.ROLES[ex.role] ? "feeds on: " + M.ROLES[ex.role].feeds : "" }),
+          el("div", { class: "cc-actions" }, [
+            el("button", { class: "btn small", text: "Assign", onclick: () => assignModal(ex) }),
+            el("button", { class: "btn small", text: "Portal", title: "Preview what this executor sees", onclick: () => portalModal(ex) }),
+            review ? el("button", { class: "btn small gold-btn", text: `Review (${review})`, onclick: () => { const t = st.mtasks.find(x => x.executorId === ex.id && x.status === "delivered"); if (t) reviewTaskModal(t.id); } }) : null,
+            el("button", { class: "btn small danger ghost", text: "✕", onclick: () => U.modal({
+              title: `Release <span class="gold">${esc(ex.name)}</span>?`,
+              body: "<p>Their open tasks are cancelled; loops and funnels using them go inactive.</p>",
+              actions: [{ label: "Cancel", cls: "ghost" }, { label: "Release", cls: "danger", onClick: () => { M.removeExecutor(ex.id); route(); } }]
+            }) })
+          ].filter(Boolean))
+        ])
+      ]));
+    });
+    cols.appendChild(roster);
+
+    /* ---- income redistribution ---- */
+    const income = el("div", { class: "panel" });
+    income.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "📈 Intelligent income redistribution (sim)" })]));
+    const pctIn = el("input", { class: "input inline-num", type: "number", min: 0, max: 100, value: st.matrixConfig.reinvestPct });
+    pctIn.addEventListener("change", () => { st.matrixConfig.reinvestPct = Math.min(100, Math.max(0, parseInt(pctIn.value, 10) || 0)); S.save(); toast("Split updated — human PayShare comes off the top; the remainder splits vault/reinvest.", "info"); });
+    income.appendChild(el("div", { class: "split-row" }, [
+      el("span", { class: "dim small-note", text: "Of post-PayShare revenue, reinvest" }),
+      pctIn,
+      el("span", { class: "dim small-note", text: "% · rest goes to the main vault" })
+    ]));
+    const reports = M.weeklyReportLines();
+    if (reports.length) {
+      const repBox = el("div", { class: "report-list", style: "margin-top:12px" });
+      reports.slice(0, 4).forEach(line => repBox.appendChild(reportRow("💰", "Weekly report", line)));
+      income.appendChild(repBox);
+    } else {
+      income.appendChild(el("p", { class: "empty-note", text: "No revenue routed yet. Wire a SuperFunnel or a human loop, then fast-forward the sim clock." }));
+    }
+    const led = st.ledger.slice(-6).reverse();
+    if (led.length) {
+      const ll = el("div", { class: "log-list", style: "margin-top:10px" });
+      led.forEach(l => ll.appendChild(el("div", { class: "log-row" }, [
+        el("span", { class: "log-ico", text: "🧩" }),
+        el("span", { class: "log-text", text: `${l.source}: ${M.money(l.gross)} → ${M.money(l.toHuman)} ${l.executorName || "human"} · ${M.money(l.toReinvest)} reinvest · ${M.money(l.toOperator)} vault` }),
+        el("span", { class: "log-time", text: U.timeAgo(l.at) })
+      ])));
+      income.appendChild(ll);
+    }
+    income.appendChild(el("div", { class: "modal-actions", style: "justify-content:flex-start" }, [
+      el("button", { class: "btn small blue-btn", text: `📈 Reinvest ${M.money(M.GHOST_COST)} → spawn Ghost`, onclick: () => {
+        const g = M.reinvestIntoGhost();
+        if (!g) { toast(`Reinvest pool below ${M.money(M.GHOST_COST)}.`, "err"); return; }
+        U.sfx("spawn"); toast(`Reinvested — Product Ghost ${g.name} spawned from the pool.`, "ok"); route();
+      } }),
+      el("button", { class: "btn small", text: "💰 Withdraw pool → vault", onclick: () => { const amt = M.withdraw(); toast(amt ? `${M.money(amt)} moved to the main vault.` : "Pool is empty.", amt ? "ok" : "err"); route(); } })
+    ]));
+    cols.appendChild(income);
+    wrap.appendChild(cols);
+
+    /* ---- superfunnels ---- */
+    const sfPanel = el("div", { class: "panel" });
+    sfPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🔗 SuperFunnels — Shell audience → Ghost offer → Human closer" })]));
+    const funnels = st.superFunnels.filter(f => f.active);
+    if (!funnels.length) sfPanel.appendChild(el("p", { class: "empty-note", text: "No SuperFunnels yet. Wire a Shell, a Ghost product and a closer into one pipeline." }));
+    funnels.forEach(f => {
+      const shell = st.shells.find(s2 => s2.id === f.shellId);
+      const product = st.products.find(p => p.id === f.productId);
+      const ex = st.executors.find(x => x.id === f.executorId);
+      sfPanel.appendChild(el("div", { class: "sf-row" }, [
+        el("div", { class: "sf-pipe" }, [
+          el("span", { class: "sf-node cyan-node", text: "🎭 " + (shell ? shell.name : "?") }),
+          el("span", { class: "sf-arrow", text: "→" }),
+          el("span", { class: "sf-node violet-node", text: "👻 " + (product ? product.name.slice(0, 24) : "?") }),
+          el("span", { class: "sf-arrow", text: "→" }),
+          el("span", { class: "sf-node blue-node", text: "👤 " + (ex ? ex.name : "?") })
+        ]),
+        el("div", { class: "sf-stats" }, [
+          el("span", { class: "dim small-note", text: `${f.stats.days}d · ${f.stats.leads} leads · ${f.stats.closes} closes · ` }),
+          el("b", { class: "sf-gross", text: M.money(f.stats.gross) + " gross" }),
+          el("button", { class: "btn tiny danger ghost", text: "✕", style: "margin-left:10px", onclick: () => { f.active = false; S.save(); route(); } })
+        ])
+      ]));
+    });
+    wrap.appendChild(sfPanel);
+
+    main.appendChild(wrap);
+
+    /* catch up funnel/loop days + auto-deliveries */
+    const evs = M.process();
+    if (evs.length) { evs.slice(0, 4).forEach((e2, i) => setTimeout(() => toast(e2, "info"), i * 450)); route(); }
+  }
+
+  /* ---- matrix modals ---- */
+  function onboardModal() {
+    const f = {};
+    const body = el("div", { class: "modal-body" });
+    body.appendChild(field("Name / handle", f, "name", el("input", { class: "input", placeholder: "e.g. LENA K." })));
+    const roleSel = el("select", { class: "input" });
+    Object.entries(M.ROLES).forEach(([r2, meta]) => roleSel.appendChild(el("option", { value: r2, text: `${meta.icon}  ${r2} — ${meta.feeds}` })));
+    body.appendChild(field("Role", f, "role", roleSel));
+    body.appendChild(field("Telegram / Email", f, "contact", el("input", { class: "input", placeholder: "@handle or name@mail.com" })));
+    const permSel = el("select", { class: "input" });
+    M.PERMISSIONS.forEach(p => permSel.appendChild(el("option", { value: p, text: p + (p === "basic" ? " — task access only" : p === "trusted" ? " — sees agent context" : " — sees offers & splits") })));
+    body.appendChild(field("Permission level", f, "perm", permSel));
+    const share = el("input", { class: "input", type: "number", min: 1, max: 70, value: 30 });
+    roleSel.addEventListener("change", () => { share.value = M.ROLES[roleSel.value].defaultShare; });
+    body.appendChild(field("PayShare — % cut of revenue they close", f, "share", share));
+    U.modal({
+      title: "👤 Auto-Onboard Freelancer",
+      body,
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        { label: "Onboard", cls: "blue-btn", keepOpen: true, onClick: () => {
+          if (!f.name.value.trim()) { toast("Name the executor.", "err"); return; }
+          U.closeModal();
+          const ex = M.onboard({ name: f.name.value, role: roleSel.value, contact: f.contact.value, permission: permSel.value, payShare: share.value });
+          U.sfx("spawn");
+          toast(`${ex.name} is in the Matrix — ${ex.role}, ${ex.payShare}% PayShare.`, "ok");
+          route();
+        } }
+      ]
+    });
+  }
+
+  function assignModal(ex) {
+    const st = S.state;
+    const srcSel = el("select", { class: "input" });
+    const og1 = el("optgroup", { label: "Shells (audience ops)" });
+    st.shells.forEach(s2 => og1.appendChild(el("option", { value: "shell:" + s2.id, text: `🎭 ${s2.name} — ${s2.niche}` })));
+    const og2 = el("optgroup", { label: "Ghost products (offer ops)" });
+    st.products.slice(-8).reverse().forEach(p => og2.appendChild(el("option", { value: "product:" + p.id, text: `👻 ${p.name} (${p.status})` })));
+    if (og1.children.length) srcSel.appendChild(og1);
+    if (og2.children.length) srcSel.appendChild(og2);
+    srcSel.appendChild(el("option", { value: "core:", text: "◈ GOD CORE (generic op)" }));
+    U.modal({
+      title: `Assign task → <span class="gold">${esc(ex.name)}</span> (${esc(ex.role)})`,
+      body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("p", { text: "Pick the agent feeding this task. The brief is generated from that agent's real assets." })); b.appendChild(srcSel); return b; })(),
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        { label: "Generate Brief & Assign", cls: "blue-btn", keepOpen: true, onClick: () => {
+          const [type, id] = srcSel.value.split(":");
+          const source = { type, id: id || null };
+          if (type === "shell") source.shell = st.shells.find(s2 => s2.id === id);
+          if (type === "product") source.product = st.products.find(p => p.id === id);
+          const t = M.assignTask(ex.id, source);
+          if (t) { U.sfx("click"); briefModal(t, ex); }
+        } }
+      ]
+    });
+  }
+
+  function briefModal(t, ex) {
+    U.modal({
+      title: `🧾 Brief packet — ${esc(t.title)}`,
+      cls: "wide",
+      body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("pre", { class: "output-pre", text: t.brief })); b.appendChild(el("p", { class: "dim tiny-note", text: "Send this packet to the freelancer over Telegram/Email/Upwork — that part is you; delivery tracking here is simulated." })); return b; })(),
+      actions: [
+        { label: "Copy packet", onClick: () => U.copyText(t.brief, "Brief packet copied — paste it to " + (ex.contact || "your freelancer") + ".") },
+        { label: "Email packet", onClick: () => U.emailExport(`[PRISM-X] ${t.title}`, t.brief) },
+        { label: "Done", cls: "ghost", onClick: () => route() }
+      ]
+    });
+  }
+
+  function portalModal(ex) {
+    const st = S.state;
+    const mine = st.mtasks.filter(t => t.executorId === ex.id && t.status !== "scored").slice(-5).reverse();
+    const b = el("div", { class: "modal-body portal-body" });
+    b.appendChild(el("div", { class: "portal-head" }, [
+      el("div", {}, [
+        el("b", { text: ex.name }), el("span", { class: "dim", text: ` · ${ex.role} · logged in` })
+      ]),
+      el("span", { class: "badge gst-hit", text: `SCORE ${ex.score} · ${ex.streak}🔥 STREAK` })
+    ]));
+    b.appendChild(el("p", { class: "dim small-note", text: `Lifetime earnings: ${M.money(ex.earnings)} · payout rails (Stripe/PayPal/crypto) connect in a future backend.` }));
+    if (!mine.length) b.appendChild(el("p", { class: "empty-note", text: "No open tasks assigned." }));
+    mine.forEach(t => {
+      b.appendChild(el("div", { class: "portal-task" }, [
+        el("div", { class: "pt-title", text: t.title }),
+        el("div", { class: "dim small-note", text: `Deadline ${new Date(t.deadline).toLocaleString()} · ${t.revenueTask ? `you earn ${ex.payShare}% per sale` : "flat + bonus"} · status: ${t.status}` }),
+        el("div", { class: "vi-actions" }, [
+          el("button", { class: "btn tiny", text: "View brief", onclick: () => briefModal(t, ex) }),
+          t.status === "assigned" ? el("button", { class: "btn tiny blue-btn", text: "Upload deliverable (sim)", onclick: () => { M.deliver(t); S.save(); toast(`"${t.title}" delivered${t.revenue ? ` — ${M.money(t.revenue)} attributed` : ""}. Review it in the Matrix.`, "ok"); U.closeModal(); route(); } }) : null
+        ].filter(Boolean))
+      ]));
+    });
+    b.appendChild(el("p", { class: "dim tiny-note", text: "Portal preview — what this executor would see. A real multi-user portal needs a backend; until then, ship work with the brief packets." }));
+    U.modal({ title: `🌍 Executor portal — ${esc(ex.name)}`, cls: "wide", body: b, actions: [{ label: "Close", cls: "ghost" }] });
+  }
+
+  function reviewTaskModal(taskId) {
+    const st = S.state;
+    const t = st.mtasks.find(x => x.id === taskId);
+    if (!t) return;
+    const ex = st.executors.find(x => x.id === t.executorId);
+    if (t.status === "assigned") { if (ex) briefModal(t, ex); return; }
+    const b = el("div", { class: "modal-body" });
+    b.appendChild(el("p", { html: `<b>${esc(ex ? ex.name : "?")}</b> delivered <b>${esc(t.title)}</b>${t.revenue ? ` — ${M.money(t.revenue)} revenue attributed (${M.money(t.payout)} PayShare)` : ""}.` }));
+    if (t.status === "scored") b.appendChild(el("p", { class: "dim", text: `Already scored ${t.rating}/5.` }));
+    else {
+      b.appendChild(el("p", { class: "fb-label", text: "Score the delivery" }));
+      b.appendChild(U.stars(0, (n) => {
+        M.scoreTask(t.id, n);
+        U.sfx("rate");
+        toast(`Scored ${n}/5 — ${ex ? ex.name + "'s performance is now " + ex.score : "logged"}.`, "ok");
+        U.closeModal(); route();
+      }));
+    }
+    U.modal({ title: "📦 Review delivery", body: b, actions: [{ label: "Close", cls: "ghost" }] });
+  }
+
+  function superFunnelModal() {
+    const st = S.state;
+    const shells = st.shells, products = st.products.filter(p => p.status !== "retired");
+    const closers = st.executors.filter(x => x.active && (x.role === "DM Closer" || x.role === "Cold Email Closer"));
+    if (!shells.length) { toast("Need a Shell (Phase 3) for the audience layer.", "err"); return; }
+    if (!products.length) { toast("Need a Ghost product (Phase 2) for the offer layer.", "err"); return; }
+    if (!closers.length) { toast("Need a human closer (DM or Cold Email) — onboard one first.", "err"); return; }
+    const sSel = el("select", { class: "input" }); shells.forEach(s2 => sSel.appendChild(el("option", { value: s2.id, text: "🎭 " + s2.name + " — " + U.fmtNum(s2.followers) + " followers" })));
+    const pSel = el("select", { class: "input" }); products.slice().reverse().forEach(p => pSel.appendChild(el("option", { value: p.id, text: "👻 " + p.name + (p.price ? " · $" + p.price : "") })));
+    const eSel = el("select", { class: "input" }); closers.forEach(x => eSel.appendChild(el("option", { value: x.id, text: "👤 " + x.name + " — score " + x.score + " · " + x.payShare + "%" })));
+    const b = el("div", { class: "modal-body" }, [
+      el("p", { text: "Shell grows the audience and captures leads → Ghost product solves their pain → human closer closes. GOD CORE feeds and tracks all three." }),
+      sSel, el("p", { style: "text-align:center;margin:6px 0", text: "↓" }), pSel, el("p", { style: "text-align:center;margin:6px 0", text: "↓" }), eSel
+    ]);
+    U.modal({
+      title: "🔗 Create SuperFunnel",
+      body: b,
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        { label: "Forge SuperFunnel", cls: "blue-btn", onClick: () => {
+          const f = M.createSuperFunnel(sSel.value, pSel.value, eSel.value);
+          if (f) { U.evolveFlash(); U.sfx("evolve"); toast(`🔗 SuperFunnel live: ${f.name}. Revenue splits auto-calculate each sim day.`, "ok"); route(); }
+        } }
+      ]
+    });
+  }
+
+  function humanLoopModal(owner, ownerType) {
+    const st = S.state;
+    if (!st.executors.length) { toast("Onboard an executor in the Matrix first.", "err"); return; }
+    const kindSel = el("select", { class: "input" });
+    M.LOOP_KINDS.forEach(k => kindSel.appendChild(el("option", { value: k.id, text: k.label })));
+    const exSel = el("select", { class: "input" });
+    function fillExecs() {
+      exSel.innerHTML = "";
+      const kind = M.LOOP_KINDS.find(k => k.id === kindSel.value);
+      const list = st.executors.filter(x => x.active && kind.roles.includes(x.role));
+      (list.length ? list : st.executors.filter(x => x.active)).forEach(x =>
+        exSel.appendChild(el("option", { value: x.id, text: `${x.name} — ${x.role} · score ${x.score}` })));
+    }
+    kindSel.addEventListener("change", fillExecs);
+    fillExecs();
+    const b = el("div", { class: "modal-body" }, [
+      el("p", { text: "A standing hybrid loop: every sim day, this agent routes work to the human and the income split auto-calculates." }),
+      kindSel, exSel
+    ]);
+    U.modal({
+      title: `🤝 Human integration — ${esc(owner.name)}`,
+      body: b,
+      actions: [
+        owner.humanLoop ? { label: "Remove loop", cls: "danger", onClick: () => { owner.humanLoop = null; S.save(); toast("Human loop removed.", "info"); route(); } } : null,
+        { label: "Cancel", cls: "ghost" },
+        { label: "Wire Loop", cls: "blue-btn", onClick: () => {
+          const ex = st.executors.find(x => x.id === exSel.value);
+          owner.humanLoop = { executorId: exSel.value, kind: kindSel.value };
+          owner.memory.push(`Human loop wired: ${M.LOOP_KINDS.find(k => k.id === kindSel.value).label} → ${ex ? ex.name : "?"}.`);
+          S.save(); U.sfx("evolve");
+          toast(`Loop live — ${ex ? ex.name : "executor"} now rides ${owner.name}'s output.`, "ok");
+          route();
+        } }
+      ].filter(Boolean)
+    });
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -1828,7 +2233,7 @@
     /* log */
     const logPanel = el("div", { class: "panel" });
     logPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Evolution log" })]));
-    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲", queue: "⌁", ghost: "👻", shell: "🎭" };
+    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲", queue: "⌁", ghost: "👻", shell: "🎭", matrix: "🧩" };
     const list = el("div", { class: "log-list" });
     const entries = st.systemMemory.slice().reverse();
     if (!entries.length) list.appendChild(el("p", { class: "empty-note", text: "Nothing logged yet." }));
@@ -2058,11 +2463,12 @@
       }).catch(() => {});
       const due = S.dueQueue();
       if (due.length) toast(`⌁ ${due.length} scheduled post${due.length > 1 ? "s" : ""} due — open the Broadcast Queue.`, "info");
-      /* wake-up digest: what the ghosts and shells did while you were away */
+      /* wake-up digest: ghosts, shells and the human matrix while you were away */
       const shellEvents = SH.process();
+      const matrixEvents = M.process();
       G.process().then(events => {
-        shellEvents.concat(events).slice(0, 5).forEach((e2, i) => setTimeout(() => toast(e2, "info"), 800 + i * 700));
-        if (events.length || shellEvents.length) $$navActive(location.hash.replace(/^#\//, "").split("/")[0] || "dashboard");
+        shellEvents.concat(matrixEvents, events).slice(0, 5).forEach((e2, i) => setTimeout(() => toast(e2, "info"), 800 + i * 700));
+        if (events.length || shellEvents.length || matrixEvents.length) $$navActive(location.hash.replace(/^#\//, "").split("/")[0] || "dashboard");
       }).catch(() => {});
     }
   }

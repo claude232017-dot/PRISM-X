@@ -100,6 +100,41 @@ traffic back into your ghosts, affiliates and clones.
 - Followers/engagement are a **labeled simulation** on the shared sim clock;
   the content itself is real and publish-ready.
 
+## Phase 4 — The Matrix Merge 🧩
+
+The human layer: bridges every AI agent (clone, ghost, shell) to a hybrid
+workforce of freelancers, closers, editors, designers and VAs — fed by the
+system, not managed by you.
+
+- **Human Executor Bridge** — Auto-Onboard a freelancer (name, role, Telegram/
+  Email, permission level, PayShare % cut). Any agent can assign a task; the
+  **brief packet is generated from that agent's real assets** (a ghost's DM
+  flow, a product's sales page, a shell's latest post + B-roll) and is copy/
+  email-exportable to send for real. Track delivery, score performance 1–5;
+  scores feed back — a good Designer pass lifts a shell's content quality, a
+  good Copy Editor pass carries into the ghost's next launch.
+- **Freelancer portal preview** — see exactly what an executor sees: their
+  assigned tasks, briefs, pay terms, performance score and streak, with an
+  "upload deliverable" step (a real multi-user portal with Stripe/PayPal/crypto
+  payout needs a backend — noted as the future layer).
+- **AI + Human hybrid loops** — a Human Loop toggle on every shell and ghost:
+  route DM replies to a closer, content to an editor, affiliate growth to a VA.
+  Each loop runs every sim day and auto-splits the income.
+- **Intelligent income redistribution** — every simulated dollar is tagged by
+  source and split: PayShare to the human off the top, then a configurable
+  reinvest %/vault split of the remainder. Weekly reports read exactly like the
+  spec ("Shell earned $X… $Y to closer, $Z reinvested, $W to main vault"), and
+  the reinvest pool can spawn a fresh Product Ghost or withdraw to the vault.
+- **SuperFunnels** — one button wires Shell (audience) → Ghost product (offer)
+  → human closer into a single tracked pipeline that feeds all three and reports
+  gross/leads/closes per sim day.
+- **GOD CORE Task Grid** — the real-time task map: AI tasks (green), human tasks
+  (blue), joint/hybrid tasks (purple), sortable by priority, ROI, team member or
+  agent — one look at what's earning, failing and scaling. High performers
+  auto-earn more work via Auto-Assign.
+- Deliveries, close-rates and payouts are a **labeled simulation** on the shared
+  sim clock; the briefs are real, exportable work packets.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,

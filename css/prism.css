@@ -601,6 +601,81 @@ select.input { appearance: auto; }
 .shell-strip { border-color: rgba(15, 155, 189, .3); }
 .shell-glyph { filter: drop-shadow(0 0 10px rgba(15, 155, 189, .55)); }
 
+/* ---------------- PHASE 4: the matrix merge ---------------- */
+.btn.blue-btn { color: #6ea8ef; border-color: rgba(57, 135, 229, .55); background: rgba(57, 135, 229, .1); }
+.btn.blue-btn:hover { box-shadow: 0 0 14px rgba(57, 135, 229, .35); color: #93c0f5; }
+
+.grid-legend { display: flex; gap: 16px; margin-bottom: 12px; font-size: 12px; }
+.leg.ai    { color: #37d67a; }
+.leg.human { color: #6ea8ef; }
+.leg.joint { color: var(--violet); }
+
+.task-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 9px;
+}
+.grid-tile {
+  border: 1px solid var(--line); border-left-width: 3px;
+  border-radius: 8px; padding: 9px 11px; background: var(--surface-2);
+  transition: transform .12s, border-color .12s;
+}
+.grid-tile.ai    { border-left-color: #37d67a; }
+.grid-tile.human { border-left-color: #3987e5; cursor: pointer; }
+.grid-tile.joint { border-left-color: var(--violet); }
+.grid-tile.human:hover { transform: translateY(-1px); border-color: rgba(57, 135, 229, .5); }
+.grid-tile.needs-review { animation: pulse-border 2s ease-in-out infinite; border-left-color: var(--accent); }
+.grid-tile.tile-done { opacity: .55; }
+.tile-top { display: flex; justify-content: space-between; margin-bottom: 5px; }
+.tile-tag { font: 800 9px/1.4 var(--mono); letter-spacing: 1px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line-strong); }
+.grid-tile.ai .tile-tag    { color: #37d67a; border-color: rgba(55, 214, 122, .4); }
+.grid-tile.human .tile-tag { color: #6ea8ef; border-color: rgba(57, 135, 229, .45); }
+.grid-tile.joint .tile-tag { color: var(--violet); border-color: rgba(144, 133, 233, .45); }
+.tile-status { font: 700 9px/1.6 var(--mono); letter-spacing: .8px; color: var(--ink-muted); }
+.tile-title { font-size: 12px; font-weight: 600; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-meta { display: flex; justify-content: space-between; margin-top: 5px; font-size: 10.5px; color: var(--ink-muted); }
+.tile-val { color: var(--ink-2); font-weight: 700; }
+
+.exec-card {
+  border: 1px solid var(--line); border-radius: 9px;
+  padding: 13px 14px; margin-bottom: 11px; background: var(--surface-2);
+}
+.exec-card:hover { border-color: rgba(57, 135, 229, .4); }
+.cc-icon.exec-icon { color: #6ea8ef; border-color: rgba(57, 135, 229, .4); background: rgba(57, 135, 229, .1); }
+.exec-meter { margin: 11px 0 3px; }
+.meter.blue-track { background: rgba(57, 135, 229, .16); }
+.meter-fill.blue-fill { background: linear-gradient(90deg, #1c5cab, #3987e5); }
+.meter-val.blue-val { color: #6ea8ef; }
+
+.split-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inline-num { width: 76px; padding: 6px 9px; }
+
+.sf-row {
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 11px 13px; margin-bottom: 9px;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.sf-pipe { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sf-node {
+  font-size: 12px; font-weight: 700; padding: 5px 10px;
+  border-radius: 999px; border: 1px solid var(--line-strong);
+}
+.sf-node.cyan-node   { color: #3fc2e0; border-color: rgba(15, 155, 189, .45); }
+.sf-node.violet-node { color: var(--violet); border-color: rgba(144, 133, 233, .45); }
+.sf-node.blue-node   { color: #6ea8ef; border-color: rgba(57, 135, 229, .45); }
+.sf-arrow { color: var(--ink-muted); }
+.sf-stats { display: flex; align-items: center; }
+.sf-gross { color: var(--accent); }
+
+.portal-body .portal-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid rgba(57, 135, 229, .4); border-radius: 8px;
+  background: rgba(57, 135, 229, .07); margin-bottom: 10px;
+}
+.portal-task { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 9px; }
+.pt-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+.matrix-strip { border-color: rgba(57, 135, 229, .3); }
+.matrix-glyph { filter: drop-shadow(0 0 10px rgba(57, 135, 229, .55)); }
+
 /* ---------------- system memory log ---------------- */
 .log-list { display: flex; flex-direction: column; gap: 3px; }
 .log-row {
