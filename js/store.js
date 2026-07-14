@@ -19,6 +19,7 @@ PRISM.store = (function () {
     queue: [],
     ghosts: [],
     products: [],
+    shells: [],
     ghostSimOffset: 0,
     systemMemory: [],
     lastAudit: null,

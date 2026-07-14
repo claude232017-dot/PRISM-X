@@ -64,6 +64,42 @@ product per ghost per week, each in its own niche, reporting back).
   (The auto-audience affiliate crawler from the Phase 2 spec needs server-side
   infrastructure and is noted as a future add-on.)
 
+## Phase 3 — Outer Shells 🎭
+
+A third agent class: **faceless AI content brands**. Shells don't sell products —
+they *are* the product: audience builders and distribution nodes that feed
+traffic back into your ghosts, affiliates and clones.
+
+- **Shell Forge** — name, multi-select platform focus (X / TikTok / YT Shorts /
+  IG Reels), niche (six presets or custom), persona style (Alpha Mentor, Calm
+  Genius, Savage Meme Lord, Tactical Copywriter, Mysterious Oracle), main offer
+  source (Promote Product Ghosts · Affiliate Links · Collect Emails · Drive
+  Traffic to a Lead-Gen Clone), optional reference content for mimicry, posts
+  per day (1–5) and Auto-Upload.
+- **Daily behavior loop** — trend research (simulated niche scan with angle +
+  sound + source), platform-native content generation (tweets/threads,
+  TikTok & Shorts scripts with B-roll lists, carousels, meme cards), exactly
+  one CTA per post wired to the shell's mission — ghost-product CTAs name real
+  Phase 2 products, and lead-gen CTAs route simulated leads into a real clone's
+  stats. Engagement tracking (views/likes/follows/clicks) drives evolution:
+  **>10% weekly growth scales posting volume; stagnation triggers an automatic
+  7-day persona-swap test** that adopts or reverts on results.
+- **Shell Control Center** — deck with follower counts, daily growth %, weekly
+  network growth chart, mask avatars whose glow scales with the **Faceless
+  Power Meter** (niche heat × persona fit × quality); per-shell commands: Clone
+  Shell (inherits winning flows), Inject Ghost Offer, Change Persona,
+  Auto-Upload ON/OFF (X drops flow into the Broadcast Queue; other platforms
+  await future API integrations), plus deck-level Cross-Pollinate ("copy CTA
+  style from Shell A to Shell B").
+- **Shell vaults** — best-performing hooks, script archive, meme folder, CTA
+  performance data and offer-conversion logs per shell.
+- **Shell Builder AI** — prompt it ("faceless TikTok account… 10k followers…
+  sells my productivity planner") and get account names, a bio, a 10-day
+  content plan, post schedule, offer strategy and three hook-style variations —
+  with one-click deploy into the Forge. Uses the Neural Link when enabled.
+- Followers/engagement are a **labeled simulation** on the shared sim clock;
+  the content itself is real and publish-ready.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,

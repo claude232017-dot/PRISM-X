@@ -531,6 +531,76 @@ select.input { appearance: auto; }
   border: 1px dashed rgba(144, 133, 233, .5); border-radius: 8px; color: var(--ink-2);
 }
 
+/* ---------------- PHASE 3: outer shells ---------------- */
+.btn.cyan-btn { color: #3fc2e0; border-color: rgba(15, 155, 189, .55); background: rgba(15, 155, 189, .1); }
+.btn.cyan-btn:hover { box-shadow: 0 0 14px rgba(15, 155, 189, .35); color: #6fd6ee; }
+
+.cyan-banner { border-color: rgba(15, 155, 189, .45); background: rgba(15, 155, 189, .06); }
+.cyan-label { color: #3fc2e0; }
+.cyan-hero .hero-glyph.cyan-glyph { text-shadow: 0 0 24px rgba(15, 155, 189, .6); }
+
+.shell-card:hover { border-color: rgba(15, 155, 189, .55); }
+.shell-card .cc-icon.shell-mask,
+.cc-icon.shell-mask {
+  color: #3fc2e0; border-color: rgba(15, 155, 189, .4);
+  background: rgba(15, 155, 189, .1);
+}
+.cc-icon.shell-mask.big { display: inline-grid; vertical-align: -9px; margin-right: 6px; }
+
+/* attention glow tiers — intensity scales with the power meter */
+.shell-card.glow-1 { box-shadow: none; }
+.shell-card.glow-2 { box-shadow: 0 0 14px rgba(15, 155, 189, .14); }
+.shell-card.glow-3 {
+  border-color: rgba(15, 155, 189, .5);
+  animation: shell-glow 2.6s ease-in-out infinite;
+}
+@keyframes shell-glow {
+  0%, 100% { box-shadow: 0 0 10px rgba(15, 155, 189, .18); }
+  50% { box-shadow: 0 0 30px rgba(15, 155, 189, .42); }
+}
+.cc-icon.shell-mask.glow-2 { box-shadow: 0 0 10px rgba(15, 155, 189, .3); }
+.cc-icon.shell-mask.glow-3 { box-shadow: 0 0 18px rgba(15, 155, 189, .55); }
+
+/* Faceless Power Meter — cyan fill on a darker step of the same ramp */
+.meter-wrap { margin-top: 12px; }
+.meter-label {
+  display: flex; justify-content: space-between;
+  font: 700 9.5px/1 var(--mono); letter-spacing: 1.5px; color: var(--ink-muted);
+  margin-bottom: 5px;
+}
+.meter-val { color: #3fc2e0; }
+.meter {
+  height: 6px; border-radius: 999px; overflow: hidden;
+  background: rgba(15, 155, 189, 0.16);
+}
+.meter-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, #0f9bbd, #3fc2e0);
+  transition: width .4s ease;
+}
+
+.bar-mark.cyan { fill: var(--cyan); }
+
+.plat-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.plat-chip {
+  display: flex; gap: 7px; align-items: center; cursor: pointer;
+  font-size: 12.5px; color: var(--ink-2);
+  border: 1px solid var(--line-strong); border-radius: 999px; padding: 7px 13px;
+}
+.plat-chip:hover { border-color: rgba(15, 155, 189, .5); }
+.plat-chip input { accent-color: #0f9bbd; }
+
+.post-plat {
+  font: 700 9.5px/1.4 var(--mono); letter-spacing: 1px; color: #3fc2e0;
+  border: 1px solid rgba(15, 155, 189, .4); border-radius: 4px; padding: 2px 6px;
+  margin-right: 6px;
+}
+.post-metrics { color: var(--ink-muted); font-size: 11px; }
+.small-pre { max-height: 180px; font-size: 11.5px; }
+.mem-chip.cyan-chip { border-left-color: var(--cyan); }
+.shell-strip { border-color: rgba(15, 155, 189, .3); }
+.shell-glyph { filter: drop-shadow(0 0 10px rgba(15, 155, 189, .55)); }
+
 /* ---------------- system memory log ---------------- */
 .log-list { display: flex; flex-direction: column; gap: 3px; }
 .log-row {

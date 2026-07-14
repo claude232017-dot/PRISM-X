@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -20,6 +20,9 @@
     else if (view === "ghosts") renderGhostDeck(main);
     else if (view === "ghost-forge") renderGhostForge(main);
     else if (view === "ghost" && parts[1]) renderGhostView(main, parts[1]);
+    else if (view === "shells") renderShellDeck(main);
+    else if (view === "shell-forge") renderShellForge(main);
+    else if (view === "shell" && parts[1]) renderShellView(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
     else renderDashboard(main);
@@ -31,10 +34,12 @@
   function $$navActive(view) {
     U.$$(".nav-link").forEach(a => {
       const ghostViews = view === "ghost" || view === "ghost-forge" || view === "ghosts";
+      const shellViews = view === "shell" || view === "shell-forge" || view === "shells";
       a.classList.toggle("active",
         a.dataset.view === view ||
         (view === "clone" && a.dataset.view === "dashboard") ||
-        (ghostViews && a.dataset.view === "ghosts"));
+        (ghostViews && a.dataset.view === "ghosts") ||
+        (shellViews && a.dataset.view === "shells"));
     });
     const s = S.state.settings;
     const pill = $("#engine-pill");
@@ -219,6 +224,24 @@
       el("div", { class: "cc-actions" }, [
         el("button", { class: "btn small violet-btn", text: "👻 Launch Ghost", onclick: () => go("#/ghost-forge") }),
         el("button", { class: "btn small", text: "Open Ghost Deck", onclick: () => go("#/ghosts") })
+      ])
+    ]));
+
+    /* ---- Phase 3 strip: outer shells ---- */
+    const ss = SH.stats();
+    wrap.appendChild(el("div", { class: "panel ghost-strip shell-strip" }, [
+      el("div", { class: "gs-left" }, [
+        el("span", { class: "gs-glyph shell-glyph", text: "🎭" }),
+        el("div", {}, [
+          el("div", { class: "panel-title", text: "Outer Shells — Phase 3" }),
+          el("p", { class: "dim small-note", text: ss.shells
+            ? `${ss.shells} faceless brand(s) · ${U.fmtNum(ss.followers)} followers · ${SH.money(ss.income)} attributed income · ${U.fmtNum(ss.emails)} emails`
+            : "Faceless content brands that grow audiences and feed traffic back into your ghosts, affiliates and clones." })
+        ])
+      ]),
+      el("div", { class: "cc-actions" }, [
+        el("button", { class: "btn small cyan-btn", text: "🎭 Deploy Shell", onclick: () => go("#/shell-forge") }),
+        el("button", { class: "btn small", text: "Open Shell Deck", onclick: () => go("#/shells") })
       ])
     ]));
 
@@ -958,8 +981,9 @@
   function ffDays(n) {
     G.fastForward(n);
     U.sfx("click");
+    const shellEvents = SH.process();
     G.process().then(events => {
-      events.slice(0, 4).forEach((e2, i) => setTimeout(() => toast(e2, "info"), i * 500));
+      shellEvents.concat(events).slice(0, 5).forEach((e2, i) => setTimeout(() => toast(e2, "info"), i * 500));
       route();
     });
   }
@@ -1286,6 +1310,488 @@
     });
   }
 
+  /* =============================== PHASE 3: OUTER SHELLS =============================== */
+  let shellForgePrefill = null;
+
+  function shellGlowClass(shell) {
+    const p = SH.powerMeter(shell);
+    return p >= 75 ? "glow-3" : p >= 50 ? "glow-2" : "glow-1";
+  }
+
+  function powerMeterNode(shell) {
+    const p = SH.powerMeter(shell);
+    return el("div", { class: "meter-wrap", title: "Faceless Power Meter — virality potential from niche heat × persona fit × content quality" }, [
+      el("div", { class: "meter-label" }, [
+        el("span", { text: "FACELESS POWER" }),
+        el("span", { class: "meter-val", text: p + "%" })
+      ]),
+      el("div", { class: "meter" }, [el("div", { class: "meter-fill", style: `width:${p}%` })])
+    ]);
+  }
+
+  function renderShellDeck(main) {
+    const st = S.state;
+    const wrap = el("div", { class: "page" });
+    const stats = SH.stats();
+    const offDays = Math.round((st.ghostSimOffset || 0) / 86400000);
+
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `OUTER SHELLS <span class="dim">// phase 3 — faceless content brands</span>` }),
+        el("p", { class: "page-sub", text: `${stats.shells} shell(s) · ${U.fmtNum(stats.followers)} total followers · ${SH.money(stats.income)} attributed income · ${U.fmtNum(stats.emails)} emails collected` })
+      ]),
+      el("div", { class: "head-actions" }, [
+        el("button", { class: "btn cyan-btn", text: "🎭 Deploy Outer Shell", onclick: () => go("#/shell-forge") }),
+        el("button", { class: "btn", text: "🧱 Shell Builder AI", onclick: shellBuilderModal }),
+        el("button", { class: "btn", text: "🔁 Cross-Pollinate", onclick: crossPollinateModal })
+      ])
+    ]));
+
+    /* mission banner */
+    wrap.appendChild(el("div", { class: "directive-banner cyan-banner" }, [
+      el("div", { class: "directive-label cyan-label", text: "GOD CORE — SHELL DOCTRINE" }),
+      el("p", { class: "directive-text", text: "“Shells don't sell products. They ARE the product. Grow the audience, earn the attention, feed the traffic back into the ghost economy — without ever showing a face.”" })
+    ]));
+
+    /* weekly growth chart + sim clock */
+    if (st.shells.length) {
+      const chartPanel = el("div", { class: "panel" });
+      chartPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Weekly growth — network followers (simulated)" })]));
+      const box = el("div", { class: "chart-box" });
+      chartPanel.appendChild(box);
+      wrap.appendChild(chartPanel);
+      const s2 = SH.followerSeries();
+      setTimeout(() => U.barChart(box, { labels: s2.labels, values: s2.values, seriesName: "Followers", format: U.fmtNum, height: 160, markClass: "cyan" }), 0);
+    }
+    wrap.appendChild(el("div", { class: "sim-clock" }, [
+      el("span", { class: "dim", text: `Shared market sim clock: ${offDays ? "+" + offDays + " day(s)" : "real time"} — each elapsed day, every shell drops its content and the engagement sim runs.` }),
+      el("span", {}, [
+        el("button", { class: "btn tiny", text: "⏩ +1 day", onclick: () => ffDays(1) }),
+        el("button", { class: "btn tiny", text: "⏭ +7 days", onclick: () => ffDays(7), style: "margin-left:6px" })
+      ])
+    ]));
+
+    if (!st.shells.length) {
+      wrap.appendChild(el("div", { class: "hero-empty cyan-hero" }, [
+        el("div", { class: "hero-glyph cyan-glyph", text: "🎭" }),
+        el("h2", { text: "No shells in orbit." }),
+        el("p", { text: "Outer Shells are faceless AI content brands: they research their niche daily, drop platform-native content with one CTA per post, grow their following, and evolve their persona on engagement — feeding traffic back to your ghosts, affiliates and clones." }),
+        el("button", { class: "btn cyan-btn big", text: "🎭 Deploy First Outer Shell", onclick: () => go("#/shell-forge") })
+      ]));
+    } else {
+      const grid = el("div", { class: "clone-grid" });
+      st.shells.forEach(s3 => grid.appendChild(shellCard(s3)));
+      wrap.appendChild(grid);
+    }
+
+    main.appendChild(wrap);
+
+    SH.process().length && route(); /* catch up missed sim days, redraw once */
+  }
+
+  function shellCard(shell) {
+    const growth = SH.dailyGrowthPct(shell);
+    return el("div", {
+      class: "clone-card shell-card " + shellGlowClass(shell),
+      onclick: (e) => { if (e.target.closest("button")) return; go("#/shell/" + shell.id); }
+    }, [
+      el("div", { class: "cc-top" }, [
+        el("div", { class: "cc-ident" }, [
+          el("span", { class: "cc-icon shell-mask", text: "🎭" }),
+          el("div", {}, [
+            el("div", { class: "cc-name", text: shell.name + (shell.generation > 1 ? ` · G${shell.generation}` : "") }),
+            el("div", { class: "cc-role", text: `${shell.niche} · ${shell.persona}` })
+          ])
+        ]),
+        shell.personaTest
+          ? el("span", { class: "badge gst-needs", text: "PERSONA TEST" })
+          : el("span", { class: "badge gst-track", text: shell.autoUpload ? "AUTO-UPLOAD" : "BROADCASTING" })
+      ]),
+      el("div", { class: "cc-target", text: `${shell.platforms.join(" · ")} · ${shell.postsPerDay}/day · ${shell.offerSource}` }),
+      el("div", { class: "cc-metrics" }, [
+        ccMetric("FOLLOWERS", U.fmtCompact(shell.followers)),
+        ccMetric("TODAY", (growth >= 0 ? "+" : "") + growth.toFixed(1) + "%"),
+        ccMetric("INCOME", SH.money(shell.daily.reduce((a, d) => a + d.income, 0))),
+        ccMetric("POSTS", String(shell.posts.length))
+      ]),
+      powerMeterNode(shell),
+      el("div", { class: "cc-foot" }, [
+        el("span", { class: "dim small-note", text: shell.personaTest ? `testing ${shell.persona} until day's end` : "faceless · autonomous" }),
+        el("div", { class: "cc-actions" }, [
+          el("button", { class: "btn small", text: "Open", onclick: () => go("#/shell/" + shell.id) }),
+          el("button", { class: "btn small ghost", text: "⧉", title: "Clone Shell", onclick: () => { const c = SH.cloneShell(shell.id); if (c) { U.sfx("spawn"); toast(`Shell cloned → ${c.name} (winning flows inherited).`, "ok"); route(); } } }),
+          el("button", { class: "btn small danger ghost", text: "✕", onclick: () => U.modal({
+            title: `Dissolve <span class="gold">${esc(shell.name)}</span>?`,
+            body: `<p>The shell, its ${shell.posts.length} archived posts and vault data will be deleted.</p>`,
+            actions: [
+              { label: "Cancel", cls: "ghost" },
+              { label: "Dissolve", cls: "danger", onClick: () => { SH.deleteShell(shell.id); U.sfx("error"); route(); } }
+            ]
+          }) })
+        ])
+      ])
+    ]);
+  }
+
+  /* ---- shell forge ---- */
+  function renderShellForge(main) {
+    const st = S.state;
+    const wrap = el("div", { class: "page narrow" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("a", { class: "back-link", href: "#/shells", text: "← shell deck" }),
+        el("h1", { class: "page-title", html: `SHELL FORGE <span class="dim">// deploy a faceless brand</span>` }),
+        el("p", { class: "page-sub", text: "No face, no name, no voice — just a persona, a niche, and a daily content engine." })
+      ])
+    ]));
+
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+
+    form.appendChild(field("Shell name", f, "name", el("input", { class: "input", maxlength: 20, placeholder: "e.g. SILENTWEALTH", value: "SHELL-" + (st.shells.length + 1) })));
+
+    /* platform multi-select */
+    const platWrap = el("div", { class: "plat-row" });
+    const platChecks = {};
+    SH.PLATFORMS.forEach((p, i) => {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = i === 0;
+      platChecks[p] = cb;
+      platWrap.appendChild(el("label", { class: "plat-chip" }, [cb, el("span", { text: p })]));
+    });
+    form.appendChild(el("div", { class: "field" }, [el("span", { class: "field-label", text: "Platform focus (multi-select)" }), platWrap]));
+
+    const nicheSel = el("select", { class: "input" });
+    Object.keys(SH.NICHES).forEach(n => nicheSel.appendChild(el("option", { value: n, text: n })));
+    nicheSel.appendChild(el("option", { value: "__custom", text: "Custom niche…" }));
+    const nicheCustom = el("input", { class: "input", placeholder: "type your niche", style: "display:none;margin-top:8px" });
+    nicheSel.addEventListener("change", () => { nicheCustom.style.display = nicheSel.value === "__custom" ? "block" : "none"; });
+    form.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Niche" }), nicheSel, nicheCustom]));
+
+    const personaSel = el("select", { class: "input" });
+    Object.entries(SH.PERSONAS).forEach(([p, meta]) => personaSel.appendChild(el("option", { value: p, text: `${p} — ${meta.desc}` })));
+    form.appendChild(field("Persona style", f, "persona", personaSel));
+
+    const offerSel = el("select", { class: "input" });
+    SH.OFFER_SOURCES.forEach(o => offerSel.appendChild(el("option", { value: o, text: o })));
+    form.appendChild(field("Main offer source", f, "offer", offerSel));
+
+    /* conditional targets */
+    const prodSel = el("select", { class: "input" });
+    st.products.forEach(p => prodSel.appendChild(el("option", { value: p.id, text: `${p.name} (${p.status})` })));
+    const prodField = el("label", { class: "field", style: st.products.length ? "" : "display:none" }, [el("span", { class: "field-label", text: "Ghost product to promote" }), prodSel]);
+    form.appendChild(prodField);
+    const cloneSel = el("select", { class: "input" });
+    st.clones.forEach(c => cloneSel.appendChild(el("option", { value: c.id, text: `${c.name} (${c.role})` })));
+    const cloneField = el("label", { class: "field", style: "display:none" }, [el("span", { class: "field-label", text: "Lead-gen clone to feed" }), cloneSel]);
+    form.appendChild(cloneField);
+    offerSel.addEventListener("change", () => {
+      prodField.style.display = offerSel.value === "Promote Product Ghosts" && st.products.length ? "" : "none";
+      cloneField.style.display = offerSel.value === "Drive Traffic to Lead Gen Clone" && st.clones.length ? "" : "none";
+    });
+
+    form.appendChild(field("Reference content for mimicry (optional)", f, "ref", el("textarea", { class: "input", rows: 3, placeholder: "Paste a post or two whose style this shell should mimic…" })));
+
+    const ppd = el("input", { class: "input", type: "number", min: 1, max: 5, value: 2 });
+    form.appendChild(field("Posts per day (1–5)", f, "ppd", ppd));
+
+    const autoCb = el("input", { type: "checkbox" });
+    form.appendChild(el("label", { class: "check-row" }, [autoCb, el("span", { text: "Auto-Upload — queue each day's X post into the Broadcast Queue automatically (TikTok/IG/Shorts pending future API integrations)" })]));
+
+    const deployBtn = el("button", { class: "btn cyan-btn big", text: "🎭 Deploy Shell & Run Day One" });
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn ghost", text: "Cancel", onclick: () => go("#/shells") }),
+      deployBtn
+    ]));
+
+    if (shellForgePrefill) {
+      if (shellForgePrefill.niche && SH.NICHES[shellForgePrefill.niche]) nicheSel.value = shellForgePrefill.niche;
+      if (shellForgePrefill.platform) { Object.values(platChecks).forEach(cb => cb.checked = false); if (platChecks[shellForgePrefill.platform]) platChecks[shellForgePrefill.platform].checked = true; }
+      if (shellForgePrefill.name) f.name.value = shellForgePrefill.name;
+      shellForgePrefill = null;
+    }
+
+    deployBtn.addEventListener("click", () => {
+      const name = f.name.value.trim().toUpperCase();
+      if (!name) { toast("Name the shell.", "err"); return; }
+      if (st.shells.some(s2 => s2.name === name)) { toast("A shell with that name already exists.", "err"); return; }
+      const platforms = SH.PLATFORMS.filter(p => platChecks[p].checked);
+      if (!platforms.length) { toast("Pick at least one platform.", "err"); return; }
+      const niche = nicheSel.value === "__custom" ? (nicheCustom.value.trim() || "AI Tools / Tech") : nicheSel.value;
+      const shell = SH.createShell({
+        name, platforms, niche,
+        persona: f.persona.value,
+        offerSource: f.offer.value,
+        offerTargetProductId: f.offer.value === "Promote Product Ghosts" ? prodSel.value || null : null,
+        leadGenCloneId: f.offer.value === "Drive Traffic to Lead Gen Clone" ? cloneSel.value || null : null,
+        referenceContent: f.ref.value,
+        postsPerDay: parseInt(ppd.value, 10) || 2,
+        autoUpload: autoCb.checked
+      });
+      SH.process(); /* day one drop */
+      U.sfx("spawn"); U.evolveFlash();
+      toast(`🎭 ${shell.name} is live — day-one content drop generated.`, "ok");
+      go("#/shell/" + shell.id);
+    });
+
+    wrap.appendChild(form);
+    main.appendChild(wrap);
+  }
+
+  /* ---- shell detail ---- */
+  function renderShellView(main, id) {
+    const st = S.state;
+    const shell = st.shells.find(s2 => s2.id === id);
+    if (!shell) { go("#/shells"); return; }
+    const wrap = el("div", { class: "page" });
+    const wk = SH.weeklyGrowthPct(shell);
+
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("a", { class: "back-link", href: "#/shells", text: "← shell deck" }),
+        el("h1", { class: "page-title clone-title" }, [
+          el("span", { class: "cc-icon shell-mask big " + shellGlowClass(shell), text: "🎭" }),
+          el("span", { text: ` ${shell.name} ` }),
+          shell.personaTest ? el("span", { class: "badge gst-needs", text: `PERSONA TEST: ${shell.persona}` }) : el("span", { class: "badge gst-track", text: "LIVE" })
+        ]),
+        el("p", { class: "page-sub", text: `${shell.niche} · ${shell.persona} · ${shell.platforms.join(" / ")} · ${shell.postsPerDay} post(s)/day · mission: ${shell.offerSource}` })
+      ]),
+      el("div", { class: "head-actions" }, [
+        el("button", { class: "btn", text: "⧉ Clone Shell", onclick: () => { const c = SH.cloneShell(shell.id); if (c) { U.sfx("spawn"); toast(`Cloned → ${c.name}.`, "ok"); go("#/shell/" + c.id); } } }),
+        el("button", { class: "btn", text: "👻 Inject Ghost Offer", onclick: () => injectGhostOfferModal(shell) }),
+        el("button", { class: "btn", text: "🎭 Change Persona", onclick: () => changePersonaModal(shell) }),
+        el("button", { class: "btn " + (shell.autoUpload ? "cyan-btn" : ""), text: shell.autoUpload ? "⇪ Auto-Upload: ON" : "⇪ Auto-Upload: OFF", onclick: (e) => {
+          shell.autoUpload = !shell.autoUpload; S.save();
+          toast(shell.autoUpload ? "Auto-Upload ON — daily X drops flow into the Broadcast Queue. Other platforms await future API integrations." : "Auto-Upload OFF.", "info");
+          route();
+        } }),
+        el("button", { class: "btn danger ghost", text: "✕", onclick: () => { SH.deleteShell(shell.id); go("#/shells"); } })
+      ])
+    ]));
+
+    /* stat strip + meter */
+    const strip = el("div", { class: "stat-strip" });
+    [["FOLLOWERS", U.fmtNum(shell.followers)],
+     ["DAILY", (SH.dailyGrowthPct(shell) >= 0 ? "+" : "") + SH.dailyGrowthPct(shell).toFixed(1) + "%"],
+     ["WEEKLY", wk == null ? "—" : (wk >= 0 ? "+" : "") + wk.toFixed(1) + "%"],
+     ["INCOME", SH.money(shell.daily.reduce((a, d) => a + d.income, 0))],
+     ["EMAILS", U.fmtNum(shell.emailList || 0)],
+     ["ARCHIVE", shell.posts.length + " posts"]]
+      .forEach(([l, v]) => strip.appendChild(ccMetric(l, v)));
+    wrap.appendChild(strip);
+    wrap.appendChild(powerMeterNode(shell));
+
+    const cols = el("div", { class: "clone-cols" });
+    const left = el("div", { class: "col" });
+    const right = el("div", { class: "col" });
+
+    /* follower chart */
+    if (shell.daily.length) {
+      const cPanel = el("div", { class: "panel" });
+      cPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Followers — last days (simulated)" })]));
+      const box = el("div", { class: "chart-box" });
+      cPanel.appendChild(box);
+      left.appendChild(cPanel);
+      const days = shell.daily.slice(-7);
+      setTimeout(() => U.barChart(box, {
+        labels: days.map(d => d.day.slice(5)), values: days.map(d => d.followers),
+        seriesName: "Followers", format: U.fmtNum, height: 150, markClass: "cyan"
+      }), 0);
+    }
+
+    /* posts preview by platform */
+    const postsPanel = el("div", { class: "panel" });
+    postsPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "📡 Latest drops by platform" })]));
+    const recent = shell.posts.slice(-8).reverse();
+    if (!recent.length) postsPanel.appendChild(el("p", { class: "empty-note", text: "First drop pending — fast-forward the sim clock on the Shell Deck." }));
+    recent.forEach(p => {
+      postsPanel.appendChild(el("details", { class: "asset-fold" }, [
+        el("summary", {}, [
+          el("span", { class: "post-plat", text: p.platform }),
+          el("span", { text: ` ${p.format} — ${p.hook} ${p.topic}` }),
+          p.metrics ? el("span", { class: "post-metrics", text: ` · ${U.fmtCompact(p.metrics.views)} views · +${p.metrics.follows} fo` }) : null
+        ].filter(Boolean)),
+        el("pre", { class: "output-pre", text: p.body + (p.broll ? "\n\nB-ROLL:\n• " + p.broll.join("\n• ") : "") + `\n\nTREND SOURCE (sim): ${p.trend}` }),
+        el("div", { class: "vi-actions" }, [
+          el("button", { class: "btn tiny", text: "Copy", onclick: () => U.copyText(p.body, "Post copied.") }),
+          p.platform === "X" ? el("button", { class: "btn tiny", text: "Post ↗", onclick: () => U.shareToX(p.body.split("\n\n")[0]) }) : null
+        ].filter(Boolean))
+      ]));
+    });
+    left.appendChild(postsPanel);
+
+    /* vault */
+    const vaultPanel = el("div", { class: "panel" });
+    vaultPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "📁 Shell vault" })]));
+    const tabs = el("div", { class: "vault-tabs" });
+    const body = el("div", {});
+    const draw = {
+      hooks: () => {
+        const best = SH.bestHooks(shell, 5);
+        if (!best.length) return [el("p", { class: "empty-note", text: "No performance data yet." })];
+        return best.map(p => el("div", { class: "vault-item" }, [
+          el("div", { class: "vi-head" }, [
+            el("span", { class: "vi-type", text: p.platform }),
+            el("span", { class: "vi-title", text: `${p.hook} ${p.topic}` }),
+            el("span", { class: "vi-meta", text: `${U.fmtCompact(p.metrics.views)} views` })
+          ])
+        ]));
+      },
+      scripts: () => shell.posts.filter(p => p.format === "short-script" || p.format === "thread").slice(-6).reverse()
+        .map(p => el("div", { class: "vault-item" }, [el("div", { class: "vi-head", onclick: () => U.modal({ title: esc(p.platform + " " + p.format), cls: "wide", body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("pre", { class: "output-pre", text: p.body })); return b; })(), actions: [{ label: "Copy", onClick: () => U.copyText(p.body) }, { label: "Close", cls: "ghost" }] }) }, [
+          el("span", { class: "vi-type", text: p.platform }), el("span", { class: "vi-title", text: p.hook + " " + p.topic }), el("span", { class: "vi-meta", text: p.day })
+        ])])),
+      memes: () => {
+        const memes = shell.posts.filter(p => p.format === "meme-card" || p.format === "carousel").slice(-6).reverse();
+        if (!memes.length) return [el("p", { class: "empty-note", text: "No meme cards yet — IG Reels platform generates them." })];
+        return memes.map(p => el("div", { class: "vault-item" }, [el("pre", { class: "output-pre small-pre", text: p.body })]));
+      },
+      cta: () => {
+        const entries = Object.entries(shell.ctaStats);
+        if (!entries.length) return [el("p", { class: "empty-note", text: "No CTA data yet." })];
+        return entries.sort((a, b) => b[1].clicks - a[1].clicks).map(([style, s3]) =>
+          el("div", { class: "report-row" }, [
+            el("span", { class: "report-ico", text: "⌁" }),
+            el("div", {}, [
+              el("div", { class: "report-label", text: style }),
+              el("div", { class: "report-text", text: `${s3.clicks} clicks across ${s3.posts} posts (${(s3.clicks / Math.max(1, s3.posts)).toFixed(1)}/post)` })
+            ])
+          ]));
+      },
+      conversions: () => {
+        const logs = shell.memory.filter(m => /assisted sale|emails collected|leads routed/.test(m)).slice(-8).reverse();
+        if (!logs.length) return [el("p", { class: "empty-note", text: "No conversions logged yet." })];
+        return logs.map(m => el("div", { class: "mem-chip cyan-chip", text: m }));
+      }
+    };
+    let vtab = "hooks";
+    [["hooks", "Best hooks"], ["scripts", "Script archive"], ["memes", "Meme folder"], ["cta", "CTA performance"], ["conversions", "Conversion log"]].forEach(([k, label]) => {
+      tabs.appendChild(el("button", {
+        class: "vtab" + (k === "hooks" ? " on" : ""), text: label, "data-k": k,
+        onclick: () => { vtab = k; U.$$(".vtab", tabs).forEach(b => b.classList.toggle("on", b.dataset.k === k)); body.innerHTML = ""; draw[vtab]().forEach(n => body.appendChild(n)); }
+      }));
+    });
+    vaultPanel.appendChild(tabs);
+    draw.hooks().forEach(n => body.appendChild(n));
+    vaultPanel.appendChild(body);
+    right.appendChild(vaultPanel);
+
+    /* memory */
+    const memPanel = el("div", { class: "panel" });
+    memPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "◌ Shell memory" })]));
+    const memList = el("div", { class: "mem-list" });
+    shell.memory.slice(-8).reverse().forEach(m => memList.appendChild(el("div", { class: "mem-chip cyan-chip", text: m })));
+    memPanel.appendChild(memList);
+    right.appendChild(memPanel);
+
+    cols.appendChild(left);
+    cols.appendChild(right);
+    wrap.appendChild(cols);
+    main.appendChild(wrap);
+  }
+
+  /* ---- shell commands ---- */
+  function injectGhostOfferModal(shell) {
+    const products = S.state.products;
+    if (!products.length) { toast("No ghost products yet — launch a Product Ghost first.", "err"); return; }
+    const sel = el("select", { class: "input" });
+    products.slice().reverse().forEach(p => sel.appendChild(el("option", { value: p.id, text: `${p.name} — ${p.status}${p.price ? " · $" + p.price : ""}` })));
+    U.modal({
+      title: "👻 Inject Ghost Offer",
+      body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("p", { text: "Every future post's CTA will promote this Product Ghost product." })); b.appendChild(sel); return b; })(),
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        { label: "Inject", cls: "cyan-btn", onClick: () => {
+          shell.offerSource = "Promote Product Ghosts";
+          shell.offerTargetProductId = sel.value;
+          const p = products.find(x => x.id === sel.value);
+          shell.memory.push(`Ghost offer injected: now promoting "${p ? p.name : "product"}".`);
+          S.logMemory("shell", `🎭 ${shell.name} now funnels traffic to ghost product "${p ? p.name : "?"}".`);
+          S.save(); toast("Offer injected — CTAs updated.", "ok"); route();
+        } }
+      ]
+    });
+  }
+
+  function changePersonaModal(shell) {
+    const sel = el("select", { class: "input" });
+    Object.entries(SH.PERSONAS).forEach(([p, meta]) => {
+      const o = el("option", { value: p, text: `${p} — ${meta.desc}` });
+      if (p === shell.persona) o.selected = true;
+      sel.appendChild(o);
+    });
+    U.modal({
+      title: "🎭 Change Persona",
+      body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(sel); return b; })(),
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        { label: "Apply", cls: "cyan-btn", onClick: () => {
+          shell.personaTest = null;
+          shell.persona = sel.value;
+          shell.memory.push(`Persona manually set to ${sel.value}.`);
+          S.save(); toast(`Persona → ${sel.value}.`, "ok"); route();
+        } }
+      ]
+    });
+  }
+
+  function crossPollinateModal() {
+    const shells = S.state.shells;
+    if (shells.length < 2) { toast("Need at least two shells to cross-pollinate.", "err"); return; }
+    const from = el("select", { class: "input" }), to = el("select", { class: "input" });
+    shells.forEach(s2 => {
+      from.appendChild(el("option", { value: s2.id, text: `${s2.name} (source)` }));
+      to.appendChild(el("option", { value: s2.id, text: `${s2.name} (target)` }));
+    });
+    to.selectedIndex = 1;
+    U.modal({
+      title: "🔁 Cross-Pollinate Shells",
+      body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("p", { text: "Copy the best-performing CTA style and top hooks from one shell into another." })); b.appendChild(from); b.appendChild(el("p", { style: "text-align:center;margin:8px 0", text: "↓" })); b.appendChild(to); return b; })(),
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        { label: "Pollinate", cls: "cyan-btn", keepOpen: true, onClick: () => {
+          if (from.value === to.value) { toast("Pick two different shells.", "err"); return; }
+          U.closeModal();
+          if (SH.crossPollinate(from.value, to.value)) { U.sfx("evolve"); toast("Style transferred — target shell's quality boosted.", "ok"); route(); }
+        } }
+      ]
+    });
+  }
+
+  function shellBuilderModal() {
+    const ta = el("textarea", { class: "input", rows: 3, placeholder: `e.g. "Create me a faceless TikTok account that grows to 10k followers in the AI niche and sells my productivity planner."` });
+    const out = el("div", {});
+    let lastPlan = null;
+    U.modal({
+      title: "🧱 Shell Builder AI",
+      cls: "wide",
+      body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("p", { text: "Describe the faceless brand you want. Shell AI returns names, bio, a 10-day content plan, schedule, offer strategy and hook variations." })); b.appendChild(ta); b.appendChild(out); return b; })(),
+      actions: [
+        { label: "Summon Shell AI", cls: "cyan-btn", keepOpen: true, onClick: async (e) => {
+          const q = ta.value.trim();
+          if (!q) { toast("Describe the shell first.", "err"); return; }
+          out.innerHTML = "";
+          out.appendChild(el("p", { class: "dim", text: "◈ Shell AI composing…" }));
+          const res = await SH.builderAI(q);
+          lastPlan = res;
+          out.innerHTML = "";
+          out.appendChild(el("p", { class: "dim small-note", text: `engine: ${res.engine === "neural" ? "Neural Link" : "Local Cortex"} · detected niche: ${res.niche}` }));
+          out.appendChild(el("pre", { class: "output-pre", text: res.text }));
+          out.appendChild(el("div", { class: "vi-actions" }, [
+            el("button", { class: "btn tiny", text: "Copy plan", onclick: () => U.copyText(res.text, "Plan copied.") }),
+            el("button", { class: "btn tiny cyan-btn", text: "🎭 Deploy this Shell", onclick: () => {
+              const nameMatch = res.text.match(/@([a-z0-9._]+)/i);
+              shellForgePrefill = { niche: res.niche, platform: /tiktok/i.test(q) ? "TikTok" : /youtube|shorts/i.test(q) ? "YT Shorts" : /insta|reel/i.test(q) ? "IG Reels" : "X", name: nameMatch ? nameMatch[1].replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 16) : null };
+              U.closeModal();
+              go("#/shell-forge");
+            } })
+          ]));
+        } },
+        { label: "Close", cls: "ghost" }
+      ]
+    });
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -1322,7 +1828,7 @@
     /* log */
     const logPanel = el("div", { class: "panel" });
     logPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Evolution log" })]));
-    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲", queue: "⌁", ghost: "👻" };
+    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲", queue: "⌁", ghost: "👻", shell: "🎭" };
     const list = el("div", { class: "log-list" });
     const entries = st.systemMemory.slice().reverse();
     if (!entries.length) list.appendChild(el("p", { class: "empty-note", text: "Nothing logged yet." }));
@@ -1552,10 +2058,11 @@
       }).catch(() => {});
       const due = S.dueQueue();
       if (due.length) toast(`⌁ ${due.length} scheduled post${due.length > 1 ? "s" : ""} due — open the Broadcast Queue.`, "info");
-      /* wake-up digest: what the ghosts did while you were away */
+      /* wake-up digest: what the ghosts and shells did while you were away */
+      const shellEvents = SH.process();
       G.process().then(events => {
-        events.slice(0, 4).forEach((e2, i) => setTimeout(() => toast(e2, "info"), 800 + i * 700));
-        if (events.length) $$navActive(location.hash.replace(/^#\//, "").split("/")[0] || "dashboard");
+        shellEvents.concat(events).slice(0, 5).forEach((e2, i) => setTimeout(() => toast(e2, "info"), 800 + i * 700));
+        if (events.length || shellEvents.length) $$navActive(location.hash.replace(/^#\//, "").split("/")[0] || "dashboard");
       }).catch(() => {});
     }
   }

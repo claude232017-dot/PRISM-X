@@ -193,7 +193,7 @@ PRISM.ui = (function () {
       const x = m.l + band * i + (band - barW) / 2;
       const y = m.t + ih - h;
       if (h > 0) {
-        const p = svgEl("path", { d: barPath(x, y, barW, h), class: "bar-mark" });
+        const p = svgEl("path", { d: barPath(x, y, barW, h), class: "bar-mark" + (cfg.markClass ? " " + cfg.markClass : "") });
         svg.appendChild(p);
       }
       /* x label */
