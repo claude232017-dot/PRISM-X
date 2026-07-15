@@ -523,6 +523,18 @@ PRISM.engine = (function () {
     return text;
   }
 
+  /* Phase Alpha: the AI Router decides which model a task category uses. */
+  function routedSettings(settings, category) {
+    if (!window.PRISM || !PRISM.bridge) return settings;
+    try {
+      const route = PRISM.bridge.routeFor(category);
+      if (route && route.model && route.model !== settings.model) {
+        return Object.assign({}, settings, { model: route.model, routedVia: route.provider });
+      }
+    } catch (_) {}
+    return settings;
+  }
+
   async function generateNeural(clone, task, dna, settings) {
     const text = await complete(systemPrompt(clone, dna), taskPrompt(task), settings);
     const ctaMatch = text.match(/^CTA:\s*(.+)$/m);
@@ -541,7 +553,11 @@ PRISM.engine = (function () {
   async function generate(clone, task, dna, settings) {
     if (settings && settings.engine === "neural" && settings.apiKey) {
       try {
-        return await generateNeural(clone, task, dna, settings);
+        const category = /tweet|thread|caption|email|copy|content|dm/i.test(task.type) ? "Copywriting / content"
+          : /offer|price|funnel|upsell/i.test(task.type) ? "Reasoning / strategy"
+          : /market|position|brief/i.test(task.type) ? "Research"
+          : "Copywriting / content";
+        return await generateNeural(clone, task, dna, routedSettings(settings, category));
       } catch (err) {
         const local = generateLocal(clone, task, dna);
         local.notes.unshift(`Neural Link unavailable (${err.message}) — Local Cortex answered instead.`);

@@ -29,6 +29,15 @@ PRISM.store = (function () {
     vaultBalance: 0,
     matrixLastRun: null,
     ghostSimOffset: 0,
+    /* Phase Alpha — Foundation Protocol (PRISM-X Bridge) */
+    events: [],
+    sharedMemory: [],
+    integrations: [],
+    workflows: [],
+    aiRouter: null,
+    activeRole: "Owner",
+    apiLog: [],
+    bridgeReady: false,
     systemMemory: [],
     lastAudit: null,
     pendingUpgrade: null,
@@ -269,6 +278,8 @@ PRISM.store = (function () {
   function logMemory(kind, text) {
     state.systemMemory.push({ id: uid("sm"), at: Date.now(), kind, text });
     if (state.systemMemory.length > 200) state.systemMemory.shift();
+    /* Phase Alpha: every logged action also becomes a Bridge event */
+    if (window.PRISM && PRISM.bridge) PRISM.bridge.onMemoryLog(kind, text);
     save();
   }
 

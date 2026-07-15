@@ -135,6 +135,51 @@ system, not managed by you.
 - Deliveries, close-rates and payouts are a **labeled simulation** on the shared
   sim clock; the briefs are real, exportable work packets.
 
+## Phase Alpha — The Foundation Protocol (PRISM-X Bridge) ⚫
+
+The infrastructure phase: turns four phases of independent modules into one
+operating system with a shared nervous system. No new business features — just
+the foundation everything else plugs into. Reached via the **Bridge** tab (a
+tabbed control center).
+
+- **Universal Worker System** — every Clone, Ghost, Shell and Human Executor is
+  projected through one shared **Worker** schema (identity · mission · knowledge
+  · memory · tools · workflows · metrics · revenue · status · evolution). Built
+  as a normalizing adapter over the existing stores, so the UI still shows each
+  type separately while the internal architecture is unified. The Worker
+  registry lists them all on one schema.
+- **PRISM-X Bridge + Event Bus** — a central dispatch/log layer; every logged
+  action across all four phases becomes a first-class, timestamped, categorized
+  event (500-deep ring). The **Command Center** streams them live with
+  category/priority filters.
+- **Shared Memory Engine** — private / shared / global memory tiers with kind
+  (prompt · success · failure · decision · lesson), fully searchable; GOD CORE
+  can promote a private memory to system-wide global.
+- **AI Router** — an editable table routing each task category to a provider;
+  Claude routes execute **live** (the Neural Link picks the model per category
+  via `routeFor`), GPT/Gemini routes await their integrations.
+- **Integration Manager** — 13 placeholder cards (OpenAI, Claude, Gemini,
+  Supabase, Make.com, n8n, Vapi, Voiceflow, GitHub, Gmail, Telegram, Discord,
+  Stripe) with enable toggle, mock health check, last-sync and logs. No live
+  APIs — both specs mandate this.
+- **Workflow Registry** — register workflows against a worker/trigger with
+  simulated execution and success-rate tracking (real Make.com/n8n later).
+- **Permission Engine** — 8 roles × 7 resources access matrix (Owner →
+  Viewer), with a live role switcher that genuinely gates the Bridge (a Viewer
+  is locked out of Revenue/Integrations/Automation).
+- **Internal API Layer** — standardized endpoints (`GET /workers`, `/tasks`,
+  `/memory`, `/events`, `/analytics/summary`, `/vault`, `/workflows`) that
+  return live data and log every call — the real contract future modules use.
+- **System Health** (Mission Control) and a **Developer Console** for raw
+  inspection round it out.
+
+*Merged from two spec drafts (V1 "Foundation Protocol" + V2 "The Foundation"):
+kept V1's Universal Worker model & Permission Engine and V2's AI Router &
+Internal API Layer, unified the naming conflicts (Integration Manager, Event
+Bus, Shared Memory Engine), and folded V2's "future-proofing" into the
+architecture note. Only Integrations and workflow execution are placeholders,
+per both specs; everything else is live infrastructure.*
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,

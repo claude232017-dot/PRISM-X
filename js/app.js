@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -25,6 +25,7 @@
     else if (view === "shell-forge") renderShellForge(main);
     else if (view === "shell" && parts[1]) renderShellView(main, parts[1]);
     else if (view === "matrix") renderMatrix(main);
+    else if (view === "bridge") renderBridge(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
     else renderDashboard(main);
@@ -261,6 +262,21 @@
       ]),
       el("div", { class: "cc-actions" }, [
         el("button", { class: "btn small blue-btn", text: "🧩 Open Matrix", onclick: () => go("#/matrix") })
+      ])
+    ]));
+
+    /* ---- Phase Alpha strip: the bridge ---- */
+    const bh = B.health();
+    wrap.appendChild(el("div", { class: "panel ghost-strip bridge-strip" }, [
+      el("div", { class: "gs-left" }, [
+        el("span", { class: "gs-glyph bridge-glyph", text: "⚫" }),
+        el("div", {}, [
+          el("div", { class: "panel-title", text: "PRISM-X Bridge — Foundation" }),
+          el("p", { class: "dim small-note", text: `${bh.bridge === "online" ? "● online" : "◌ init"} · ${bh.workers} workers on one schema · ${bh.events} events logged · ${bh.memory} shared memories · ${bh.integrations.total} integration slots` })
+        ])
+      ]),
+      el("div", { class: "cc-actions" }, [
+        el("button", { class: "btn small", text: "⚫ Open Bridge", onclick: () => go("#/bridge") })
       ])
     ]));
 
@@ -2197,6 +2213,408 @@
     });
   }
 
+  /* =============================== PHASE ALPHA: PRISM-X BRIDGE =============================== */
+  const BRIDGE_TABS = [
+    ["overview", "🩺 Health"],
+    ["workers", "◎ Workers"],
+    ["events", "📡 Command Center"],
+    ["memory", "🧠 Shared Memory"],
+    ["router", "🔀 AI Router"],
+    ["integrations", "🔌 Integrations"],
+    ["workflows", "⚙ Workflows"],
+    ["permissions", "🔑 Permissions"],
+    ["api", "🛰 Internal API"],
+    ["dev", "🧪 Dev Console"]
+  ];
+
+  function renderBridge(main, tab) {
+    tab = tab || "overview";
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `PRISM-X BRIDGE <span class="dim">// phase alpha — foundation protocol</span>` }),
+        el("p", { class: "page-sub", text: "The nervous system. Every action routes through the Bridge; every module plugs into these interfaces." })
+      ]),
+      el("div", { class: "head-actions" }, [
+        el("span", { class: "role-pill", html: `active role: <b>${esc(B.activeRole())}</b>` })
+      ])
+    ]));
+
+    const tabs = el("div", { class: "bridge-tabs" });
+    BRIDGE_TABS.forEach(([k, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k === tab ? " on" : ""), href: "#/bridge/" + k, text: label
+    })));
+    wrap.appendChild(tabs);
+
+    const body = el("div", { class: "bridge-body" });
+    ({
+      overview: bridgeOverview, workers: bridgeWorkers, events: bridgeEvents,
+      memory: bridgeMemory, router: bridgeRouter, integrations: bridgeIntegrations,
+      workflows: bridgeWorkflows, permissions: bridgePermissions, api: bridgeApi, dev: bridgeDev
+    }[tab] || bridgeOverview)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  /* ---- Health / Overview ---- */
+  function bridgeOverview(body) {
+    const h = B.health();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      kpiTile("Bridge status", h.bridge === "online" ? "● ONLINE" : "◌ INIT", null),
+      kpiTile("Workers", String(h.workers), null),
+      kpiTile("Events logged", String(h.events), null),
+      kpiTile("Shared memories", String(h.memory), null),
+      kpiTile("Success rate", h.successRate + "%", null)
+    ]));
+    const grid = el("div", { class: "dash-grid" });
+
+    const left = el("div", { class: "panel" });
+    left.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "System health — mission control" })]));
+    const rows = [
+      ["Bridge", h.bridge, h.bridge === "online" ? "ok" : "warn"],
+      ["Workers online", `${h.workers} (◈${h.byType.clone} 👻${h.byType.ghost} 🎭${h.byType.shell} 👤${h.byType.executor})`, "ok"],
+      ["Workflows", `${h.workflows} registered · ${h.runningWorkflows} ready`, "ok"],
+      ["Failed tasks (events)", String(h.failedTasks), h.failedTasks ? "warn" : "ok"],
+      ["Integrations", `${h.integrations.enabled}/${h.integrations.total} enabled · ${h.integrations.healthy} healthy`, "ok"],
+      ["Memory engine", `${h.memory} entries`, "ok"],
+      ["Event throughput", `${h.throughput} in last hour`, "ok"],
+      ["Database (localStorage)", "persistent", "ok"],
+      ["System load", h.events > 300 ? "moderate" : "light", "ok"]
+    ];
+    const hl = el("div", { class: "health-list" });
+    rows.forEach(([k, v, s]) => hl.appendChild(el("div", { class: "health-row" }, [
+      el("span", { class: "health-dot " + s }),
+      el("span", { class: "health-k", text: k }),
+      el("span", { class: "health-v", text: v })
+    ])));
+    left.appendChild(hl);
+    grid.appendChild(left);
+
+    const right = el("div", { class: "panel" });
+    right.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Recent events" }), el("a", { class: "dim small-note", href: "#/bridge/events", text: "command center →" })]));
+    const feed = el("div", { class: "log-list" });
+    B.events().slice(0, 8).forEach(e2 => feed.appendChild(eventRow(e2)));
+    if (!B.events().length) feed.appendChild(el("p", { class: "empty-note", text: "No events yet." }));
+    right.appendChild(feed);
+    grid.appendChild(right);
+    body.appendChild(grid);
+
+    body.appendChild(el("div", { class: "panel arch-note" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Architecture" })]),
+      el("p", { class: "dim", html: `Every Clone, Ghost, Shell and Human Executor is projected through one <b>Universal Worker</b> schema (identity · mission · knowledge · memory · tools · workflows · metrics · revenue · status · evolution). All four phases feed the <b>Event Bus</b> via the Bridge. New AI providers, integrations or Worker types plug into these interfaces without redesigning the architecture.` })
+    ]));
+  }
+
+  function eventRow(e2) {
+    return el("div", { class: "log-row event-row" }, [
+      el("span", { class: "ev-time", text: new Date(e2.at).toLocaleTimeString() }),
+      el("span", { class: "ev-cat cat-" + e2.category, text: e2.category }),
+      el("span", { class: "log-text", text: e2.text }),
+      e2.priority === "high" ? el("span", { class: "ev-pri", text: "!" }) : null
+    ].filter(Boolean));
+  }
+
+  /* ---- Universal Worker registry ---- */
+  function bridgeWorkers(body) {
+    if (!B.can("Workers", "read")) { body.appendChild(permDenied("Workers")); return; }
+    const ws = B.workers();
+    body.appendChild(el("p", { class: "dim small-note", text: `${ws.length} workers, one schema. UI still shows them as Clones/Ghosts/Shells — only the internal architecture is unified.` }));
+    const showRev = B.can("Revenue", "read");
+    const table = el("div", { class: "worker-table" });
+    table.appendChild(el("div", { class: "wt-head" }, [
+      el("span", { text: "TYPE" }), el("span", { text: "WORKER" }), el("span", { text: "MISSION" }),
+      el("span", { text: "STATUS" }), el("span", { text: showRev ? "REVENUE" : "—" })
+    ]));
+    ws.forEach(w => {
+      const meta = B.WORKER_TYPES[w.type];
+      table.appendChild(el("div", { class: "wt-row", onclick: () => workerModal(w) }, [
+        el("span", { class: "wt-type", html: `${meta.icon} ${meta.label}` }),
+        el("span", { class: "wt-name", text: w.name }),
+        el("span", { class: "wt-mission", text: w.mission }),
+        el("span", { class: "wt-status", text: w.status }),
+        el("span", { class: "wt-rev", text: showRev ? "$" + Math.round(w.revenue).toLocaleString() : "—" })
+      ]));
+    });
+    if (!ws.length) table.appendChild(el("p", { class: "empty-note", text: "No workers yet." }));
+    body.appendChild(table);
+  }
+
+  function workerModal(w) {
+    const meta = B.WORKER_TYPES[w.type];
+    const b = el("div", { class: "modal-body" });
+    b.appendChild(el("pre", { class: "output-pre", text: JSON.stringify({
+      identity: w.name, type: meta.label, mission: w.mission,
+      knowledge: w.knowledge, tools: w.tools, metrics: w.metrics,
+      revenue: w.revenue, status: w.status,
+      workflows: w.workflows.length, memory_entries: w.memory.length,
+      evolution: w.evolution
+    }, null, 2) }));
+    U.modal({ title: `${meta.icon} Worker — ${esc(w.name)}`, cls: "wide", body: b, actions: [{ label: "Close", cls: "ghost" }] });
+  }
+
+  /* ---- Command Center (event feed + filters) ---- */
+  function bridgeEvents(body) {
+    const catSel = el("select", { class: "input inline-select" });
+    B.eventCategories().forEach(c => catSel.appendChild(el("option", { value: c, text: "Category: " + c })));
+    const priSel = el("select", { class: "input inline-select" });
+    [["all", "Priority: all"], ["high", "high"], ["normal", "normal"], ["medium", "medium"]].forEach(([v, l]) => priSel.appendChild(el("option", { value: v, text: l })));
+    body.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "📡 Command center — live activity" }),
+      el("div", { class: "filter-row" }, [catSel, priSel])
+    ]));
+    const feed = el("div", { class: "log-list cc-feed" });
+    function draw() {
+      feed.innerHTML = "";
+      const list = B.events({ category: catSel.value, priority: priSel.value });
+      if (!list.length) feed.appendChild(el("p", { class: "empty-note", text: "No events match." }));
+      list.slice(0, 60).forEach(e2 => feed.appendChild(eventRow(e2)));
+    }
+    catSel.addEventListener("change", draw); priSel.addEventListener("change", draw);
+    draw();
+    body.appendChild(feed);
+  }
+
+  /* ---- Shared Memory Engine ---- */
+  function bridgeMemory(body) {
+    if (!B.can("Memory", "read")) { body.appendChild(permDenied("Memory")); return; }
+    const canWrite = B.can("Memory", "write");
+    if (canWrite) {
+      const f = {};
+      const form = el("div", { class: "panel form-panel mem-form" });
+      form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧠 Store a memory" })]));
+      form.appendChild(field("Title", f, "title", el("input", { class: "input", placeholder: "e.g. Best cold-open for AI niche" })));
+      form.appendChild(field("Body", f, "body", el("textarea", { class: "input", rows: 2, placeholder: "prompt · successful output · decision · lesson…" })));
+      const scopeSel = el("select", { class: "input" }); B.MEMORY_SCOPES.forEach(s => scopeSel.appendChild(el("option", { value: s, text: s + (s === "global" ? " — system-wide intelligence" : s === "private" ? " — one worker" : " — cross-worker") })));
+      const kindSel = el("select", { class: "input" }); ["lesson", "prompt", "success", "failure", "decision"].forEach(k => kindSel.appendChild(el("option", { value: k, text: k })));
+      form.appendChild(el("div", { class: "two-col" }, [
+        el("label", { class: "field" }, [el("span", { class: "field-label", text: "Scope" }), scopeSel]),
+        el("label", { class: "field" }, [el("span", { class: "field-label", text: "Kind" }), kindSel])
+      ]));
+      form.appendChild(el("div", { class: "form-actions" }, [
+        el("button", { class: "btn primary", text: "Store", onclick: () => {
+          if (!f.title.value.trim()) { toast("Title required.", "err"); return; }
+          B.addMemory({ title: f.title.value, body: f.body.value, scope: scopeSel.value, kind: kindSel.value });
+          toast("Memory stored to the engine.", "ok"); go("#/bridge/memory");
+        } })
+      ]));
+      body.appendChild(form);
+    }
+
+    const search = el("input", { class: "input", placeholder: "Search all memory…" });
+    const scopeFilter = el("select", { class: "input inline-select" });
+    ["all"].concat(B.MEMORY_SCOPES).forEach(s => scopeFilter.appendChild(el("option", { value: s, text: "Scope: " + s })));
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Memory engine" }), el("div", { class: "filter-row" }, [search, scopeFilter])]));
+    const list = el("div", { class: "mem-list" });
+    function draw() {
+      list.innerHTML = "";
+      const items = B.searchMemory(search.value, scopeFilter.value);
+      if (!items.length) list.appendChild(el("p", { class: "empty-note", text: "No memories match. GOD CORE can promote a private memory to global to make it system-wide." }));
+      items.forEach(m => list.appendChild(el("div", { class: "mem-entry" }, [
+        el("div", {}, [
+          el("span", { class: "mem-scope scope-" + m.scope, text: m.scope }),
+          el("span", { class: "mem-kind", text: m.kind }),
+          el("b", { class: "mem-title", text: " " + m.title })
+        ]),
+        m.body ? el("div", { class: "dim small-note", text: m.body }) : null,
+        canWrite ? el("div", { class: "vi-actions" }, [
+          m.scope !== "global" ? el("button", { class: "btn tiny", text: "↑ Promote to global", onclick: () => { B.promoteMemory(m.id, "global"); go("#/bridge/memory"); } }) : null,
+          el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { B.deleteMemory(m.id); draw(); } })
+        ].filter(Boolean)) : null
+      ].filter(Boolean))));
+    }
+    search.addEventListener("input", draw); scopeFilter.addEventListener("change", draw);
+    draw();
+    panel.appendChild(list);
+    body.appendChild(panel);
+  }
+
+  /* ---- AI Router ---- */
+  function bridgeRouter(body) {
+    const r = B.router();
+    body.appendChild(el("p", { class: "dim small-note", text: "Which provider handles each task category. Claude routes execute live (the Neural Link picks the model per category); GPT/Gemini routes await their integrations. Future Workers inherit this table." }));
+    const panel = el("div", { class: "panel" });
+    const table = el("div", { class: "router-table" });
+    table.appendChild(el("div", { class: "rt-head" }, [el("span", { text: "TASK CATEGORY" }), el("span", { text: "PROVIDER" }), el("span", { text: "MODEL" })]));
+    r.routes.forEach(route => {
+      const provSel = el("select", { class: "input" });
+      B.PROVIDERS.forEach(p => { const o = el("option", { value: p, text: p }); if (p === route.provider) o.selected = true; provSel.appendChild(o); });
+      const modelSel = el("select", { class: "input" });
+      B.CLAUDE_MODELS.forEach(m => { const o = el("option", { value: m, text: m }); if (m === route.model) o.selected = true; modelSel.appendChild(o); });
+      const usable = route.provider === "Claude" || route.provider === "Multi-model";
+      modelSel.disabled = !usable;
+      provSel.addEventListener("change", () => { B.setRoute(route.id, { provider: provSel.value }); go("#/bridge/router"); });
+      modelSel.addEventListener("change", () => B.setRoute(route.id, { model: modelSel.value }));
+      table.appendChild(el("div", { class: "rt-row" }, [
+        el("span", { class: "rt-cat", text: route.category }),
+        provSel,
+        el("span", {}, [modelSel, usable ? null : el("span", { class: "rt-flag", text: " awaits integration" })].filter(Boolean))
+      ]));
+    });
+    panel.appendChild(table);
+    body.appendChild(panel);
+  }
+
+  /* ---- Integration Manager ---- */
+  function bridgeIntegrations(body) {
+    if (!B.can("Integrations", "read")) { body.appendChild(permDenied("Integrations")); return; }
+    B.ensureIntegrations();
+    const canManage = B.can("Integrations", "write");
+    body.appendChild(el("p", { class: "dim small-note", text: "Placeholder framework — cards are provisioned but no live APIs connect in Phase Alpha (both specs mandate this). Future credentials plug in here." }));
+    const grid = el("div", { class: "int-grid" });
+    S.state.integrations.forEach(it => {
+      grid.appendChild(el("div", { class: "int-card" }, [
+        el("div", { class: "int-top" }, [
+          el("div", {}, [el("b", { text: it.name }), el("span", { class: "dim small-note", text: " · " + it.group })]),
+          el("span", { class: "int-status st-" + it.status, text: it.status.replace("_", " ") })
+        ]),
+        el("div", { class: "int-meta", text: `last sync: ${it.lastSync ? U.timeAgo(it.lastSync) : "never"} · ${it.logs.length} log(s)` }),
+        canManage ? el("div", { class: "vi-actions" }, [
+          el("button", { class: "btn tiny " + (it.enabled ? "cyan-btn" : ""), text: it.enabled ? "Enabled" : "Enable", onclick: () => { B.toggleIntegration(it.id); go("#/bridge/integrations"); } }),
+          el("button", { class: "btn tiny", text: "Health check", onclick: () => { const s = B.healthCheck(it.id); toast(`${it.name}: ${s} (mock).`, s === "healthy" ? "ok" : "info"); go("#/bridge/integrations"); } }),
+          el("button", { class: "btn tiny", text: "Logs", onclick: () => U.modal({ title: it.name + " — logs", cls: "wide", body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("pre", { class: "output-pre", text: it.logs.join("\n") })); return b; })(), actions: [{ label: "Close", cls: "ghost" }] }) })
+        ]) : el("div", { class: "dim tiny-note", text: "read-only for this role" })
+      ]));
+    });
+    body.appendChild(grid);
+  }
+
+  /* ---- Workflow Registry ---- */
+  function bridgeWorkflows(body) {
+    if (!B.can("Automation", "read")) { body.appendChild(permDenied("Automation")); return; }
+    const canManage = B.can("Automation", "write");
+    if (canManage) {
+      const f = {};
+      const form = el("div", { class: "panel form-panel" });
+      form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⚙ Register a workflow" })]));
+      form.appendChild(field("Name", f, "name", el("input", { class: "input", placeholder: "e.g. Daily shell drop → editor" })));
+      form.appendChild(field("Description", f, "desc", el("input", { class: "input", placeholder: "what it does" })));
+      const wkSel = el("select", { class: "input" });
+      wkSel.appendChild(el("option", { value: "", text: "— no worker —" }));
+      B.workers().forEach(w => wkSel.appendChild(el("option", { value: w.id, text: `${B.WORKER_TYPES[w.type].icon} ${w.name}` })));
+      const trSel = el("select", { class: "input" }); B.WF_TRIGGERS.forEach(t => trSel.appendChild(el("option", { value: t, text: t })));
+      form.appendChild(el("div", { class: "two-col" }, [
+        el("label", { class: "field" }, [el("span", { class: "field-label", text: "Connected worker" }), wkSel]),
+        el("label", { class: "field" }, [el("span", { class: "field-label", text: "Trigger" }), trSel])
+      ]));
+      form.appendChild(el("div", { class: "form-actions" }, [
+        el("button", { class: "btn primary", text: "Register", onclick: () => {
+          if (!f.name.value.trim()) { toast("Name required.", "err"); return; }
+          B.addWorkflow({ name: f.name.value, description: f.desc.value, workerId: wkSel.value || null, trigger: trSel.value });
+          toast("Workflow registered.", "ok"); go("#/bridge/workflows");
+        } })
+      ]));
+      body.appendChild(form);
+    }
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Workflow registry" }), el("span", { class: "dim small-note", text: "execution simulated — Make.com / n8n connect later" })]));
+    const list = el("div", {});
+    if (!S.state.workflows.length) list.appendChild(el("p", { class: "empty-note", text: "No workflows registered." }));
+    S.state.workflows.forEach(wf => {
+      const w = B.worker(wf.workerId);
+      list.appendChild(el("div", { class: "wf-row" }, [
+        el("div", {}, [
+          el("b", { text: wf.name }),
+          el("span", { class: "wf-badge st-" + wf.status, text: wf.status }),
+          el("div", { class: "dim small-note", text: `${wf.trigger}${w ? " · " + w.name : ""}${wf.description ? " · " + wf.description : ""} · ${wf.runs} run(s) · ${B.successRate(wf)}% success` })
+        ]),
+        canManage ? el("div", { class: "vi-actions" }, [
+          el("button", { class: "btn tiny primary", text: "▶ Run (sim)", onclick: () => { const ok = B.runWorkflow(wf.id); toast(`"${wf.name}" ${ok ? "completed" : "failed"} (simulated).`, ok ? "ok" : "err"); go("#/bridge/workflows"); } }),
+          el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { B.deleteWorkflow(wf.id); go("#/bridge/workflows"); } })
+        ]) : null
+      ].filter(Boolean)));
+    });
+    panel.appendChild(list);
+    body.appendChild(panel);
+  }
+
+  /* ---- Permission Engine ---- */
+  function bridgePermissions(body) {
+    body.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🔑 Permission engine" })]),
+      el("p", { class: "dim small-note", text: "Role-based access control. Switch the active role to see enforcement across the Bridge (Workers, Revenue, Integrations, Automation, Memory gate live)." }),
+      (() => {
+        const sel = el("select", { class: "input", style: "max-width:260px;margin-bottom:14px" });
+        B.ROLES.forEach(r => { const o = el("option", { value: r, text: r }); if (r === B.activeRole()) o.selected = true; sel.appendChild(o); });
+        sel.addEventListener("change", () => { B.setRole(sel.value); toast(`Active role: ${sel.value}.`, "info"); go("#/bridge/permissions"); });
+        return el("label", { class: "field" }, [el("span", { class: "field-label", text: "Active role" }), sel]);
+      })(),
+      (() => {
+        const table = el("div", { class: "perm-table" });
+        const head = el("div", { class: "perm-row perm-head" }, [el("span", { text: "ROLE" })].concat(B.RESOURCES.map(r => el("span", { text: r }))));
+        table.appendChild(head);
+        B.ROLES.forEach(role => {
+          const row = el("div", { class: "perm-row" + (role === B.activeRole() ? " active" : "") }, [el("span", { class: "perm-role", text: role })]);
+          B.RESOURCES.forEach(res => {
+            const a = B.access(res, role);
+            row.appendChild(el("span", { class: "perm-cell a-" + a, text: a === "full" ? "●" : a === "read" ? "◐" : "○" }));
+          });
+          table.appendChild(row);
+        });
+        return table;
+      })(),
+      el("p", { class: "dim tiny-note", text: "● full · ◐ read-only · ○ no access" })
+    ]));
+  }
+
+  /* ---- Internal API Layer ---- */
+  function bridgeApi(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Standardized internal endpoints. Future modules call these interfaces instead of reaching into each other's data. Try one:" }));
+    const out = el("pre", { class: "output-pre", text: "// response appears here" });
+    const runners = {
+      "GET /workers": () => B.api.workers.list(),
+      "GET /tasks": () => B.api.tasks.list(),
+      "GET /memory": () => B.api.memory.search(""),
+      "GET /events": () => B.api.events.list(),
+      "GET /analytics/summary": () => B.api.analytics.summary(),
+      "GET /vault": () => B.api.vault.list(),
+      "GET /workflows": () => B.api.workflows.list()
+    };
+    const btns = el("div", { class: "api-btns" });
+    Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
+      class: "btn small", text: ep, onclick: () => {
+        const res = runners[ep]();
+        const preview = Array.isArray(res) ? { endpoint: ep, count: res.length, sample: res.slice(0, 3) } : res;
+        out.textContent = JSON.stringify(preview, (k, v) => k === "raw" ? undefined : v, 2);
+      }
+    })));
+    body.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🛰 Internal API playground" })]),
+      btns, out
+    ]));
+  }
+
+  /* ---- Developer Console ---- */
+  function bridgeDev(body) {
+    const st = S.state;
+    const sections = [
+      ["Workers", B.workers().map(w => ({ id: w.id, type: w.type, name: w.name }))],
+      ["Events (last 10)", B.events().slice(0, 10)],
+      ["Shared memory", st.sharedMemory],
+      ["Workflows", st.workflows],
+      ["Integrations", st.integrations.map(i => ({ name: i.name, enabled: i.enabled, status: i.status }))],
+      ["AI Router", B.router().routes],
+      ["API call log", st.apiLog.slice(-10)],
+      ["Counts", { clones: st.clones.length, ghosts: st.ghosts.length, shells: st.shells.length, executors: st.executors.length, products: st.products.length, events: st.events.length, memory: st.sharedMemory.length }]
+    ];
+    body.appendChild(el("p", { class: "dim small-note", text: "Raw system inspection — debugging and future expansion only." }));
+    sections.forEach(([title, data]) => {
+      body.appendChild(el("details", { class: "asset-fold dev-fold" }, [
+        el("summary", { text: `${title} (${Array.isArray(data) ? data.length : Object.keys(data).length})` }),
+        el("pre", { class: "output-pre", text: JSON.stringify(data, null, 2) })
+      ]));
+    });
+  }
+
+  function permDenied(resource) {
+    return el("div", { class: "panel perm-denied" }, [
+      el("div", { class: "hero-glyph", text: "🔒" }),
+      el("h2", { text: "Access restricted" }),
+      el("p", { class: "dim", text: `The active role (${B.activeRole()}) has no access to ${resource}. Switch to Owner or Administrator in the Permissions tab.` }),
+      el("button", { class: "btn", text: "Open Permissions", onclick: () => go("#/bridge/permissions") })
+    ]);
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -2453,6 +2871,7 @@
 
   /* =============================== boot =============================== */
   function boot() {
+    B.boot(); /* Phase Alpha: bring the Bridge online, provision placeholders */
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();
