@@ -879,3 +879,56 @@ select.input { appearance: auto; }
   .head-actions { width: 100%; }
   .head-actions .btn { flex: 1; }
 }
+
+/* ============================================================ *
+ * PHASE H0 — Intelligence Provider Layer
+ * ============================================================ */
+.prov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.prov-card { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; transition: border-color .18s, box-shadow .18s; }
+.prov-card:hover { border-color: rgba(245,197,66,.45); box-shadow: 0 0 18px rgba(245,197,66,.07); }
+.prov-card.off { opacity: .62; }
+.prov-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.prov-name { font: 700 15px/1.3 var(--mono); letter-spacing: .5px; }
+.prov-status { font: 700 9px/1.4 var(--mono); letter-spacing: .5px; padding: 3px 7px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--ink-muted); text-transform: uppercase; }
+.prov-status.st-on { color: var(--good); border-color: rgba(12,163,12,.4); }
+.prov-health { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+
+.health-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; background: #555; }
+.health-dot.h-online, .health-dot.h-healthy { background: var(--good); box-shadow: 0 0 8px rgba(12,163,12,.5); }
+.health-dot.h-auth_required { background: var(--accent-dim); box-shadow: 0 0 8px rgba(201,133,0,.45); }
+.health-dot.h-maintenance { background: var(--cyan); }
+.health-dot.h-rate_limited { background: var(--red); }
+.health-dot.h-offline { background: #4a4a55; }
+
+.cap-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.cap-chip { font: 600 10px/1.5 var(--mono); padding: 2px 7px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--ink-muted); }
+.cap-chip.on { color: var(--good); border-color: rgba(12,163,12,.35); }
+.cap-chip.off { opacity: .55; }
+
+.flow-diagram { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0 12px; }
+.flow-node { font: 600 12px/1.4 var(--mono); letter-spacing: .5px; padding: 7px 22px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel); }
+.flow-node.hot { color: var(--accent); border-color: rgba(245,197,66,.5); box-shadow: 0 0 14px rgba(245,197,66,.12); }
+.flow-arrow { color: var(--ink-muted); font-size: 13px; line-height: 1.1; }
+
+.cap-table { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; min-width: 760px; }
+.cap-table > div { background: var(--surface); padding: 8px 6px; text-align: center; font-size: 12px; }
+.cap-head { font: 700 9.5px/1.5 var(--mono); letter-spacing: .5px; color: var(--ink-muted); text-transform: uppercase; }
+.cap-prov { font: 700 12px/1.5 var(--mono); text-align: left !important; padding-left: 12px !important; }
+.cap-cell.on { color: var(--good); }
+.cap-cell.off { color: var(--ink-muted); opacity: .5; }
+
+.pa-table { min-width: 860px; }
+.pa-row { display: grid; grid-template-columns: 130px 80px 70px 70px 100px 90px 100px 90px 1fr; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; align-items: center; }
+.pa-row:last-child { border-bottom: none; }
+.pa-head { font: 700 9.5px/1.5 var(--mono); letter-spacing: .5px; color: var(--ink-muted); }
+.pa-name { font: 700 12px/1.5 var(--mono); }
+.pa-err { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.hm-row { display: flex; align-items: center; gap: 12px; padding: 11px 6px; border-bottom: 1px solid var(--line); }
+.hm-row:last-child { border-bottom: none; }
+.hm-name { font: 700 13px/1.4 var(--mono); min-width: 130px; }
+.hm-state { font-size: 12.5px; min-width: 180px; }
+.hm-row .btn { margin-left: auto; }
+
+.reg-row { padding: 12px 6px; border-bottom: 1px solid var(--line); }
+.reg-row:last-child { border-bottom: none; }

@@ -489,8 +489,13 @@ PRISM.engine = (function () {
     return parts.filter(Boolean).join("\n");
   }
 
-  /* Low-level Neural Link call — shared by clone tasks and Product Ghosts. */
-  async function complete(system, prompt, settings) {
+  /* Low-level Neural Link call — shared by clone tasks and Product Ghosts.
+   * PHASE H0: delegates to the Provider Manager, so no module talks to an
+   * AI model directly. The manager calls back with __direct set. */
+  async function complete(system, prompt, settings, meta) {
+    if (window.PRISM && PRISM.providers && !(settings && settings.__direct)) {
+      return PRISM.providers.complete(system, prompt, settings, meta);
+    }
     const res = await fetch(API_URL, {
       method: "POST",
       headers: {
@@ -535,8 +540,17 @@ PRISM.engine = (function () {
     return settings;
   }
 
+  /* Which AI Router category a task type belongs to. */
+  function categoryFor(taskType) {
+    return /tweet|thread|caption|email|copy|content|dm/i.test(taskType) ? "Copywriting / content"
+      : /offer|price|funnel|upsell/i.test(taskType) ? "Reasoning / strategy"
+      : /market|position|brief/i.test(taskType) ? "Research"
+      : "Copywriting / content";
+  }
+
   async function generateNeural(clone, task, dna, settings) {
-    const text = await complete(systemPrompt(clone, dna), taskPrompt(task), settings);
+    const text = await complete(systemPrompt(clone, dna), taskPrompt(task), settings,
+      { workerId: clone.id, workerName: clone.name, provider: clone.provider || "auto", category: categoryFor(task.type) });
     const ctaMatch = text.match(/^CTA:\s*(.+)$/m);
     return {
       engine: "neural",
@@ -549,24 +563,38 @@ PRISM.engine = (function () {
     };
   }
 
-  /* Unified entry point: tries Neural Link when enabled, falls back to local. */
+  /* Unified entry point. PHASE H0: the Provider Manager decides which
+   * provider executes (per-worker Intelligence Provider field, Auto = the
+   * AI Router); unavailable providers fail over to the Local Cortex. */
   async function generate(clone, task, dna, settings) {
-    if (settings && settings.engine === "neural" && settings.apiKey) {
+    const category = categoryFor(task.type);
+    const P = window.PRISM && PRISM.providers ? PRISM.providers : null;
+    const sel = P ? P.resolve(clone.provider || "auto", category)
+      : { id: (settings && settings.engine === "neural" && settings.apiKey) ? "claude" : "local", requested: "auto", switched: false };
+    if (sel.id === "claude") {
       try {
-        const category = /tweet|thread|caption|email|copy|content|dm/i.test(task.type) ? "Copywriting / content"
-          : /offer|price|funnel|upsell/i.test(task.type) ? "Reasoning / strategy"
-          : /market|position|brief/i.test(task.type) ? "Research"
-          : "Copywriting / content";
         return await generateNeural(clone, task, dna, routedSettings(settings, category));
       } catch (err) {
         const local = generateLocal(clone, task, dna);
         local.notes.unshift(`Neural Link unavailable (${err.message}) — Local Cortex answered instead.`);
         local.text = renderText(clone, task, local, local.cta, local.notes);
         local.fallback = true;
+        if (P) P.recordLocal({ workerId: clone.id, workerName: clone.name, chars: local.text.length });
         return local;
       }
     }
-    return generateLocal(clone, task, dna);
+    const local = generateLocal(clone, task, dna);
+    if (sel.switched) {
+      local.notes.unshift(`Provider "${P.name(sel.requested)}" unavailable (${sel.reason}) — Local Cortex executed instead.`);
+      local.text = renderText(clone, task, local, local.cta, local.notes);
+      local.fallback = true;
+    }
+    if (P) P.recordLocal({
+      workerId: clone.id, workerName: clone.name,
+      requested: sel.requested, switched: sel.switched, reason: sel.reason,
+      chars: local.text.length
+    });
+    return local;
   }
 
   /* ---------------- performance simulation ---------------- */
@@ -717,7 +745,7 @@ PRISM.engine = (function () {
   }
 
   return {
-    MODELS, generate, generateLocal, systemPrompt, complete,
+    MODELS, generate, generateLocal, generateNeural, systemPrompt, complete, categoryFor,
     recordOutcome, weeklySeries, combinedWeekly,
     effectiveStatus, runAudit, applyUpgrade, dateKey, rng, hashStr
   };

@@ -40,6 +40,7 @@ PRISM.bridge = (function () {
   function normClone(c) {
     return {
       id: c.id, type: "clone", name: c.name,
+      provider: c.provider || "auto",
       mission: c.target || c.role,
       knowledge: c.skills || "",
       memory: c.memory || [],
@@ -56,6 +57,7 @@ PRISM.bridge = (function () {
     const G = PRISM.ghosts;
     return {
       id: g.id, type: "ghost", name: g.name,
+      provider: g.provider || "auto",
       mission: `${g.focus} · ${g.niche} · ${G.money(g.targetIncome)}/day`,
       knowledge: (g.skills || []).join(", "),
       memory: g.memory || [],
@@ -72,6 +74,7 @@ PRISM.bridge = (function () {
     const SH = PRISM.shells;
     return {
       id: s.id, type: "shell", name: s.name,
+      provider: s.provider || "auto",
       mission: `${s.niche} · ${s.persona} · ${s.offerSource}`,
       knowledge: s.platforms.join(", "),
       memory: s.memory || [],
@@ -87,6 +90,7 @@ PRISM.bridge = (function () {
   function normExecutor(x) {
     return {
       id: x.id, type: "executor", name: x.name,
+      provider: "human",
       mission: `${x.role} · ${x.permission}`,
       knowledge: x.role,
       memory: x.memory || [],
@@ -120,7 +124,8 @@ PRISM.bridge = (function () {
     ghost: "product", shell: "content", matrix: "human", queue: "distribution",
     audit: "evolution", upgrade: "evolution", dna: "evolution", repeat: "automation",
     share: "memory", workflow: "automation", integration: "system",
-    memory: "memory", api: "system", permission: "system", bridge: "system"
+    memory: "memory", api: "system", permission: "system", bridge: "system",
+    provider: "intelligence"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 
@@ -414,9 +419,24 @@ PRISM.bridge = (function () {
     },
     workflows: {
       list: () => { const r = S().state.workflows; logApi("GET /workflows", r.length); return r; }
+    },
+    /* Phase H0 — the Intelligence Provider Layer speaks Bridge API too */
+    providers: {
+      list: () => {
+        const P = window.PRISM && PRISM.providers ? PRISM.providers : null;
+        const r = P ? P.list().map(p => ({ id: p.id, name: p.name, version: p.version, priority: p.priority, enabled: p.enabled, health: P.healthOf(p.id) })) : [];
+        logApi("GET /providers", r.length);
+        return r;
+      },
+      analytics: () => {
+        const P = window.PRISM && PRISM.providers ? PRISM.providers : null;
+        const r = P ? P.list().map(p => P.analyticsOf(p.id)) : [];
+        logApi("GET /providers/analytics", r.length);
+        return r;
+      }
     }
   };
-  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows"];
+  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics"];
 
   /* ================================================================== *
    * MODULE 2 — Bridge dispatch (single routing choke point)

@@ -240,6 +240,7 @@ PRISM.shells = (function () {
       offerSource: input.offerSource || OFFER_SOURCES[0],
       offerTargetProductId: input.offerTargetProductId || null,
       leadGenCloneId: input.leadGenCloneId || null,
+      provider: input.provider || "auto",
       referenceContent: (input.referenceContent || "").trim().slice(0, 500),
       postsPerDay: Math.min(5, Math.max(1, input.postsPerDay || 2)),
       autoUpload: !!input.autoUpload,
@@ -506,7 +507,11 @@ PRISM.shells = (function () {
   async function builderAI(promptText) {
     const st = S().state;
     const niche = detectNiche(promptText);
-    if (st.settings.engine === "neural" && st.settings.apiKey) {
+    /* Phase H0: provider resolution runs through the Provider Manager */
+    const P = window.PRISM && PRISM.providers ? PRISM.providers : null;
+    const sel = P ? P.resolve("auto", "Reasoning / strategy")
+      : { id: (st.settings.engine === "neural" && st.settings.apiKey) ? "claude" : "local", switched: false };
+    if (sel.id === "claude") {
       try {
         const dna = st.dna || {};
         const sys = [
@@ -514,11 +519,14 @@ PRISM.shells = (function () {
           dna.decision ? `Decision Framework (non-negotiable):\n${dna.decision}` : "",
           `Output plain text with exactly these section headers: === ACCOUNT NAME IDEAS ===, === BIO ===, === 10-DAY CONTENT PLAN ===, === POST SCHEDULE ===, === AFFILIATE / OFFER STRATEGY ===, === 3 HOOK STYLE VARIATIONS ===.`
         ].filter(Boolean).join("\n");
-        const text = await E().complete(sys, `Mission: ${promptText}\nDesign the complete faceless brand launch plan now.`, st.settings);
+        const text = await E().complete(sys, `Mission: ${promptText}\nDesign the complete faceless brand launch plan now.`, st.settings,
+          { workerName: "Shell Builder AI", provider: "auto", category: "Reasoning / strategy" });
         if (/=== ACCOUNT NAME IDEAS ===/.test(text)) return { text, engine: "neural", niche };
       } catch (e) { /* fall through */ }
     }
-    return { text: builderLocal(promptText), engine: "local", niche };
+    const text = builderLocal(promptText);
+    if (P) P.recordLocal({ workerName: "Shell Builder AI", requested: sel.requested, switched: sel.switched, reason: sel.reason, chars: text.length });
+    return { text, engine: "local", niche };
   }
 
   function deleteShell(id) {

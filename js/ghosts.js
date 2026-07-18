@@ -181,7 +181,11 @@ PRISM.ghosts = (function () {
 
   async function buildAssets(ghost, product, r) {
     const st = S().state;
-    if (st.settings.engine === "neural" && st.settings.apiKey) {
+    /* Phase H0: the Provider Manager decides which provider builds assets */
+    const P = window.PRISM && PRISM.providers ? PRISM.providers : null;
+    const sel = P ? P.resolve(ghost.provider || "auto", "Copywriting / content")
+      : { id: (st.settings.engine === "neural" && st.settings.apiKey) ? "claude" : "local", switched: false };
+    if (sel.id === "claude") {
       try {
         const dna = st.dna || {};
         const sys = [
@@ -198,7 +202,8 @@ PRISM.ghosts = (function () {
           product.urgencyHeadline ? `Urgency headline to feature: ${product.urgencyHeadline}` : "",
           `Write: (1) a complete sales page, (2) a 6-tweet launch thread, (3) a 3-touch DM flow.`
         ].filter(Boolean).join("\n");
-        const text = await E().complete(sys, prompt, st.settings);
+        const text = await E().complete(sys, prompt, st.settings,
+          { workerId: ghost.id, workerName: ghost.name, provider: ghost.provider || "auto", category: "Copywriting / content" });
         const cut = (a, b) => {
           const i = text.indexOf(a);
           if (i < 0) return "";
@@ -215,7 +220,13 @@ PRISM.ghosts = (function () {
       } catch (e) { /* fall through to local */ }
     }
     product.engine = "local";
-    return buildAssetsLocal(ghost, product, r);
+    const assets = buildAssetsLocal(ghost, product, r);
+    if (P) P.recordLocal({
+      workerId: ghost.id, workerName: ghost.name,
+      requested: sel.requested, switched: sel.switched, reason: sel.reason,
+      chars: (assets.salesPage || "").length + (assets.thread || "").length
+    });
+    return assets;
   }
 
   /* ------------------------------------------------------------------ *
@@ -275,6 +286,7 @@ PRISM.ghosts = (function () {
       productType: input.productType,
       platform: input.platform,
       tone: input.tone,
+      provider: input.provider || "auto",
       skills: GHOST_SKILLS.slice(),
       createdAt: now(),
       generation: input.generation || 1,

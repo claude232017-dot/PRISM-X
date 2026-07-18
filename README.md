@@ -182,6 +182,41 @@ Bus, Shared Memory Engine), and folded V2's "future-proofing" into the
 architecture note. Only Integrations and workflow execution are placeholders,
 per both specs; everything else is live infrastructure.*
 
+## Phase H0 — Intelligence Provider Layer (`#/intelligence`)
+
+PRISM-X as an Intelligence Operating System: no Worker, Ghost, Shell or future
+module talks to an AI model directly — `engine.complete()` delegates every
+request to the **Provider Manager** (Worker → Bridge → Provider Manager →
+provider → Bridge → Worker), and Workers never know which provider answered.
+
+- **Intelligence Center** — provider cards for Claude, OpenAI, Gemini, Hermes
+  Agent, Ollama, Local Models and Future Providers: status, version, health,
+  connection state, capabilities, last activity, Configure / Test Connection
+  (placeholder) / Enable toggle. No real third-party APIs — by design.
+- **Provider Manager** — resolves each request from the Worker's
+  **Intelligence Provider** field (Auto default; Auto follows the AI Router's
+  category route). Unavailable providers fail over to the Local Cortex with a
+  `Provider switched` event; Claude and the Local Cortex execute for real.
+- **Universal Provider Interface** — every adapter exposes the same 8
+  functions (generateText · chat · analyze · reason · summarize · executeTask
+  · capabilities · healthCheck); future providers must implement it.
+- **Capability Registry** — ✔/✖ matrix (Reasoning, Writing, Coding, Analysis,
+  Browser, Terminal, Tool Use, MCP, Filesystem) for later intelligent routing.
+- **Provider Analytics** — requests, success/failure rate, response time,
+  token & cost estimates, last error. Live counters for Claude + Local Cortex;
+  unconnected providers hold placeholder zeros.
+- **Health Monitor** — Online / Offline / Maintenance / Authentication
+  Required / Rate Limited / Healthy (placeholder logic until live APIs).
+- **Event Logging** — every provider interaction (selected, started,
+  completed, failed, timeout, switched, health changed) lands in the Phase
+  Alpha Event Bus under the `intelligence` category.
+- **Provider Registry** — name, description, capabilities, config schema,
+  required credentials, version, priority; `registerProvider()` (or the
+  Registry tab form) is all a new provider needs — zero Worker changes.
+- **Future Integration Framework** — provisioned placeholders for API keys,
+  OAuth, webhooks, authentication, tool permissions, capability detection and
+  version updates.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -216,4 +251,7 @@ README there for how to activate more).
 
 Vanilla HTML/CSS/JS — zero dependencies. `js/data.js` (roles, tones, templates),
 `js/engine.js` (generation + audit + simulation), `js/store.js` (state +
-persistence), `js/ui.js` (components, charts, sound FX), `js/app.js` (views).
+persistence), `js/ui.js` (components, charts, sound FX), `js/ghosts.js`
+(Product Ghosts), `js/shells.js` (Outer Shells), `js/matrix.js` (Matrix Merge),
+`js/bridge.js` (Phase Alpha Bridge), `js/providers.js` (Phase H0 Intelligence
+Provider Layer), `js/app.js` (views).

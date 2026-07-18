@@ -41,7 +41,11 @@ PRISM.store = (function () {
     systemMemory: [],
     lastAudit: null,
     pendingUpgrade: null,
-    lastReport: null
+    lastReport: null,
+    /* Phase H0 — Intelligence Provider Layer */
+    providers: [],
+    customProviders: [],
+    providerLayerReady: false
   });
 
   let state = load();
@@ -82,6 +86,7 @@ PRISM.store = (function () {
       mindset: input.mindset || "",
       skills: input.skills || "",
       learningSource: input.learningSource || "Use GOD CORE DNA",
+      provider: input.provider || "auto",
       createdAt: Date.now(),
       generation: input.generation || 1,
       brainVersion: state.godBrainVersion,
@@ -114,6 +119,7 @@ PRISM.store = (function () {
       role: src.role, tone: src.tone, target: src.target,
       mindset: src.mindset, skills: src.skills,
       learningSource: src.learningSource,
+      provider: src.provider,
       generation: (src.generation || 1) + 1,
       memory: src.memory
     });

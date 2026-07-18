@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -26,6 +26,7 @@
     else if (view === "shell" && parts[1]) renderShellView(main, parts[1]);
     else if (view === "matrix") renderMatrix(main);
     else if (view === "bridge") renderBridge(main, parts[1]);
+    else if (view === "intelligence") renderIntelligence(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
     else renderDashboard(main);
@@ -432,6 +433,8 @@
     D.LEARNING_SOURCES.forEach(s => srcSel.appendChild(el("option", { value: s, text: s })));
     form.appendChild(field("Learning source", f, "learningSource", srcSel));
 
+    form.appendChild(providerField(f));
+
     form.appendChild(el("div", { class: "form-actions" }, [
       el("button", { class: "btn ghost", text: "Cancel", onclick: () => go("#/dashboard") }),
       el("button", {
@@ -442,7 +445,7 @@
           const clone = S.addClone({
             name: name.toUpperCase(), role: f.role.value, target: f.target.value.trim(),
             tone: f.tone.value, mindset: f.mindset.value.trim(), skills: f.skills.value.trim(),
-            learningSource: f.learningSource.value
+            learningSource: f.learningSource.value, provider: f.provider.value
           });
           U.sfx("spawn"); U.evolveFlash();
           toast(`"${clone.name}" is online — ready for tasks.`, "ok");
@@ -458,6 +461,18 @@
   function field(label, refs, key, input) {
     refs[key] = input;
     return el("label", { class: "field" }, [el("span", { class: "field-label", text: label }), input]);
+  }
+
+  /* Phase H0 (Module 4): every AI Worker carries an Intelligence Provider field. */
+  function providerField(refs) {
+    const sel = el("select", { class: "input" });
+    P.PROVIDER_OPTIONS.forEach(([v, l]) => sel.appendChild(el("option", { value: v, text: l })));
+    refs.provider = sel;
+    return el("label", { class: "field" }, [
+      el("span", { class: "field-label", text: "Intelligence Provider" }),
+      sel,
+      el("span", { class: "dim tiny-note", text: P.FIELD_DESC })
+    ]);
   }
 
   /* =============================== clone console =============================== */
@@ -1114,6 +1129,8 @@
     Object.entries(D.TONES).forEach(([t, meta]) => toneSel.appendChild(el("option", { value: t, text: `${t} — ${meta.desc}` })));
     form.appendChild(field("Tone", f, "tone", toneSel));
 
+    form.appendChild(providerField(f));
+
     if (forgePrefill) {
       if (forgePrefill.niche) f.niche.value = forgePrefill.niche;
       if (forgePrefill.type) f.type.value = forgePrefill.type;
@@ -1138,7 +1155,8 @@
           name, template: G.TEMPLATES.some(t => t.name === name) ? name.toLowerCase() : "custom",
           focus: f._focus || f.type.value,
           niche: f.niche.value, targetIncome: f.target.value,
-          productType: f.type.value, platform: f.platform.value, tone: f.tone.value
+          productType: f.type.value, platform: f.platform.value, tone: f.tone.value,
+          provider: f.provider.value
         });
         launchBtn.textContent = "◈ BUILDING ASSETS…";
         const product = await G.runCycle(ghost);
@@ -1532,6 +1550,8 @@
     const ppd = el("input", { class: "input", type: "number", min: 1, max: 5, value: 2 });
     form.appendChild(field("Posts per day (1–5)", f, "ppd", ppd));
 
+    form.appendChild(providerField(f));
+
     const autoCb = el("input", { type: "checkbox" });
     form.appendChild(el("label", { class: "check-row" }, [autoCb, el("span", { text: "Auto-Upload — queue each day's X post into the Broadcast Queue automatically (TikTok/IG/Shorts pending future API integrations)" })]));
 
@@ -1563,7 +1583,8 @@
         leadGenCloneId: f.offer.value === "Drive Traffic to Lead Gen Clone" ? cloneSel.value || null : null,
         referenceContent: f.ref.value,
         postsPerDay: parseInt(ppd.value, 10) || 2,
-        autoUpload: autoCb.checked
+        autoUpload: autoCb.checked,
+        provider: f.provider.value
       });
       SH.process(); /* day one drop */
       U.sfx("spawn"); U.evolveFlash();
@@ -2603,7 +2624,9 @@
       "GET /events": () => B.api.events.list(),
       "GET /analytics/summary": () => B.api.analytics.summary(),
       "GET /vault": () => B.api.vault.list(),
-      "GET /workflows": () => B.api.workflows.list()
+      "GET /workflows": () => B.api.workflows.list(),
+      "GET /providers": () => B.api.providers.list(),
+      "GET /providers/analytics": () => B.api.providers.analytics()
     };
     const btns = el("div", { class: "api-btns" });
     Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
@@ -2648,6 +2671,279 @@
       el("p", { class: "dim", text: `The active role (${B.activeRole()}) has no access to ${resource}. Switch to Owner or Administrator in the Permissions tab.` }),
       el("button", { class: "btn", text: "Open Permissions", onclick: () => go("#/bridge/permissions") })
     ]);
+  }
+
+  /* =============================== intelligence center (PHASE H0) =============================== */
+  const INT_TABS = [
+    ["providers", "🧠 Providers"],
+    ["manager", "🔀 Manager"],
+    ["capabilities", "⚡ Capabilities"],
+    ["analytics", "📊 Analytics"],
+    ["health", "🩺 Health"],
+    ["registry", "🗂 Registry"],
+    ["future", "🔌 Future"]
+  ];
+
+  function renderIntelligence(main, tab) {
+    tab = tab || "providers";
+    P.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `INTELLIGENCE CENTER <span class="dim">// phase h0 — provider layer</span>` }),
+        el("p", { class: "page-sub", text: "Every intelligence request flows Worker → Bridge → Provider Manager → provider. Workers never know which provider answered. No live third-party APIs in Phase H0 — Claude (Neural Link) and the Local Cortex execute; everything else is provisioned." })
+      ])
+    ]));
+
+    const tabs = el("div", { class: "bridge-tabs" });
+    INT_TABS.forEach(([k, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k === tab ? " on" : ""), href: "#/intelligence/" + k, text: label
+    })));
+    wrap.appendChild(tabs);
+
+    const body = el("div", { class: "bridge-body" });
+    ({
+      providers: intProviders, manager: intManager, capabilities: intCapabilities,
+      analytics: intAnalytics, health: intHealth, registry: intRegistry, future: intFuture
+    }[tab] || intProviders)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  function healthDot(h) {
+    return el("span", { class: "health-dot h-" + h, title: P.HEALTH_LABEL[h] || h });
+  }
+  function connState(p) {
+    if (!p.enabled) return "disconnected";
+    if (p.id === "local") return "embedded — always on";
+    if (p.id === "claude") return S.state.settings.apiKey ? "connected via Neural Link" : "awaiting API key";
+    return "provisioned — awaiting live API";
+  }
+
+  /* ---- MODULE 1 — provider cards ---- */
+  function intProviders(body) {
+    const grid = el("div", { class: "prov-grid" });
+    P.list().forEach(p => {
+      const h = P.healthOf(p.id);
+      const caps = Object.entries(p.capabilities || {});
+      grid.appendChild(el("div", { class: "prov-card" + (p.enabled ? "" : " off") }, [
+        el("div", { class: "prov-top" }, [
+          el("div", {}, [
+            el("b", { class: "prov-name", text: p.name }),
+            el("span", { class: "dim small-note", text: " · v" + p.version })
+          ]),
+          el("span", { class: "prov-status " + (p.enabled ? "st-on" : "st-off"), text: p.enabled ? "enabled" : "disabled" })
+        ]),
+        el("div", { class: "prov-health" }, [
+          healthDot(h),
+          el("span", { text: P.HEALTH_LABEL[h] }),
+          el("span", { class: "dim small-note", text: " · " + connState(p) })
+        ]),
+        el("p", { class: "dim small-note", text: p.description }),
+        caps.length ? el("div", { class: "cap-row" }, caps.slice(0, 6).map(([c, on]) =>
+          el("span", { class: "cap-chip " + (on ? "on" : "off"), text: (on ? "✔ " : "✖ ") + c }))) : null,
+        el("div", { class: "int-meta", text: `last activity: ${p.lastActivity ? timeAgo(p.lastActivity) : "never"} · ${p.analytics.requests} request(s)${p.config && Object.keys(p.config).some(k => p.config[k]) ? " · credentials stored" : ""}` }),
+        el("div", { class: "vi-actions" }, [
+          el("button", { class: "btn tiny " + (p.enabled ? "cyan-btn" : ""), text: p.enabled ? "Enabled" : "Enable", onclick: () => { P.toggle(p.id); go("#/intelligence"); } }),
+          el("button", { class: "btn tiny", text: "Configure", onclick: () => intConfigureModal(p) }),
+          el("button", { class: "btn tiny", text: "Test connection", onclick: () => {
+            const s2 = P.testConnection(p.id);
+            toast(`${p.name}: ${P.HEALTH_LABEL[s2]} (placeholder test).`, s2 === "healthy" || s2 === "online" ? "ok" : "info");
+            go("#/intelligence");
+          } })
+        ])
+      ].filter(Boolean)));
+    });
+    body.appendChild(grid);
+  }
+
+  function intConfigureModal(p) {
+    const schema = (p.configSchema && p.configSchema.length) ? p.configSchema : [{ key: "apiKey", label: "API Key", type: "password" }];
+    const inputs = {};
+    const b = el("div", { class: "modal-body" }, [
+      el("p", { class: "dim small-note", text: `Future credentials for ${p.name}. Stored locally only — nothing is transmitted in Phase H0.` })
+    ]);
+    schema.forEach(fld => {
+      const inp = el("input", { class: "input", type: fld.type === "password" ? "password" : "text", placeholder: fld.label });
+      inp.value = (p.config && p.config[fld.key]) || "";
+      inputs[fld.key] = inp;
+      b.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: fld.label }), inp]));
+    });
+    U.modal({
+      title: "⚙ Configure " + p.name, body: b, actions: [
+        { label: "Save configuration", cls: "primary", onClick: () => {
+          const cfg = {};
+          Object.keys(inputs).forEach(k => { cfg[k] = inputs[k].value.trim(); });
+          P.configure(p.id, cfg);
+          toast(`${p.name} configuration stored.`, "ok");
+          go("#/intelligence");
+        } },
+        { label: "Cancel", cls: "ghost" }
+      ]
+    });
+  }
+
+  /* ---- MODULE 2 — the Provider Manager funnel ---- */
+  function intManager(body) {
+    const flowPanel = el("div", { class: "panel" });
+    flowPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🔀 Provider Manager — the single funnel" })]));
+    const flow = el("div", { class: "flow-diagram" });
+    ["Worker", "PRISM-X Bridge", "Provider Manager", "Selected Provider", "Provider Response", "Bridge", "Worker"].forEach((n, i, arr) => {
+      flow.appendChild(el("div", { class: "flow-node" + (n === "Provider Manager" ? " hot" : ""), text: n }));
+      if (i < arr.length - 1) flow.appendChild(el("div", { class: "flow-arrow", text: "↓" }));
+    });
+    flowPanel.appendChild(flow);
+    flowPanel.appendChild(el("p", { class: "dim small-note", text: "No Worker, Ghost, Shell or future module talks to an AI model directly — engine.complete() delegates every request here, and Workers never know which provider answered. Unavailable providers fail over to the Local Cortex with the switch logged." }));
+    body.appendChild(flowPanel);
+
+    /* live resolution preview per AI worker */
+    const ws = B.workers().filter(w => w.type !== "executor").slice(0, 14);
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Live routing — who executes for whom" })]));
+    const table = el("div", { class: "router-table" });
+    table.appendChild(el("div", { class: "rt-head" }, [el("span", { text: "WORKER" }), el("span", { text: "PROVIDER FIELD" }), el("span", { text: "EXECUTES VIA" })]));
+    ws.forEach(w => {
+      const sel = P.resolve(w.provider || "auto", "Copywriting / content");
+      table.appendChild(el("div", { class: "rt-row" }, [
+        el("span", { class: "rt-cat", text: `${B.WORKER_TYPES[w.type].icon} ${w.name}` }),
+        el("span", { text: w.provider || "auto" }),
+        el("span", {}, [
+          el("span", { text: P.name(sel.id) }),
+          sel.switched ? el("span", { class: "rt-flag", text: ` (requested ${P.name(sel.requested)} — ${sel.reason})` }) : null
+        ].filter(Boolean))
+      ]));
+    });
+    if (!ws.length) panel.appendChild(el("p", { class: "empty-note", text: "No AI workers yet — forge a clone, ghost or shell." }));
+    else panel.appendChild(table);
+    body.appendChild(panel);
+
+    /* MODULE 8 — recent provider events */
+    const evPanel = el("div", { class: "panel" });
+    evPanel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "📡 Provider events" }),
+      el("a", { class: "dim small-note", href: "#/bridge/events", text: "full Command Center →" })
+    ]));
+    const evs = B.events({ category: "intelligence" }).slice(0, 15);
+    const list = el("div", { class: "log-list" });
+    if (!evs.length) list.appendChild(el("p", { class: "empty-note", text: "No provider events yet — run any task." }));
+    evs.forEach(e2 => list.appendChild(eventRow(e2)));
+    evPanel.appendChild(list);
+    body.appendChild(evPanel);
+  }
+
+  /* ---- MODULE 5 — capability registry ---- */
+  function intCapabilities(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "What each provider can do. Later phases use this to select providers intelligently (Auto already routes by category via the AI Router)." }));
+    const panel = el("div", { class: "panel", style: "overflow-x:auto" });
+    const table = el("div", { class: "cap-table", style: `grid-template-columns: 140px repeat(${P.CAPS.length}, 1fr)` });
+    table.appendChild(el("div", { class: "cap-head", text: "PROVIDER" }));
+    P.CAPS.forEach(c => table.appendChild(el("div", { class: "cap-head", text: c })));
+    P.list().forEach(p => {
+      table.appendChild(el("div", { class: "cap-prov", text: p.name }));
+      P.CAPS.forEach(c => {
+        const on = (p.capabilities || {})[c];
+        table.appendChild(el("div", { class: "cap-cell " + (on ? "on" : "off"), text: on ? "✔" : "✖" }));
+      });
+    });
+    panel.appendChild(table);
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 6 — provider analytics ---- */
+  function intAnalytics(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Live counters for Claude and the Local Cortex (requests, timings, token/cost estimates); unconnected providers hold their placeholder zeros until their APIs arrive." }));
+    const panel = el("div", { class: "panel", style: "overflow-x:auto" });
+    const table = el("div", { class: "pa-table" });
+    table.appendChild(el("div", { class: "pa-row pa-head" }, ["PROVIDER", "REQUESTS", "SUCCESS", "FAILURE", "AVG RESPONSE", "AVG TASK", "TOKENS (EST)", "COST (EST)", "LAST ERROR"].map(h => el("span", { text: h }))));
+    P.list().forEach(p => {
+      const a = P.analyticsOf(p.id);
+      table.appendChild(el("div", { class: "pa-row" }, [
+        el("span", { class: "pa-name", text: a.name }),
+        el("span", { text: String(a.requests) }),
+        el("span", { text: a.successRate == null ? "—" : a.successRate + "%" }),
+        el("span", { text: a.failureRate == null ? "—" : a.failureRate + "%" }),
+        el("span", { text: a.requests ? (a.avgMs < 50 ? "instant" : (a.avgMs / 1000).toFixed(1) + "s") : "—" }),
+        el("span", { text: a.requests ? (a.avgTaskMs < 50 ? "instant" : (a.avgTaskMs / 1000).toFixed(1) + "s") : "—" }),
+        el("span", { text: fmtNum(a.tokensEst) }),
+        el("span", { text: a.costEst ? "$" + a.costEst.toFixed(4) : "$0" }),
+        el("span", { class: "dim pa-err", text: a.lastError ? a.lastError.slice(0, 60) : "—" })
+      ]));
+    });
+    panel.appendChild(table);
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 7 — health monitor ---- */
+  function intHealth(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Placeholder monitoring — future API integrations update these automatically. Possible states: Online · Offline · Maintenance · Authentication Required · Rate Limited · Healthy." }));
+    const panel = el("div", { class: "panel" });
+    P.list().forEach(p => {
+      const h = P.healthOf(p.id);
+      panel.appendChild(el("div", { class: "hm-row" }, [
+        healthDot(h),
+        el("b", { class: "hm-name", text: p.name }),
+        el("span", { class: "hm-state", text: P.HEALTH_LABEL[h] }),
+        el("span", { class: "dim small-note", text: p.lastActivity ? "last activity " + timeAgo(p.lastActivity) : "no activity yet" }),
+        el("button", { class: "btn tiny", text: "Test", onclick: () => { const s2 = P.testConnection(p.id); toast(`${p.name}: ${P.HEALTH_LABEL[s2]}.`, "info"); go("#/intelligence/health"); } })
+      ]));
+    });
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 9 — provider registry ---- */
+  function intRegistry(body) {
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🗂 Register a provider" })]));
+    form.appendChild(el("p", { class: "dim small-note", text: "Registration is all a future provider needs — no Worker architecture changes. It gets the Universal Provider Interface (8 standardized functions) and appears everywhere providers are listed." }));
+    form.appendChild(el("div", { class: "two-col" }, [
+      field("Provider id", f, "pid", el("input", { class: "input", placeholder: "e.g. mistral" })),
+      field("Display name", f, "pname", el("input", { class: "input", placeholder: "e.g. Mistral" }))
+    ]));
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "Register provider", onclick: () => {
+        const res = P.registerProvider({ id: f.pid.value.trim().toLowerCase(), name: f.pname.value.trim() || f.pid.value.trim() });
+        if (!res.ok) { toast(res.reason, "err"); return; }
+        toast(`${res.provider.name} registered — interface standardized.`, "ok");
+        go("#/intelligence/registry");
+      } })
+    ]));
+    body.appendChild(form);
+
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Registry — every available provider" })]));
+    P.list().forEach(p => {
+      const feats = Object.entries(p.capabilities || {}).filter(([, v]) => v).map(([k]) => k);
+      panel.appendChild(el("div", { class: "reg-row" }, [
+        el("div", {}, [
+          el("b", { text: p.name }),
+          el("span", { class: "wf-badge " + (p.live ? "st-success" : "st-idle"), text: p.live ? "live" : "placeholder" }),
+          el("span", { class: "dim small-note", text: ` v${p.version} · priority ${p.priority}` }),
+          el("div", { class: "dim small-note", text: p.description }),
+          el("div", { class: "dim tiny-note", text: `features: ${feats.length ? feats.join(", ") : "—"} · credentials: ${(p.requiredCredentials || []).join(", ") || "none"} · config schema: ${(p.configSchema || []).map(s2 => s2.key).join(", ") || "none"} · interface: ${P.interfaceComplete(p.id) ? "8/8 standardized ✔" : "incomplete"}` })
+        ])
+      ]));
+    });
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 10 — future integration framework ---- */
+  function intFuture(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Provisioned placeholders — no real integrations are created in Phase H0. Each slot activates when live provider APIs connect." }));
+    const grid = el("div", { class: "int-grid" });
+    [
+      ["🔑 API Keys", "Per-provider key storage wired to the Configure editors — held locally, never transmitted."],
+      ["🪪 OAuth", "Authorization-code flow slot for providers that use OAuth instead of static keys."],
+      ["🪝 Webhooks", "Inbound event endpoints so providers can push results back into the Bridge."],
+      ["🛡 Authentication", "Session/token refresh handling for long-lived provider connections."],
+      ["🧰 Tool Permissions", "Per-provider allowlists (browser, terminal, filesystem) enforced by the Permission Engine."],
+      ["🧭 Capability Detection", "Live capability probing to replace the static registry entries."],
+      ["⬆ Version Updates", "Provider version tracking + migration notes when APIs change."]
+    ].forEach(([t, d]) => grid.appendChild(el("div", { class: "int-card" }, [
+      el("div", { class: "int-top" }, [el("b", { text: t }), el("span", { class: "int-status st-not_connected", text: "provisioned" })]),
+      el("p", { class: "dim small-note", text: d })
+    ])));
+    body.appendChild(grid);
   }
 
   /* =============================== system memory =============================== */
@@ -2907,6 +3203,7 @@
   /* =============================== boot =============================== */
   function boot() {
     B.boot(); /* Phase Alpha: bring the Bridge online, provision placeholders */
+    P.boot(); /* Phase H0: register providers, route intelligence through the Manager */
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();
