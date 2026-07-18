@@ -217,6 +217,38 @@ provider → Bridge → Worker), and Workers never know which provider answered.
   OAuth, webhooks, authentication, tool permissions, capability detection and
   version updates.
 
+## Phase Beta — First Intelligence (`#/runtime`)
+
+The phase that proves the architecture: **one** clone is designated the First
+Intelligence and gains the Worker Runtime Engine — a static record becomes
+executable intelligence. One Worker, one task at a time, until it's reliable.
+
+- **Worker Runtime status card** — mission, current objective (editable),
+  status, current workflow, assigned provider (with what it resolves to),
+  memory context and execution totals.
+- **Task Queue** — pending → running → waiting (owner evaluation) →
+  completed, plus failed and cancelled. One task executes at a time.
+- **Run Worker** — every manual run performs the full sequence for real:
+  load memory (worker memory + GOD CORE DNA + Decision Framework + shared-
+  memory search + execution history) → resolve provider via the Provider
+  Manager → execute the registered **First Intelligence Mission** workflow
+  from the Workflow Registry step by step → generate the artifact through
+  the Phase H0 funnel → write the output and lessons back to Shared Memory →
+  log events to the Event Bus (`execution` category) → store the execution
+  record → report for evaluation.
+- **Live Execution Monitor** — real-time panel during a run: current step,
+  active provider, memory retrieved, workflow stage, progress bar, estimated
+  completion.
+- **Execution Logs** — every run records execution ID, worker, provider used
+  (vs requested), runtime, estimated cost, success/errors, memory-accessed
+  count, events-generated count; click any row for the full record + output.
+- **Worker Inspector** (`#/worker/:id`) — a dedicated inspection page for any
+  worker on the universal schema: mission, DNA, assigned provider, memory,
+  workflows, task queue, outputs, metrics, execution history.
+- **Worker Evaluation** — auto quality score + completion score + runtime +
+  cost per execution; owner feedback (1–5★) feeds the same performance
+  economics as Phase 1 and writes winning patterns to global Shared Memory.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -254,4 +286,4 @@ Vanilla HTML/CSS/JS — zero dependencies. `js/data.js` (roles, tones, templates
 persistence), `js/ui.js` (components, charts, sound FX), `js/ghosts.js`
 (Product Ghosts), `js/shells.js` (Outer Shells), `js/matrix.js` (Matrix Merge),
 `js/bridge.js` (Phase Alpha Bridge), `js/providers.js` (Phase H0 Intelligence
-Provider Layer), `js/app.js` (views).
+Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/app.js` (views).

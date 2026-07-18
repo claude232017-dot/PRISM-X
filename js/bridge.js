@@ -125,7 +125,7 @@ PRISM.bridge = (function () {
     audit: "evolution", upgrade: "evolution", dna: "evolution", repeat: "automation",
     share: "memory", workflow: "automation", integration: "system",
     memory: "memory", api: "system", permission: "system", bridge: "system",
-    provider: "intelligence"
+    provider: "intelligence", runtime: "execution"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 

@@ -932,3 +932,52 @@ select.input { appearance: auto; }
 
 .reg-row { padding: 12px 6px; border-bottom: 1px solid var(--line); }
 .reg-row:last-child { border-bottom: none; }
+
+/* ============================================================ *
+ * PHASE BETA — First Intelligence (Worker Runtime)
+ * ============================================================ */
+.rt-state { font: 700 10px/1.4 var(--mono); letter-spacing: 1px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-muted); text-transform: uppercase; }
+.rt-state.s-running { color: var(--accent); border-color: rgba(245,197,66,.5); box-shadow: var(--glow); }
+.rt-state.s-waiting { color: var(--cyan); border-color: rgba(15,155,189,.5); }
+.rt-state.s-idle { color: var(--good); border-color: rgba(12,163,12,.35); }
+
+.rt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 18px; margin-bottom: 10px; }
+.rt-fact { display: flex; flex-direction: column; gap: 2px; }
+.rt-fact-label { font: 700 9.5px/1.5 var(--mono); letter-spacing: 1px; color: var(--ink-muted); }
+.rt-fact-value { font-size: 12.5px; }
+
+.rt-obj { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.rt-obj .field-label { flex: none; }
+.rt-obj .input { flex: 1; }
+
+.rt-monitor { border-color: rgba(245,197,66,.4); box-shadow: 0 0 22px rgba(245,197,66,.07); }
+.rt-bar { height: 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; margin-bottom: 14px; }
+.rt-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); border-radius: 999px; transition: width .25s ease; box-shadow: 0 0 10px rgba(245,197,66,.5); }
+.rt-mem { margin-top: 10px; display: flex; flex-direction: column; gap: 3px; }
+
+.rt-addrow { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.rt-queue { display: flex; flex-direction: column; }
+.rt-task { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.rt-task:last-child { border-bottom: none; }
+.rt-task-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-state { font: 700 9px/1.4 var(--mono); letter-spacing: .5px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--ink-muted); text-transform: uppercase; flex: none; }
+.q-state.q-pending { color: var(--ink-2); }
+.q-state.q-running { color: var(--accent); border-color: rgba(245,197,66,.5); }
+.q-state.q-waiting { color: var(--cyan); border-color: rgba(15,155,189,.5); }
+.q-state.q-completed { color: var(--good); border-color: rgba(12,163,12,.4); }
+.q-state.q-failed { color: var(--red); border-color: rgba(230,103,103,.4); }
+.q-state.q-cancelled { opacity: .55; }
+
+.eval-card { border-color: rgba(15,155,189,.4); }
+.eval-pre { max-height: 220px; overflow-y: auto; }
+.eval-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+
+.exec-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--line); font-size: 13px; cursor: pointer; }
+.exec-row:hover { background: var(--surface-2); }
+.exec-row:last-child { border-bottom: none; }
+.exec-ok { font-weight: 800; flex: none; }
+.exec-ok.ok { color: var(--good); }
+.exec-ok.bad { color: var(--red); }
+.exec-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.insp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 4px; }

@@ -45,7 +45,9 @@ PRISM.store = (function () {
     /* Phase H0 — Intelligence Provider Layer */
     providers: [],
     customProviders: [],
-    providerLayerReady: false
+    providerLayerReady: false,
+    /* Phase Beta — First Intelligence (Worker Runtime Engine) */
+    runtime: { workerId: null, objective: "", queue: [], executions: [], activatedAt: null }
   });
 
   let state = load();

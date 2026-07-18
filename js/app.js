@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -27,6 +27,8 @@
     else if (view === "matrix") renderMatrix(main);
     else if (view === "bridge") renderBridge(main, parts[1]);
     else if (view === "intelligence") renderIntelligence(main, parts[1]);
+    else if (view === "runtime") renderRuntime(main);
+    else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
     else renderDashboard(main);
@@ -42,6 +44,7 @@
       a.classList.toggle("active",
         a.dataset.view === view ||
         (view === "clone" && a.dataset.view === "dashboard") ||
+        (view === "worker" && a.dataset.view === "runtime") ||
         (ghostViews && a.dataset.view === "ghosts") ||
         (shellViews && a.dataset.view === "shells"));
     });
@@ -278,6 +281,23 @@
       ]),
       el("div", { class: "cc-actions" }, [
         el("button", { class: "btn small", text: "⚫ Open Bridge", onclick: () => go("#/bridge") })
+      ])
+    ]));
+
+    /* ---- Phase Beta strip: the First Intelligence ---- */
+    const rts = RT.stats();
+    wrap.appendChild(el("div", { class: "panel ghost-strip runtime-strip" }, [
+      el("div", { class: "gs-left" }, [
+        el("span", { class: "gs-glyph", text: "⚡" }),
+        el("div", {}, [
+          el("div", { class: "panel-title", text: "First Intelligence — Worker Runtime" }),
+          el("p", { class: "dim small-note", text: rts.activated
+            ? `${rts.workerName} operational · ${rts.executions} mission(s)${rts.successRate != null ? " · " + rts.successRate + "% success" : ""} · ${rts.pending} queued · ${rts.waiting} awaiting evaluation`
+            : "No executable worker yet — activate one clone as the First Intelligence." })
+        ])
+      ]),
+      el("div", { class: "cc-actions" }, [
+        el("button", { class: "btn small " + (rts.activated ? "" : "gold-btn"), text: rts.activated ? "⚡ Open Runtime" : "⚡ Activate", onclick: () => go("#/runtime") })
       ])
     ]));
 
@@ -2944,6 +2964,328 @@
       el("p", { class: "dim small-note", text: d })
     ])));
     body.appendChild(grid);
+  }
+
+  /* =============================== worker runtime (PHASE BETA) =============================== */
+  function renderRuntime(main) {
+    RT.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `FIRST INTELLIGENCE <span class="dim">// phase beta — worker runtime</span>` }),
+        el("p", { class: "page-sub", text: "One Worker, fully operational: every run loads memory, routes through the Bridge + Provider Manager, executes its registered workflow, updates Shared Memory, logs events and reports back for evaluation. One task at a time — reliability before expansion." })
+      ])
+    ]));
+
+    const c = RT.worker();
+    if (!c) { wrap.appendChild(runtimeActivation()); main.appendChild(wrap); return; }
+
+    /* ---- Module 1 — the Worker as executable intelligence ---- */
+    const wf = RT.missionWorkflow();
+    const sel = P.resolve(c.provider || "auto", "Copywriting / content");
+    const st8 = RT.stats();
+    const status = RT.isRunning() ? "running" : (RT.waitingTasks().length ? "waiting" : "idle");
+    const objInput = el("input", { class: "input", value: RT.rt().objective });
+    wrap.appendChild(el("div", { class: "panel rt-status" }, [
+      el("div", { class: "panel-head" }, [
+        el("h2", { class: "panel-title", text: "⚡ " + c.name + " — executable worker" }),
+        el("div", { class: "head-actions" }, [
+          el("span", { class: "rt-state s-" + status, text: status }),
+          el("a", { class: "btn tiny", href: "#/worker/" + c.id, text: "🔍 Inspector" })
+        ])
+      ]),
+      el("div", { class: "rt-grid" }, [
+        rtFact("MISSION", c.target || c.role),
+        rtFact("ASSIGNED PROVIDER", `${c.provider || "auto"} → executes via ${P.name(sel.id)}`),
+        rtFact("CURRENT WORKFLOW", wf ? wf.name : "—"),
+        rtFact("MEMORY CONTEXT", `${(c.memory || []).length} worker entries · DNA + Decision Framework · shared memory search`),
+        rtFact("EXECUTIONS", `${st8.executions} run(s)${st8.successRate != null ? " · " + st8.successRate + "% success" : ""} · est cost $${st8.totalCost}`),
+        rtFact("PROGRESS", st8.lastExec ? `last: ${st8.lastExec.taskType} in ${(st8.lastExec.ms / 1000).toFixed(1)}s (quality ${st8.lastExec.quality}/100)` : "no missions yet")
+      ]),
+      el("div", { class: "rt-obj" }, [
+        el("span", { class: "field-label", text: "Current objective" }),
+        objInput,
+        el("button", { class: "btn tiny", text: "Save", onclick: () => { RT.setObjective(objInput.value); toast("Objective updated.", "ok"); } })
+      ])
+    ]));
+
+    /* ---- Module 6 — live execution monitor (fills during a run) ---- */
+    const monitor = el("div", { class: "panel rt-monitor", hidden: true });
+    wrap.appendChild(monitor);
+
+    /* ---- Module 10 — waiting evaluations ---- */
+    const evalWrap = el("div", {});
+    function drawEvals() {
+      evalWrap.innerHTML = "";
+      RT.waitingTasks().forEach(t => {
+        const exec = RT.rt().executions.find(x => x.id === t.execId);
+        if (!exec) return;
+        evalWrap.appendChild(el("div", { class: "panel eval-card" }, [
+          el("div", { class: "panel-head" }, [
+            el("h2", { class: "panel-title", text: `📋 Awaiting evaluation — ${exec.taskType}: ${exec.topic}` }),
+            el("span", { class: "dim small-note", text: `${exec.provider} · ${(exec.ms / 1000).toFixed(1)}s · est $${exec.costEst}` })
+          ]),
+          el("pre", { class: "output-pre eval-pre", text: exec.output.slice(0, 900) + (exec.output.length > 900 ? "\n…" : "") }),
+          el("div", { class: "eval-row" }, [
+            el("span", { class: "dim small-note", text: `auto quality ${exec.quality}/100 · completion ${exec.completion}% · your score:` }),
+            U.stars(0, (n) => {
+              const res = RT.evaluate(exec.id, n);
+              if (res.ok) { U.sfx("rate"); toast(`Evaluation stored — ${n}/5. Lesson written to memory.`, "ok"); go("#/runtime"); }
+            })
+          ])
+        ]));
+      });
+    }
+    drawEvals();
+    wrap.appendChild(evalWrap);
+
+    /* ---- Module 4 — task queue + Module 9 — Run Worker ---- */
+    const qPanel = el("div", { class: "panel" });
+    const runBtn = el("button", { class: "btn primary", text: "▶ Run Worker" });
+    runBtn.disabled = RT.isRunning() || !RT.nextTask();
+    qPanel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "🗂 Task queue — one at a time" }),
+      runBtn
+    ]));
+    const f = {};
+    const typeSel = el("select", { class: "input inline-select" });
+    ((D.ROLES[c.role] || {}).taskTypes || ["Write Tweet"]).forEach(t => typeSel.appendChild(el("option", { value: t, text: t })));
+    const topicInput = el("input", { class: "input", placeholder: "topic / objective for this mission (defaults to the standing objective)", style: "flex:1" });
+    qPanel.appendChild(el("div", { class: "rt-addrow" }, [
+      typeSel, topicInput,
+      el("button", { class: "btn small", text: "+ Queue task", onclick: () => {
+        RT.addTask({ type: typeSel.value, topic: topicInput.value });
+        toast("Task queued.", "ok"); go("#/runtime");
+      } })
+    ]));
+    const qList = el("div", { class: "rt-queue" });
+    function drawQueue() {
+      qList.innerHTML = "";
+      const q = RT.queue().slice().reverse().slice(0, 12);
+      if (!q.length) qList.appendChild(el("p", { class: "empty-note", text: "Queue empty — add the first mission above." }));
+      q.forEach(t => qList.appendChild(el("div", { class: "rt-task" }, [
+        el("span", { class: "q-state q-" + t.state, text: t.state, title: RT.STATE_HELP[t.state] }),
+        el("span", { class: "rt-task-name", text: `${t.type} — ${t.topic}` }),
+        el("span", { class: "dim tiny-note", text: t.finishedAt ? timeAgo(t.finishedAt) : timeAgo(t.queuedAt) }),
+        t.state === "pending" ? el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { RT.cancelTask(t.id); go("#/runtime"); } }) : null
+      ].filter(Boolean))));
+    }
+    drawQueue();
+    qPanel.appendChild(qList);
+    qPanel.appendChild(el("p", { class: "dim tiny-note", text: "states: pending → running → waiting (owner evaluation) → completed · failed · cancelled" }));
+    wrap.appendChild(qPanel);
+
+    runBtn.addEventListener("click", async () => {
+      runBtn.disabled = true;
+      runBtn.textContent = "◈ EXECUTING…";
+      monitor.hidden = false;
+      const res = await RT.run((live) => drawMonitor(monitor, live));
+      if (res.ok) { U.sfx("spawn"); U.evolveFlash(); toast(`Mission complete via ${res.exec.provider} — evaluate the output below.`, "ok"); }
+      else toast(res.reason, "err");
+      go("#/runtime");
+    });
+
+    /* auto-show monitor with last state if a run just finished */
+
+    /* ---- Module 8 — execution logs ---- */
+    const logPanel = el("div", { class: "panel" });
+    logPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧾 Execution logs" })]));
+    const execs = RT.rt().executions.slice().reverse();
+    if (!execs.length) logPanel.appendChild(el("p", { class: "empty-note", text: "No executions yet — queue a task and Run Worker." }));
+    execs.slice(0, 10).forEach(x => logPanel.appendChild(el("div", { class: "exec-row", onclick: () => execModal(x) }, [
+      el("span", { class: "exec-ok " + (x.success ? "ok" : "bad"), text: x.success ? "✓" : "✗" }),
+      el("span", { class: "exec-name", text: `${x.taskType} — ${x.topic}` }),
+      el("span", { class: "dim tiny-note", text: `${x.provider} · ${(x.ms / 1000).toFixed(1)}s · $${x.costEst} · mem ${x.memoryAccessed} · ev ${x.eventsGenerated}${x.feedback ? " · ★" + x.feedback : ""}` })
+    ])));
+    wrap.appendChild(logPanel);
+
+    /* recent runtime events */
+    const evs = B.events({ category: "execution" }).slice(0, 8);
+    if (evs.length) {
+      const evPanel = el("div", { class: "panel" });
+      evPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "📡 Runtime events" }), el("a", { class: "dim small-note", href: "#/bridge/events", text: "Command Center →" })]));
+      const list = el("div", { class: "log-list" });
+      evs.forEach(e2 => list.appendChild(eventRow(e2)));
+      evPanel.appendChild(list);
+      wrap.appendChild(evPanel);
+    }
+
+    main.appendChild(wrap);
+  }
+
+  function rtFact(label, value) {
+    return el("div", { class: "rt-fact" }, [
+      el("span", { class: "rt-fact-label", text: label }),
+      el("span", { class: "rt-fact-value", text: value })
+    ]);
+  }
+
+  function runtimeActivation() {
+    const panel = el("div", { class: "panel form-panel rt-activate" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⚡ Activate the First Intelligence" })]));
+    panel.appendChild(el("p", { class: "dim small-note", text: "Pick one clone to become the first fully operational Worker. It gains the runtime engine, a registered mission workflow, a task queue and an execution log. Only one Worker in Phase Beta — expansion comes after it performs reliably." }));
+    const sel = el("select", { class: "input" });
+    const sorted = S.state.clones.slice().sort((a, b) => b.stats.earnings - a.stats.earnings);
+    sorted.forEach(c => sel.appendChild(el("option", { value: c.id, text: `${(D.ROLES[c.role] || {}).icon || "◈"} ${c.name} — ${c.role} ($${c.stats.earnings} lifetime)` })));
+    panel.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Worker" }), sel]));
+    const obj = el("input", { class: "input", placeholder: "standing objective, e.g. Ship one revenue asset per mission" });
+    panel.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Current objective" }), obj]));
+    panel.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary big", text: "⚡ Activate First Intelligence", onclick: () => {
+        if (!S.state.clones.length) { toast("Forge a clone first.", "err"); return; }
+        const res = RT.designate(sel.value, obj.value);
+        if (res.ok) { U.sfx("spawn"); U.evolveFlash(); toast(`${res.worker.name} is now executable intelligence.`, "ok"); go("#/runtime"); }
+      } })
+    ]));
+    if (!S.state.clones.length) panel.appendChild(el("p", { class: "empty-note", text: "No clones yet — forge one first." }));
+    return panel;
+  }
+
+  function drawMonitor(monitor, live) {
+    monitor.hidden = false;
+    monitor.innerHTML = "";
+    const etaLeft = Math.max(0, live.etaMs - (Date.now() - live.startedAt));
+    monitor.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "🔴 Live execution monitor" }),
+      el("span", { class: "dim small-note", text: live.done ? "finished" : `est. completion ~${Math.ceil(etaLeft / 1000)}s` })
+    ]));
+    const bar = el("div", { class: "rt-bar" }, [el("div", { class: "rt-bar-fill", style: `width:${live.progress}%` })]);
+    monitor.appendChild(bar);
+    monitor.appendChild(el("div", { class: "rt-grid" }, [
+      rtFact("CURRENT STEP", `${live.stage} (${live.i}/${live.n})`),
+      rtFact("ACTIVE PROVIDER", live.provider || `resolving… (requested ${live.requested})`),
+      rtFact("WORKFLOW", live.wfName),
+      rtFact("WORKFLOW STAGE", live.wfStep),
+      rtFact("PROGRESS", live.progress + "%"),
+      rtFact("TASK", `${live.taskType} — ${live.topic}`)
+    ]));
+    if (live.memory && live.memory.length) {
+      const mem = el("div", { class: "rt-mem" });
+      mem.appendChild(el("span", { class: "rt-fact-label", text: "MEMORY RETRIEVED (" + live.memory.length + ")" }));
+      live.memory.forEach(m => mem.appendChild(el("div", { class: "dim tiny-note", text: "• " + m })));
+      monitor.appendChild(mem);
+    }
+    if (live.error) monitor.appendChild(el("p", { class: "empty-note", text: "⚠ " + live.error }));
+  }
+
+  function execModal(x) {
+    const b = el("div", { class: "modal-body" });
+    b.appendChild(el("pre", { class: "output-pre", text: [
+      `Execution ID:      ${x.id}`,
+      `Worker:            ${x.workerName} (${x.workerId})`,
+      `Task:              ${x.taskType} — ${x.topic}`,
+      `Provider used:     ${x.provider}${x.requested !== x.provider ? " (requested " + x.requested + ")" : ""}`,
+      `Workflow:          ${x.wfName}`,
+      `Runtime:           ${(x.ms / 1000).toFixed(2)}s`,
+      `Estimated cost:    $${x.costEst}`,
+      `Success:           ${x.success ? "yes" : "NO — " + (x.error || "unknown error")}`,
+      `Memory accessed:   ${x.memoryAccessed} item(s)`,
+      `Events generated:  ${x.eventsGenerated}`,
+      `Auto quality:      ${x.quality}/100 · completion ${x.completion}%`,
+      `Owner feedback:    ${x.feedback ? x.feedback + "/5" : "not yet rated"}`
+    ].join("\n") }));
+    if (x.output) {
+      b.appendChild(el("div", { class: "field-label", text: "OUTPUT", style: "margin-top:10px" }));
+      b.appendChild(el("pre", { class: "output-pre", text: x.output }));
+    }
+    U.modal({ title: "🧾 Execution — " + x.topic, cls: "wide", body: b, actions: [
+      { label: "Copy output", onClick: () => U.copyText(x.output) },
+      { label: "Close", cls: "ghost" }
+    ] });
+  }
+
+  /* ---- Module 7 — Worker Inspector (any worker on the universal schema) ---- */
+  function renderWorkerInspector(main, id) {
+    const w = B.worker(id);
+    if (!w) { go("#/runtime"); return; }
+    const meta = B.WORKER_TYPES[w.type];
+    const st = S.state;
+    const isFirst = RT.rt().workerId === id;
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("a", { class: "back-link", href: isFirst ? "#/runtime" : "#/bridge/workers", text: isFirst ? "← runtime" : "← workers" }),
+        el("h1", { class: "page-title", html: `${meta.icon} ${esc(w.name)} <span class="dim">// worker inspector</span>` }),
+        el("p", { class: "page-sub", text: `${meta.label} · ${w.status}${isFirst ? " · FIRST INTELLIGENCE" : ""}` })
+      ])
+    ]));
+
+    const wfs = B.workflowsFor(id);
+    const execs = RT.rt().executions.filter(x => x.workerId === id).slice().reverse();
+    const dna = st.dna;
+    const grid = el("div", { class: "insp-grid" });
+
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🎯 Mission" })]),
+      el("p", { text: w.mission }),
+      isFirst ? el("p", { class: "dim small-note", text: "Objective: " + RT.rt().objective }) : null,
+      el("div", { class: "dim small-note", text: `knowledge/tools: ${w.knowledge || (w.tools || []).join(", ") || "—"}` })
+    ].filter(Boolean)));
+
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧬 DNA" })]),
+      el("div", { class: "dim small-note", text: "Inherited GOD CORE layers:" }),
+      dna.tone ? el("div", { class: "tiny-note", text: "• Voice: " + dna.tone.split("\n")[0] }) : null,
+      dna.mindset ? el("div", { class: "tiny-note", text: "• Mindset: " + dna.mindset.split("\n")[0] }) : null,
+      dna.logic ? el("div", { class: "tiny-note", text: "• Strategy: " + dna.logic.split("\n")[0] }) : null,
+      dna.decision ? el("div", { class: "tiny-note", text: "• Decision Framework: " + dna.decision.split("\n")[0] }) : null,
+      w.raw && w.raw.tone ? el("div", { class: "tiny-note", text: "• Worker tone: " + w.raw.tone }) : null
+    ].filter(Boolean)));
+
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧠 Assigned provider" })]),
+      (() => {
+        const pv = w.provider || "auto";
+        if (pv === "human") return el("p", { text: "Human executor — no AI provider." });
+        const sel = P.resolve(pv, "Copywriting / content");
+        return el("div", {}, [
+          el("p", { text: `${pv} → executes via ${P.name(sel.id)}` }),
+          sel.switched ? el("p", { class: "dim tiny-note", text: `requested ${P.name(sel.requested)} — ${sel.reason}` }) : null
+        ].filter(Boolean));
+      })()
+    ]));
+
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "📊 Metrics" })]),
+      el("pre", { class: "output-pre", text: JSON.stringify(Object.assign({ revenue: "$" + Math.round(w.revenue) }, w.metrics), null, 2) })
+    ]));
+
+    wrap.appendChild(grid);
+
+    const memPanel = el("div", { class: "panel" });
+    memPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `🧠 Memory (${(w.memory || []).length})` })]));
+    (w.memory || []).slice(-8).reverse().forEach(m => memPanel.appendChild(el("div", { class: "dim small-note", text: "• " + m })));
+    if (!(w.memory || []).length) memPanel.appendChild(el("p", { class: "empty-note", text: "No memory entries yet." }));
+    wrap.appendChild(memPanel);
+
+    const wfPanel = el("div", { class: "panel" });
+    wfPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `⚙ Workflows (${wfs.length})` })]));
+    wfs.forEach(wf => wfPanel.appendChild(el("div", { class: "dim small-note", text: `• ${wf.name} — ${wf.trigger} · ${wf.runs} run(s) · ${B.successRate(wf)}% success` })));
+    if (!wfs.length) wfPanel.appendChild(el("p", { class: "empty-note", text: "No workflows attached." }));
+    wrap.appendChild(wfPanel);
+
+    if (isFirst) {
+      const qPanel = el("div", { class: "panel" });
+      qPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🗂 Task queue" })]));
+      RT.queue().slice().reverse().slice(0, 8).forEach(t => qPanel.appendChild(el("div", { class: "rt-task" }, [
+        el("span", { class: "q-state q-" + t.state, text: t.state }),
+        el("span", { class: "rt-task-name", text: `${t.type} — ${t.topic}` })
+      ])));
+      if (!RT.queue().length) qPanel.appendChild(el("p", { class: "empty-note", text: "Queue empty." }));
+      wrap.appendChild(qPanel);
+    }
+
+    const exPanel = el("div", { class: "panel" });
+    exPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `🧾 Execution history (${execs.length})` })]));
+    execs.slice(0, 8).forEach(x => exPanel.appendChild(el("div", { class: "exec-row", onclick: () => execModal(x) }, [
+      el("span", { class: "exec-ok " + (x.success ? "ok" : "bad"), text: x.success ? "✓" : "✗" }),
+      el("span", { class: "exec-name", text: `${x.taskType} — ${x.topic}` }),
+      el("span", { class: "dim tiny-note", text: `${x.provider} · ${(x.ms / 1000).toFixed(1)}s${x.feedback ? " · ★" + x.feedback : ""}` })
+    ])));
+    if (!execs.length) exPanel.appendChild(el("p", { class: "empty-note", text: w.type === "clone" ? "No runtime executions — designate this worker in Runtime and run a mission." : "The runtime engine currently attaches to clones only (one Worker in Phase Beta)." }));
+    wrap.appendChild(exPanel);
+
+    main.appendChild(wrap);
   }
 
   /* =============================== system memory =============================== */
