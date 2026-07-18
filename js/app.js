@@ -2358,18 +2358,23 @@
     B.eventCategories().forEach(c => catSel.appendChild(el("option", { value: c, text: "Category: " + c })));
     const priSel = el("select", { class: "input inline-select" });
     [["all", "Priority: all"], ["high", "high"], ["normal", "normal"], ["medium", "medium"]].forEach(([v, l]) => priSel.appendChild(el("option", { value: v, text: l })));
+    const wkSel = el("select", { class: "input inline-select" });
+    wkSel.appendChild(el("option", { value: "all", text: "Worker: all" }));
+    B.workers().forEach(w => wkSel.appendChild(el("option", { value: w.id, text: `${B.WORKER_TYPES[w.type].icon} ${w.name}` })));
+    const timeSel = el("select", { class: "input inline-select" });
+    [["all", "Time: all"], ["hour", "last hour"], ["day", "last 24h"], ["week", "last 7d"]].forEach(([v, l]) => timeSel.appendChild(el("option", { value: v, text: l })));
     body.appendChild(el("div", { class: "panel-head" }, [
       el("h2", { class: "panel-title", text: "📡 Command center — live activity" }),
-      el("div", { class: "filter-row" }, [catSel, priSel])
+      el("div", { class: "filter-row" }, [catSel, priSel, wkSel, timeSel])
     ]));
     const feed = el("div", { class: "log-list cc-feed" });
     function draw() {
       feed.innerHTML = "";
-      const list = B.events({ category: catSel.value, priority: priSel.value });
+      const list = B.events({ category: catSel.value, priority: priSel.value, worker: wkSel.value, time: timeSel.value });
       if (!list.length) feed.appendChild(el("p", { class: "empty-note", text: "No events match." }));
       list.slice(0, 60).forEach(e2 => feed.appendChild(eventRow(e2)));
     }
-    catSel.addEventListener("change", draw); priSel.addEventListener("change", draw);
+    [catSel, priSel, wkSel, timeSel].forEach(s => s.addEventListener("change", draw));
     draw();
     body.appendChild(feed);
   }
@@ -2468,9 +2473,21 @@
           el("div", {}, [el("b", { text: it.name }), el("span", { class: "dim small-note", text: " · " + it.group })]),
           el("span", { class: "int-status st-" + it.status, text: it.status.replace("_", " ") })
         ]),
-        el("div", { class: "int-meta", text: `last sync: ${it.lastSync ? U.timeAgo(it.lastSync) : "never"} · ${it.logs.length} log(s)` }),
+        el("div", { class: "int-meta", text: `last sync: ${it.lastSync ? U.timeAgo(it.lastSync) : "never"} · ${it.logs.length} log(s)${it.config ? " · credentials stored" : ""}` }),
         canManage ? el("div", { class: "vi-actions" }, [
           el("button", { class: "btn tiny " + (it.enabled ? "cyan-btn" : ""), text: it.enabled ? "Enabled" : "Enable", onclick: () => { B.toggleIntegration(it.id); go("#/bridge/integrations"); } }),
+          el("button", { class: "btn tiny", text: "Configure", onclick: () => {
+            const ta = el("textarea", { class: "input", rows: 3, placeholder: "API key / webhook URL / account — stored locally, unused until live APIs connect" });
+            ta.value = it.config || "";
+            const b = el("div", { class: "modal-body" }, [
+              el("p", { class: "dim small-note", text: "Future credentials for " + it.name + ". Nothing is transmitted in Phase Alpha — this only provisions the slot." }),
+              el("label", { class: "field" }, [el("span", { class: "field-label", text: "Configuration" }), ta])
+            ]);
+            U.modal({ title: "⚙ Configure " + it.name, body: b, actions: [
+              { label: "Save configuration", cls: "primary", onClick: () => { B.configureIntegration(it.id, ta.value); toast(it.name + " configuration stored.", "ok"); go("#/bridge/integrations"); } },
+              { label: "Cancel", cls: "ghost" }
+            ] });
+          } }),
           el("button", { class: "btn tiny", text: "Health check", onclick: () => { const s = B.healthCheck(it.id); toast(`${it.name}: ${s} (mock).`, s === "healthy" ? "ok" : "info"); go("#/bridge/integrations"); } }),
           el("button", { class: "btn tiny", text: "Logs", onclick: () => U.modal({ title: it.name + " — logs", cls: "wide", body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("pre", { class: "output-pre", text: it.logs.join("\n") })); return b; })(), actions: [{ label: "Close", cls: "ghost" }] }) })
         ]) : el("div", { class: "dim tiny-note", text: "read-only for this role" })
@@ -2497,10 +2514,21 @@
         el("label", { class: "field" }, [el("span", { class: "field-label", text: "Connected worker" }), wkSel]),
         el("label", { class: "field" }, [el("span", { class: "field-label", text: "Trigger" }), trSel])
       ]));
+      B.ensureIntegrations();
+      const intSel = el("select", { class: "input" });
+      intSel.appendChild(el("option", { value: "", text: "— no connected tool —" }));
+      S.state.integrations.forEach(it => intSel.appendChild(el("option", { value: it.id, text: it.name })));
+      form.appendChild(field("Expected result", f, "expected", el("input", { class: "input", placeholder: "e.g. edited script delivered to vault" })));
+      form.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Connected tool (integration)" }), intSel]));
+      form.appendChild(field("Execution steps (one per line)", f, "steps", el("textarea", { class: "input", rows: 3, placeholder: "detect drop\nsend to editor\npublish to queue" })));
       form.appendChild(el("div", { class: "form-actions" }, [
         el("button", { class: "btn primary", text: "Register", onclick: () => {
           if (!f.name.value.trim()) { toast("Name required.", "err"); return; }
-          B.addWorkflow({ name: f.name.value, description: f.desc.value, workerId: wkSel.value || null, trigger: trSel.value });
+          B.addWorkflow({
+            name: f.name.value, description: f.desc.value, workerId: wkSel.value || null, trigger: trSel.value,
+            integrationId: intSel.value || null, expectedResult: f.expected.value,
+            steps: f.steps.value.split("\n").map(s => s.trim()).filter(Boolean)
+          });
           toast("Workflow registered.", "ok"); go("#/bridge/workflows");
         } })
       ]));
@@ -2512,12 +2540,19 @@
     if (!S.state.workflows.length) list.appendChild(el("p", { class: "empty-note", text: "No workflows registered." }));
     S.state.workflows.forEach(wf => {
       const w = B.worker(wf.workerId);
+      const tool = wf.integrationId ? (S.state.integrations.find(i => i.id === wf.integrationId) || {}).name : null;
+      const extras = [
+        (wf.steps && wf.steps.length) ? `${wf.steps.length} step(s)` : null,
+        tool ? "tool: " + tool : null,
+        wf.expectedResult ? "→ " + wf.expectedResult : null
+      ].filter(Boolean).join(" · ");
       list.appendChild(el("div", { class: "wf-row" }, [
         el("div", {}, [
           el("b", { text: wf.name }),
           el("span", { class: "wf-badge st-" + wf.status, text: wf.status }),
-          el("div", { class: "dim small-note", text: `${wf.trigger}${w ? " · " + w.name : ""}${wf.description ? " · " + wf.description : ""} · ${wf.runs} run(s) · ${B.successRate(wf)}% success` })
-        ]),
+          el("div", { class: "dim small-note", text: `${wf.trigger}${w ? " · " + w.name : ""}${wf.description ? " · " + wf.description : ""} · ${wf.runs} run(s) · ${B.successRate(wf)}% success` }),
+          extras ? el("div", { class: "dim tiny-note", text: extras }) : null
+        ].filter(Boolean)),
         canManage ? el("div", { class: "vi-actions" }, [
           el("button", { class: "btn tiny primary", text: "▶ Run (sim)", onclick: () => { const ok = B.runWorkflow(wf.id); toast(`"${wf.name}" ${ok ? "completed" : "failed"} (simulated).`, ok ? "ok" : "err"); go("#/bridge/workflows"); } }),
           el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { B.deleteWorkflow(wf.id); go("#/bridge/workflows"); } })

@@ -150,6 +150,16 @@ PRISM.bridge = (function () {
       if (filter.category && filter.category !== "all") list = list.filter(e => e.category === filter.category);
       if (filter.priority && filter.priority !== "all") list = list.filter(e => e.priority === filter.priority);
       if (filter.kind && filter.kind !== "all") list = list.filter(e => e.kind === filter.kind);
+      if (filter.worker && filter.worker !== "all") {
+        const w = worker(filter.worker);
+        const name = w ? w.name : null;
+        list = list.filter(e => e.workerId === filter.worker || (name && e.text.includes(name)));
+      }
+      if (filter.time && filter.time !== "all") {
+        const spans = { hour: 3600000, day: 86400000, week: 7 * 86400000 };
+        const cut = Date.now() - (spans[filter.time] || 0);
+        list = list.filter(e => e.at >= cut);
+      }
     }
     return list;
   }
@@ -232,6 +242,16 @@ PRISM.bridge = (function () {
     emit("integration", `Integration ${it.name} ${it.enabled ? "enabled" : "disabled"}.`);
     S().save();
   }
+  function configureIntegration(id, config) {
+    const it = S().state.integrations.find(i => i.id === id);
+    if (!it) return;
+    it.config = (config || "").trim();
+    if (it.config && it.status === "not_connected") it.status = "configured";
+    it.logs.push(`${new Date().toLocaleString()} · configuration stored (future API credentials — unused until live APIs connect)`);
+    emit("integration", `Integration ${it.name} configured — credentials stored for future use.`);
+    S().save();
+  }
+
   function healthCheck(id) {
     const it = S().state.integrations.find(i => i.id === id);
     if (!it) return null;
@@ -258,6 +278,7 @@ PRISM.bridge = (function () {
       workerId: input.workerId || null,
       integrationId: input.integrationId || null,
       steps: input.steps || [],
+      expectedResult: (input.expectedResult || "").trim(),
       status: "idle",
       lastRun: null,
       runs: 0,
@@ -455,7 +476,7 @@ PRISM.bridge = (function () {
     workers, worker, workersByType,
     emit, events, eventCategories,
     addMemory, promoteMemory, deleteMemory, searchMemory,
-    ensureIntegrations, toggleIntegration, healthCheck,
+    ensureIntegrations, toggleIntegration, healthCheck, configureIntegration,
     addWorkflow, workflowsFor, runWorkflow, deleteWorkflow, successRate,
     router, setRoute, routeFor,
     activeRole, setRole, access, can,

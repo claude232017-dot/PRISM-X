@@ -151,7 +151,7 @@ tabbed control center).
 - **PRISM-X Bridge + Event Bus** — a central dispatch/log layer; every logged
   action across all four phases becomes a first-class, timestamped, categorized
   event (500-deep ring). The **Command Center** streams them live with
-  category/priority filters.
+  category / priority / worker / time-window filters.
 - **Shared Memory Engine** — private / shared / global memory tiers with kind
   (prompt · success · failure · decision · lesson), fully searchable; GOD CORE
   can promote a private memory to system-wide global.
@@ -160,10 +160,12 @@ tabbed control center).
   via `routeFor`), GPT/Gemini routes await their integrations.
 - **Integration Manager** — 13 placeholder cards (OpenAI, Claude, Gemini,
   Supabase, Make.com, n8n, Vapi, Voiceflow, GitHub, Gmail, Telegram, Discord,
-  Stripe) with enable toggle, mock health check, last-sync and logs. No live
-  APIs — both specs mandate this.
-- **Workflow Registry** — register workflows against a worker/trigger with
-  simulated execution and success-rate tracking (real Make.com/n8n later).
+  Stripe) with enable toggle, mock health check, last-sync, logs, and a
+  Configure editor that stores future credentials locally. No live APIs —
+  both specs mandate this.
+- **Workflow Registry** — register workflows with a worker, trigger, connected
+  tool (integration), execution steps, and expected result; simulated execution
+  with success-rate tracking (real Make.com/n8n later).
 - **Permission Engine** — 8 roles × 7 resources access matrix (Owner →
   Viewer), with a live role switcher that genuinely gates the Bridge (a Viewer
   is locked out of Revenue/Integrations/Automation).
