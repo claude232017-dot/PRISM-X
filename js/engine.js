@@ -403,6 +403,10 @@ PRISM.engine = (function () {
     if (task.knowledge && task.knowledge.length) {
       notes.push(`Vault knowledge applied: ${task.knowledge.map(k => k.title).join(" · ").slice(0, 140)}`);
     }
+    /* Phase Epsilon: collaboration chain acknowledgment */
+    if (task.chain && task.chain.length) {
+      notes.push(`Collaboration chain: built on ${task.chain.length} upstream output(s) — ${task.chain.map(x => x.from).join(", ").slice(0, 100)}`);
+    }
     /* Decision Framework binds every clone, whatever its learning source */
     if (dna && dna.decision) notes.push(`Decision framework honored: ${firstLine(dna.decision)}`);
     if (usesDNA && dna.mindset) notes.push(`GOD CORE DNA applied: ${firstLine(dna.mindset)}`);
@@ -493,6 +497,11 @@ PRISM.engine = (function () {
     if (task.knowledge && task.knowledge.length) {
       parts.push(`Relevant knowledge retrieved from the vault (apply where useful):`);
       task.knowledge.forEach(k => parts.push(`- [${k.category} · confidence ${k.confidence}/100] ${k.title}: ${k.excerpt}`));
+    }
+    /* Phase Epsilon: structured context handed down the collaboration chain */
+    if (task.chain && task.chain.length) {
+      parts.push(`Structured context from collaborating workers upstream (build directly on it):`);
+      task.chain.forEach(x => parts.push(`- ${x.from} · ${x.step}: ${x.excerpt}`));
     }
     parts.push(`Produce the artifact and plan now.`);
     return parts.filter(Boolean).join("\n");

@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -30,6 +30,8 @@
     else if (view === "runtime") renderRuntime(main);
     else if (view === "integrations") renderIntegrationCenter(main, parts[1]);
     else if (view === "knowledge") renderKnowledge(main, parts[1]);
+    else if (view === "missions") renderMissions(main, parts[1]);
+    else if (view === "mission" && parts[1]) renderMissionView(main, parts[1]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
@@ -47,6 +49,7 @@
         a.dataset.view === view ||
         (view === "clone" && a.dataset.view === "dashboard") ||
         (view === "worker" && a.dataset.view === "runtime") ||
+        (view === "mission" && a.dataset.view === "missions") ||
         (ghostViews && a.dataset.view === "ghosts") ||
         (shellViews && a.dataset.view === "shells"));
     });
@@ -300,6 +303,23 @@
       ]),
       el("div", { class: "cc-actions" }, [
         el("button", { class: "btn small " + (rts.activated ? "" : "gold-btn"), text: rts.activated ? "⚡ Open Runtime" : "⚡ Activate", onclick: () => go("#/runtime") })
+      ])
+    ]));
+
+    /* ---- Phase Epsilon strip: mission control ---- */
+    const mss = MS.stats();
+    wrap.appendChild(el("div", { class: "panel ghost-strip mission-strip" }, [
+      el("div", { class: "gs-left" }, [
+        el("span", { class: "gs-glyph", text: "🎯" }),
+        el("div", {}, [
+          el("div", { class: "panel-title", text: "Mission Control — Orchestration" }),
+          el("p", { class: "dim small-note", text: mss.total
+            ? `${mss.active} active · ${mss.completed} completed · ${mss.outputs} task outputs · ${mss.knowledgeDocs} knowledge doc(s) generated`
+            : "No missions yet — hand GOD CORE a high-level objective and it plans the graph." })
+        ])
+      ]),
+      el("div", { class: "cc-actions" }, [
+        el("button", { class: "btn small " + (mss.total ? "" : "gold-btn"), text: "🎯 Mission Control", onclick: () => go("#/missions") })
       ])
     ]));
 
@@ -2655,7 +2675,8 @@
       "GET /actions": () => B.api.actions.list(),
       "GET /executions": () => B.api.executions.list(),
       "GET /knowledge": () => B.api.knowledge.list(),
-      "GET /knowledge/search": () => B.api.knowledge.search("cold email")
+      "GET /knowledge/search": () => B.api.knowledge.search("cold email"),
+      "GET /missions": () => B.api.missions.list()
     };
     const btns = el("div", { class: "api-btns" });
     Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
@@ -3801,6 +3822,298 @@
       ...(s2.mostUsed.filter(d2 => d2.uses > 0).length ? s2.mostUsed.filter(d2 => d2.uses > 0).map(d2 => el("div", { class: "act-row" }, [el("b", { text: d2.title.slice(0, 40) }), el("span", { class: "dim small-note", text: d2.uses + " retrieval(s)" })])) : [el("p", { class: "empty-note", text: "Workers haven't retrieved yet — run a mission." })])
     ]));
     body.appendChild(grid);
+  }
+
+  /* =============================== mission control (PHASE EPSILON) =============================== */
+  const MS_TABS = [
+    ["control", "🎯 Mission Control"],
+    ["templates", "🧩 Templates"],
+    ["analytics", "📊 Mission Analytics"]
+  ];
+
+  function renderMissions(main, tab) {
+    tab = tab || "control";
+    MS.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `MISSION CONTROL <span class="dim">// phase epsilon — autonomous orchestration</span>` }),
+        el("p", { class: "page-sub", text: "A high-level objective becomes a dependency graph of tasks executed by collaborating Workers under GOD CORE supervision. Each Worker builds on the previous one's output; failures recover (retry → reassign → escalate) from checkpoints — completed work is never redone." })
+      ])
+    ]));
+    const tabs = el("div", { class: "bridge-tabs" });
+    MS_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/missions/" + k2, text: label
+    })));
+    wrap.appendChild(tabs);
+    const body = el("div", { class: "bridge-body" });
+    ({ control: msControl, templates: msTemplates, analytics: msAnalytics }[tab] || msControl)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  /* ---- MODULES 1 + 8 — control + live dashboard ---- */
+  function msControl(body) {
+    const s2 = MS.stats();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "ACTIVE" }), el("div", { class: "kpi-value", text: String(s2.active) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "COMPLETED" }), el("div", { class: "kpi-value", text: String(s2.completed) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "DELAYED / PAUSED" }), el("div", { class: "kpi-value", text: s2.delayed + " / " + s2.paused })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "TASKS DELIVERED" }), el("div", { class: "kpi-value", text: String(s2.outputs) })])
+    ]));
+
+    /* launch form */
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🚀 Launch a mission" })]));
+    const tplSel = el("select", { class: "input" });
+    tplSel.appendChild(el("option", { value: "", text: "— custom objective (generic pipeline) —" }));
+    MS.templates().forEach(t => tplSel.appendChild(el("option", { value: t.id, text: `${t.icon} ${t.name} — ${t.steps.length} tasks` })));
+    const priSel = el("select", { class: "input" });
+    [["high", "High"], ["normal", "Normal"], ["low", "Low"]].forEach(([v, l]) => priSel.appendChild(el("option", { value: v, text: l })));
+    priSel.value = "normal";
+    form.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Template (one click = full mission structure)" }), tplSel]));
+    form.appendChild(field("Mission name", f, "name", el("input", { class: "input", placeholder: "e.g. Launch AI Prompt Pack" })));
+    form.appendChild(field("Objective", f, "objective", el("input", { class: "input", placeholder: "the high-level outcome this mission must produce" })));
+    const dl = el("input", { class: "input", type: "number", min: 1, value: 7 });
+    form.appendChild(el("div", { class: "two-col" }, [
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Priority" }), priSel]),
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Deadline (days)" }), dl])
+    ]));
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "🎯 Plan Mission", onclick: () => {
+        const m = MS.plan({
+          templateId: tplSel.value || null,
+          name: f.name.value, objective: f.objective.value,
+          priority: priSel.value,
+          deadline: Date.now() + (parseInt(dl.value, 10) || 7) * 86400000
+        });
+        U.sfx("spawn");
+        toast(`Mission planned — ${m.tasks.length} tasks in the graph.`, "ok");
+        go("#/mission/" + m.id);
+      } })
+    ]));
+    body.appendChild(form);
+
+    /* live mission board */
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Missions (${MS.missions().length})` })]));
+    if (!MS.missions().length) panel.appendChild(el("p", { class: "empty-note", text: "No missions yet — launch one above." }));
+    MS.missions().slice().reverse().forEach(m => {
+      const h = MS.health(m);
+      const bn = MS.bottleneck(m);
+      panel.appendChild(el("div", { class: "ms-row", onclick: () => go("#/mission/" + m.id) }, [
+        el("div", { class: "ms-top" }, [
+          el("b", { text: `${m.icon} ${m.name}` }),
+          el("span", { class: "ms-health h-" + h.replace(/\s+/g, "-"), text: h }),
+          el("span", { class: "dim tiny-note", text: `${m.priority} · due ${new Date(m.deadline).toLocaleDateString()}` })
+        ]),
+        el("div", { class: "rt-bar ms-bar" }, [el("div", { class: "rt-bar-fill", style: `width:${MS.progress(m)}%` })]),
+        el("div", { class: "dim tiny-note", text: [
+          `${MS.progress(m)}% · ${m.tasks.filter(t => t.status === "done").length}/${m.tasks.length} tasks`,
+          `workers: ${Array.from(new Set(m.tasks.map(t => t.assignedWorkerName).filter(Boolean))).join(", ") || "unassigned"}`,
+          bn ? "next: " + bn : null,
+          m.status === "active" ? `est ${Math.ceil(MS.estCompletion(m) / 1000)}s remaining` : m.status
+        ].filter(Boolean).join(" · ") })
+      ]));
+    });
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 7 — templates ---- */
+  function msTemplates(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "One click creates the full mission structure. Completed missions saved as templates appear here too — the flywheel." }));
+    const grid = el("div", { class: "int-grid" });
+    MS.templates().forEach(t => grid.appendChild(el("div", { class: "int-card" }, [
+      el("div", { class: "int-top" }, [
+        el("b", { text: `${t.icon} ${t.name}` }),
+        t.custom ? el("span", { class: "int-status st-configured", text: "learned" }) : el("span", { class: "int-status", text: "built-in" })
+      ]),
+      el("p", { class: "dim small-note", text: t.objective }),
+      el("div", { class: "int-meta", text: t.steps.map(s2 => s2.label).join(" → ") }),
+      el("div", { class: "vi-actions" }, [
+        el("button", { class: "btn tiny primary", text: "🎯 Create mission", onclick: () => {
+          const m = MS.plan({ templateId: t.id });
+          toast(`"${m.name}" planned — ${m.tasks.length} tasks.`, "ok");
+          go("#/mission/" + m.id);
+        } })
+      ])
+    ])));
+    body.appendChild(grid);
+  }
+
+  /* ---- MODULE 10 — analytics ---- */
+  function msAnalytics(body) {
+    const s2 = MS.stats();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "SUCCESS RATE" }), el("div", { class: "kpi-value", text: s2.successRate == null ? "—" : s2.successRate + "%" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "AVG COMPLETION" }), el("div", { class: "kpi-value", text: s2.avgTimeMs ? (s2.avgTimeMs / 1000).toFixed(1) + "s" : "—" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "AVG MISSION SCORE" }), el("div", { class: "kpi-value", text: s2.avgScore == null ? "—" : s2.avgScore + "/100" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "EST COST" }), el("div", { class: "kpi-value", text: "$" + s2.totalCost })])
+    ]));
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Worker performance" })]),
+      ...(Object.keys(s2.byWorker).length ? Object.entries(s2.byWorker).map(([w, v]) => el("div", { class: "act-row" }, [
+        el("b", { text: w }),
+        el("span", { class: "dim small-note", text: `${v.done}/${v.tasks} tasks · avg ${v.done ? (v.ms / v.done / 1000).toFixed(1) : "—"}s` })
+      ])) : [el("p", { class: "empty-note", text: "No mission tasks executed yet." })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Provider usage" })]),
+      ...(Object.keys(s2.byProvider).length ? Object.entries(s2.byProvider).map(([p2, n]) => el("div", { class: "act-row" }, [
+        el("b", { text: p2 }), el("span", { class: "dim small-note", text: n + " task(s)" })
+      ])) : [el("p", { class: "empty-note", text: "—" })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Mission output (honest ROI)" })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Artifacts delivered" }), el("span", { class: "dim small-note", text: s2.outputs + " task output(s)" })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Knowledge generated" }), el("span", { class: "dim small-note", text: s2.knowledgeDocs + " vault doc(s)" })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Automation actions" }), el("span", { class: "dim small-note", text: s2.automation + " execution-layer call(s)" })]),
+      el("p", { class: "dim tiny-note", text: "ROI shown as real outputs vs estimated cost — no simulated revenue is attributed to missions." })
+    ]));
+    body.appendChild(grid);
+  }
+
+  /* ---- MODULES 2/3/4/5/6/9 — mission detail + dependency graph ---- */
+  function renderMissionView(main, id) {
+    const m = MS.mission(id);
+    if (!m) { go("#/missions"); return; }
+    MS.refreshGraph(m);
+    const wrap = el("div", { class: "page" });
+    const h = MS.health(m);
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("a", { class: "back-link", href: "#/missions", text: "← mission control" }),
+        el("h1", { class: "page-title", html: `${m.icon} ${esc(m.name)} <span class="dim">// ${esc(m.status)}</span>` }),
+        el("p", { class: "page-sub", text: `${m.objective} · priority ${m.priority} · due ${new Date(m.deadline).toLocaleDateString()} · health: ${h}` })
+      ]),
+      el("div", { class: "head-actions" }, [
+        m.status === "active" ? el("button", { class: "btn small", text: "▶ Run Next Task", onclick: async () => {
+          const res = await MS.runTask(m.id, null);
+          toast(res.ok ? `"${res.task.label}" done by ${res.task.assignedWorkerName}.` : res.reason + (res.recovery ? ` (recovery: ${res.recovery})` : ""), res.ok ? "ok" : "err");
+          go("#/mission/" + m.id);
+        } }) : null,
+        m.status === "active" ? el("button", { class: "btn small primary", text: "⚡ Run Mission (auto)", onclick: async (ev) => {
+          ev.currentTarget.disabled = true;
+          const res = await MS.runMission(m.id, () => {});
+          toast(res.ok ? "Mission completed — memory stored." : "Mission halted — see tasks.", res.ok ? "ok" : "info");
+          U.sfx(res.ok ? "evolve" : "click");
+          go("#/mission/" + m.id);
+        } }) : null,
+        m.status === "active" ? el("button", { class: "btn small ghost", text: "⏸ Pause", onclick: () => { MS.pauseMission(m.id); go("#/mission/" + m.id); } }) : null,
+        m.status === "paused" ? el("button", { class: "btn small gold-btn", text: "⏵ Resume from checkpoint", onclick: () => { MS.resumeMission(m.id); toast("Resumed — completed tasks preserved.", "ok"); go("#/mission/" + m.id); } }) : null,
+        m.status === "completed" ? el("button", { class: "btn small gold-btn", text: "⭐ Save as Template", onclick: () => { MS.saveAsTemplate(m.id); toast("Blueprint saved to Templates.", "ok"); go("#/missions/templates"); } }) : null
+      ].filter(Boolean))
+    ]));
+
+    /* dependency graph (M4) — layered DAG */
+    const graphPanel = el("div", { class: "panel" });
+    graphPanel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "🕸 Dependency graph" }),
+      el("div", { class: "rt-bar ms-bar", style: "width:180px" }, [el("div", { class: "rt-bar-fill", style: `width:${MS.progress(m)}%` })])
+    ]));
+    graphPanel.appendChild(msGraph(m));
+    wrap.appendChild(graphPanel);
+
+    /* required context */
+    wrap.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Mission requirements" })]),
+      el("div", { class: "dim small-note", text: `knowledge: ${m.requiredKnowledge.join(" · ") || "none matched yet"}` }),
+      el("div", { class: "dim small-note", text: `integrations: ${m.requiredIntegrations.join(" · ") || "none"}` })
+    ]));
+
+    /* task list (M3/M5) */
+    const tPanel = el("div", { class: "panel" });
+    tPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Tasks" })]));
+    m.tasks.forEach(t => {
+      const reSel = el("select", { class: "input inline-select" });
+      reSel.appendChild(el("option", { value: "", text: "reassign…" }));
+      S.state.clones.forEach(c2 => reSel.appendChild(el("option", { value: c2.id, text: c2.name })));
+      reSel.addEventListener("change", () => { if (reSel.value) { MS.assign(m, t, reSel.value); toast(`"${t.label}" → manual override.`, "info"); go("#/mission/" + m.id); } });
+      tPanel.appendChild(el("div", { class: "ms-task" }, [
+        el("span", { class: "q-state q-" + (t.status === "done" ? "completed" : t.status === "running" ? "running" : t.status === "failed" ? "failed" : t.status === "ready" ? "waiting" : "pending"), text: t.status }),
+        el("div", { class: "ms-task-mid" }, [
+          el("b", { text: t.label }),
+          el("div", { class: "dim tiny-note", text: [
+            t.taskType,
+            t.needs.length ? "needs: " + t.needs.join(", ") : "root",
+            t.assignedWorkerName ? `→ ${t.assignedWorkerName} (${t.assignmentReason})` : "unassigned (auto-assigns on run)",
+            t.contextFrom.length ? `context from: ${t.contextFrom.join("; ")}` : null,
+            t.attempts > 1 ? `attempts: ${t.attempts}` : null,
+            t.note
+          ].filter(Boolean).join(" · ") })
+        ]),
+        t.status === "done" ? el("button", { class: "btn tiny", text: "Output", onclick: () => U.modal({ title: t.label, cls: "wide", body: (() => { const b2 = el("div", { class: "modal-body" }); b2.appendChild(el("pre", { class: "output-pre", text: t.output })); return b2; })(), actions: [{ label: "Copy", onClick: () => U.copyText(t.output) }, { label: "Close", cls: "ghost" }] }) }) : null,
+        (t.status === "ready" && m.status === "active") ? el("button", { class: "btn tiny primary", text: "▶", title: "run this task", onclick: async () => {
+          const res = await MS.runTask(m.id, t.id);
+          toast(res.ok ? `Done by ${res.task.assignedWorkerName}.` : res.reason, res.ok ? "ok" : "err");
+          go("#/mission/" + m.id);
+        } }) : null,
+        reSel
+      ].filter(Boolean)));
+    });
+    wrap.appendChild(tPanel);
+
+    /* mission memory (M6) */
+    wrap.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧠 Mission memory" })]),
+      el("div", { class: "dim small-note", text: `time: ${m.timeTakenMs ? (m.timeTakenMs / 1000).toFixed(1) + "s" : "—"} · est cost: $${m.costEst} · success score: ${m.successScore != null ? m.successScore + "/100" : "—"}` }),
+      el("div", { class: "field-label", text: "DECISIONS", style: "margin-top:8px" }),
+      ...m.decisions.map(d2 => el("div", { class: "dim tiny-note", text: "• " + d2 })),
+      m.lessons.length ? el("div", { class: "field-label", text: "LESSONS", style: "margin-top:8px" }) : null,
+      ...m.lessons.map(l => el("div", { class: "dim tiny-note", text: "• " + l }))
+    ].filter(Boolean)));
+
+    main.appendChild(wrap);
+  }
+
+  function msGraph(m) {
+    const cols = {};
+    m.tasks.forEach(t => {
+      const d2 = MS.depthOf(m, t);
+      (cols[d2] = cols[d2] || []).push(t);
+    });
+    const depths = Object.keys(cols).map(Number).sort((a2, b2) => a2 - b2);
+    const W = Math.max(560, depths.length * 150), H = Math.max(200, Math.max(...depths.map(d2 => cols[d2].length)) * 74 + 40);
+    const pos = {};
+    depths.forEach(d2 => {
+      cols[d2].forEach((t, i) => {
+        pos[t.key] = { x: 80 + d2 * 150, y: 50 + i * 74 + (H - 80 - (cols[d2].length - 1) * 74) / 2 };
+      });
+    });
+    const COLOR = { done: "#0ca30c", running: "#f5c542", ready: "#c98500", blocked: "#4a4a55", failed: "#e66767" };
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("class", "kg-svg ms-svg");
+    m.tasks.forEach(t => t.needs.forEach(k2 => {
+      const a2 = pos[k2], b2 = pos[t.key];
+      if (!a2 || !b2) return;
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", a2.x + 12); line.setAttribute("y1", a2.y);
+      line.setAttribute("x2", b2.x - 12); line.setAttribute("y2", b2.y);
+      line.setAttribute("class", "kg-edge");
+      svg.appendChild(line);
+    }));
+    m.tasks.forEach(t => {
+      const p2 = pos[t.key];
+      const g = document.createElementNS(svgNS, "g");
+      const c2 = document.createElementNS(svgNS, "circle");
+      c2.setAttribute("cx", p2.x); c2.setAttribute("cy", p2.y); c2.setAttribute("r", 11);
+      c2.setAttribute("fill", COLOR[t.status] || "#4a4a55");
+      if (t.status === "running") c2.setAttribute("class", "ms-node-running");
+      const label = document.createElementNS(svgNS, "text");
+      label.setAttribute("x", p2.x); label.setAttribute("y", p2.y + 28);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("class", "kg-label");
+      label.textContent = t.label.slice(0, 20);
+      g.appendChild(c2); g.appendChild(label);
+      svg.appendChild(g);
+    });
+    const box = el("div", { class: "kg-box" });
+    box.appendChild(svg);
+    return box;
   }
 
   /* =============================== system memory =============================== */

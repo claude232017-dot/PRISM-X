@@ -55,7 +55,10 @@ PRISM.store = (function () {
     execLayerReady: false,
     /* Phase Delta — Knowledge & Memory Network */
     knowledge: { docs: [], links: [] },
-    knowledgeReady: false
+    knowledgeReady: false,
+    /* Phase Epsilon — Autonomous Orchestration */
+    missions: [],
+    missionTemplatesCustom: []
   });
 
   let state = load();

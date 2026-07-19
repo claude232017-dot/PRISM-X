@@ -328,6 +328,44 @@ every Worker consults before executing and feeds after. The loop becomes
   KPIs for items/links/retrievals/quality, growth chart, most active
   categories, recently learned concepts, retrieval frequency.
 
+## Phase Epsilon — Autonomous Orchestration (`#/missions`)
+
+Mission Control: a high-level objective becomes a coordinated, multi-worker
+operation. The loop is *mission → planner → task graph → collaborating
+workers → execution → mission memory → knowledge → reusable template*.
+
+- **Mission Control** — missions carry name, objective, priority, deadline,
+  status, progress, assigned workers, required integrations, required
+  knowledge (matched from the vault), dependencies and success scoring.
+- **Mission Planner** — five built-in blueprints (Product Launch, Cold
+  Outreach Campaign, Client Onboarding, Weekly Content Engine, Competitor
+  Analysis) plus a generic pipeline for custom objectives; the execution
+  graph is built before any work begins.
+- **Worker Collaboration Engine** — each task hands its output downstream
+  as structured context (`chain`) injected into the next worker's prompt
+  (Neural) or notes (Local); the task row shows exactly whose output it
+  built on.
+- **Dependency graph** — a layered SVG DAG colored by status; blocked tasks
+  genuinely refuse to run until parents complete.
+- **Dynamic assignment** — scored by role fit, average rating, availability,
+  lifetime earnings and provider fit, with the reasoning recorded on the
+  task and a manual-override select on every row.
+- **Failure recovery** — retry (same worker) → reassign (different worker)
+  → escalate (high-priority event + GOD CORE notification via System
+  Memory, mission paused). Resume restarts from the checkpoint — completed
+  tasks are never redone.
+- **Mission Memory** — decisions, lessons, time, estimated cost, success
+  score; completed missions write a playbook into the Knowledge Vault
+  (source `mission`) and can be saved as one-click templates (the flywheel).
+- **Live dashboard + analytics** — active/completed/delayed/paused KPIs,
+  per-mission health and bottlenecks, estimated completion, worker
+  performance, provider usage, knowledge generated, automation usage.
+  ROI is reported honestly as real outputs vs estimated cost — no
+  simulated revenue is attributed to missions.
+- Real-world tie-in: the Product Launch "Publish" step fires the Execution
+  Layer's `Publish Content` action live (a real Broadcast Queue item),
+  respecting least-privilege worker permissions.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -367,4 +405,4 @@ persistence), `js/ui.js` (components, charts, sound FX), `js/ghosts.js`
 `js/bridge.js` (Phase Alpha Bridge), `js/providers.js` (Phase H0 Intelligence
 Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/execution.js`
 (Phase Gamma Execution Layer), `js/knowledge.js` (Phase Delta Knowledge
-Network), `js/app.js` (views).
+Network), `js/missions.js` (Phase Epsilon Mission Control), `js/app.js` (views).
