@@ -137,6 +137,11 @@ PRISM.runtime = (function () {
     if (st.dna.decision) items.push({ src: "Decision Framework", text: st.dna.decision.split("\n")[0].slice(0, 90) });
     const q = (task.topic || "").split(/\s+/)[0] || "";
     if (q) B().searchMemory(q).slice(0, 2).forEach(m => items.push({ src: "shared memory (" + m.scope + ")", text: m.title.slice(0, 80) }));
+    /* Phase Delta: the vault answers "what knowledge do I need?" */
+    if (window.PRISM && PRISM.knowledge) {
+      task.knowledge = PRISM.knowledge.retrieve(`${task.topic || ""} ${task.type}`, 3, c.name);
+      task.knowledge.forEach(k => items.push({ src: "knowledge vault", text: `${k.title} (confidence ${k.confidence}/100)` }));
+    }
     const lastExec = rt().executions.filter(x => x.success).slice(-1)[0];
     if (lastExec) items.push({ src: "execution history", text: `Last mission: ${lastExec.taskType} — ${lastExec.topic}`.slice(0, 90) });
     return items;
@@ -234,6 +239,7 @@ PRISM.runtime = (function () {
         eventsGenerated: 0, /* patched below once the completion event lands */
         wfId: wf.id, wfName: wf.name,
         artifactLabel: out.artifactLabel || task.type,
+        knowledgeUsed: (task.knowledge || []).length,
         output: out.text.slice(0, 4000),
         completion: 100, quality: autoQuality(out.text), feedback: null
       };
@@ -297,6 +303,8 @@ PRISM.runtime = (function () {
     c.ratingLog.push(starsGiven);
     if (starsGiven >= 4) {
       B().addMemory({ title: `Winning pattern — ${exec.taskType}: ${exec.topic}`.slice(0, 90), body: `Rated ${starsGiven}/5 by the owner. Quality ${exec.quality}/100 in ${(exec.ms / 1000).toFixed(1)}s.`, scope: "global", kind: "lesson" });
+      /* Phase Delta learning engine: should this become knowledge? Yes. */
+      if (window.PRISM && PRISM.knowledge) PRISM.knowledge.learnFromExecution(exec, starsGiven);
     } else if (starsGiven <= 2) {
       B().addMemory({ title: `Weak output — ${exec.taskType}: ${exec.topic}`.slice(0, 90), body: `Rated ${starsGiven}/5 — adjust the approach next mission.`, scope: "shared", kind: "failure" });
     }

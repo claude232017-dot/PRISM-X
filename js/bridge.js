@@ -125,7 +125,8 @@ PRISM.bridge = (function () {
     audit: "evolution", upgrade: "evolution", dna: "evolution", repeat: "automation",
     share: "memory", workflow: "automation", integration: "system",
     memory: "memory", api: "system", permission: "system", bridge: "system",
-    provider: "intelligence", runtime: "execution", action: "execution"
+    provider: "intelligence", runtime: "execution", action: "execution",
+    knowledge: "knowledge"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 
@@ -425,6 +426,21 @@ PRISM.bridge = (function () {
     workflows: {
       list: () => { const r = S().state.workflows; logApi("GET /workflows", r.length); return r; }
     },
+    /* Phase Delta — the Knowledge Network speaks Bridge API too */
+    knowledge: {
+      list: () => {
+        const K = window.PRISM && PRISM.knowledge ? PRISM.knowledge : null;
+        const r = K ? K.docs().map(d => ({ id: d.id, title: d.title, category: d.category, layer: d.layer, type: d.type, confidence: K.confidence(d), uses: d.uses })) : [];
+        logApi("GET /knowledge", r.length);
+        return r;
+      },
+      search: (q) => {
+        const K = window.PRISM && PRISM.knowledge ? PRISM.knowledge : null;
+        const r = K ? K.search(q || "").map(h => ({ title: h.doc.title, matched: h.matched, score: +h.score.toFixed(2) })) : [];
+        logApi(`GET /knowledge/search?q=${q || ""}`, r.length);
+        return r;
+      }
+    },
     /* Phase Gamma — the Execution Layer speaks Bridge API too */
     actions: {
       list: () => {
@@ -458,7 +474,7 @@ PRISM.bridge = (function () {
       }
     }
   };
-  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions"];
+  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search"];
 
   /* ================================================================== *
    * MODULE 2 — Bridge dispatch (single routing choke point)

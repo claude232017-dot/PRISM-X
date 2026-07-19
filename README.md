@@ -292,6 +292,42 @@ module calls an external API directly.
 - Runtime tie-in: an evaluated First Intelligence mission can be published
   through the Execution Layer (`Publish Content` → real Broadcast Queue item).
 
+## Phase Delta — Knowledge & Memory Network (`#/knowledge`)
+
+The long-term memory: a searchable, linked, layered Knowledge Vault that
+every Worker consults before executing and feeds after. The loop becomes
+*retrieve → reason with context → execute → learn → store → improve*.
+
+- **Knowledge Vault** — frameworks, SOPs, research, notes, prompts, lessons,
+  playbooks, meeting notes, product docs, decision logs; every document
+  carries confidence, freshness, source, owner, last-updated and
+  verification status (Module 7), and everything is searchable.
+- **Auto-classification** — 13 categories (Business → Operations) via a
+  deterministic keyword scorer, plus manual override and custom tags.
+- **Semantic search, honestly labeled** — meaning-expanded lexical
+  retrieval: a synonym/concept graph expands the query ("outreach" finds
+  the cold-email doc), weighted title/tag/body scoring ranks it, and
+  confidence + freshness re-rank the results. True embeddings plug in when
+  a vector store connects — the UI says exactly this.
+- **Knowledge linking** — auto-links on ingest (similarity threshold) plus
+  manual linking; an SVG knowledge graph (node size = retrievals, color =
+  memory layer) with a relationship browser.
+- **Five memory layers** — personal / operational / business / intelligence
+  / system, filterable everywhere; the vault seeds itself from the live
+  system (DNA, Decision Framework, signature CTA, product angles, shell
+  playbooks, workflow performance, architecture map) — state-derived only.
+- **Automatic retrieval** — before every generation `engine.generate` asks
+  the vault "what knowledge do I need?" and injects the top matches into
+  the prompt (Neural) or the artifact notes (Local); runtime missions log
+  the retrieved docs in the live monitor and the execution record.
+- **Learning Engine** — a runtime mission rated 4★+ becomes knowledge
+  automatically: summarize → categorize → link → store → index, credited
+  to the worker as source `learning-engine`.
+- **Knowledge Explorer + Intelligence Dashboard** — browse categories,
+  relationships, recent additions, most-used and most-referenced docs;
+  KPIs for items/links/retrievals/quality, growth chart, most active
+  categories, recently learned concepts, retrieval frequency.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -330,4 +366,5 @@ persistence), `js/ui.js` (components, charts, sound FX), `js/ghosts.js`
 (Product Ghosts), `js/shells.js` (Outer Shells), `js/matrix.js` (Matrix Merge),
 `js/bridge.js` (Phase Alpha Bridge), `js/providers.js` (Phase H0 Intelligence
 Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/execution.js`
-(Phase Gamma Execution Layer), `js/app.js` (views).
+(Phase Gamma Execution Layer), `js/knowledge.js` (Phase Delta Knowledge
+Network), `js/app.js` (views).

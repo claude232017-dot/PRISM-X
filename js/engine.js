@@ -399,6 +399,10 @@ PRISM.engine = (function () {
     const out = gen(ctx, tone, r);
 
     const notes = ctxLines(ctx);
+    /* Phase Delta: surface which vault knowledge informed this artifact */
+    if (task.knowledge && task.knowledge.length) {
+      notes.push(`Vault knowledge applied: ${task.knowledge.map(k => k.title).join(" · ").slice(0, 140)}`);
+    }
     /* Decision Framework binds every clone, whatever its learning source */
     if (dna && dna.decision) notes.push(`Decision framework honored: ${firstLine(dna.decision)}`);
     if (usesDNA && dna.mindset) notes.push(`GOD CORE DNA applied: ${firstLine(dna.mindset)}`);
@@ -483,9 +487,14 @@ PRISM.engine = (function () {
       task.outcome ? `Target outcome: ${task.outcome}` : "",
       task.objection ? `Audience objection to pre-handle: ${task.objection}` : "",
       task.niche ? `Niche: ${task.niche}` : "",
-      task.urgency ? `Time urgency: ${task.urgency}` : "",
-      `Produce the artifact and plan now.`
+      task.urgency ? `Time urgency: ${task.urgency}` : ""
     ];
+    /* Phase Delta: relevant vault knowledge rides into the prompt */
+    if (task.knowledge && task.knowledge.length) {
+      parts.push(`Relevant knowledge retrieved from the vault (apply where useful):`);
+      task.knowledge.forEach(k => parts.push(`- [${k.category} · confidence ${k.confidence}/100] ${k.title}: ${k.excerpt}`));
+    }
+    parts.push(`Produce the artifact and plan now.`);
     return parts.filter(Boolean).join("\n");
   }
 
@@ -567,6 +576,10 @@ PRISM.engine = (function () {
    * provider executes (per-worker Intelligence Provider field, Auto = the
    * AI Router); unavailable providers fail over to the Local Cortex. */
   async function generate(clone, task, dna, settings) {
+    /* Phase Delta: every worker retrieves context before executing */
+    if (!task.knowledge && window.PRISM && PRISM.knowledge) {
+      try { task.knowledge = PRISM.knowledge.retrieve(`${task.topic || ""} ${task.type}`, 2, clone.name); } catch (_) { task.knowledge = []; }
+    }
     const category = categoryFor(task.type);
     const P = window.PRISM && PRISM.providers ? PRISM.providers : null;
     const sel = P ? P.resolve(clone.provider || "auto", category)

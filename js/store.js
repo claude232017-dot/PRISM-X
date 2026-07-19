@@ -52,7 +52,10 @@ PRISM.store = (function () {
     execHistory: [],
     execPerms: {},
     credVault: { salt: null, entries: {} },
-    execLayerReady: false
+    execLayerReady: false,
+    /* Phase Delta — Knowledge & Memory Network */
+    knowledge: { docs: [], links: [] },
+    knowledgeReady: false
   });
 
   let state = load();

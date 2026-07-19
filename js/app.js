@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -29,6 +29,7 @@
     else if (view === "intelligence") renderIntelligence(main, parts[1]);
     else if (view === "runtime") renderRuntime(main);
     else if (view === "integrations") renderIntegrationCenter(main, parts[1]);
+    else if (view === "knowledge") renderKnowledge(main, parts[1]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
@@ -2652,7 +2653,9 @@
       "GET /providers": () => B.api.providers.list(),
       "GET /providers/analytics": () => B.api.providers.analytics(),
       "GET /actions": () => B.api.actions.list(),
-      "GET /executions": () => B.api.executions.list()
+      "GET /executions": () => B.api.executions.list(),
+      "GET /knowledge": () => B.api.knowledge.list(),
+      "GET /knowledge/search": () => B.api.knowledge.search("cold email")
     };
     const btns = el("div", { class: "api-btns" });
     Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
@@ -3546,6 +3549,260 @@
     body.appendChild(panel);
   }
 
+  /* =============================== knowledge network (PHASE DELTA) =============================== */
+  const K_TABS = [
+    ["vault", "📚 Vault"],
+    ["search", "🔎 Semantic Search"],
+    ["graph", "🕸 Graph"],
+    ["dashboard", "📈 Intelligence Dashboard"]
+  ];
+
+  function renderKnowledge(main, tab) {
+    tab = tab || "vault";
+    K.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `KNOWLEDGE NETWORK <span class="dim">// phase delta — long-term memory</span>` }),
+        el("p", { class: "page-sub", text: "The vault every Worker consults before executing and feeds after. Search is meaning-expanded lexical retrieval (synonym graph + weighted scoring, re-ranked by confidence and freshness) — labeled honestly; true embeddings arrive with a vector store." })
+      ])
+    ]));
+    const tabs = el("div", { class: "bridge-tabs" });
+    K_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/knowledge/" + k2, text: label
+    })));
+    wrap.appendChild(tabs);
+    const body = el("div", { class: "bridge-body" });
+    ({ vault: kVault, search: kSearch, graph: kGraph, dashboard: kDashboard }[tab] || kVault)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  function kDocRow(d) {
+    return el("div", { class: "kd-row", onclick: () => kDocModal(d) }, [
+      el("span", { class: "cap-chip on", text: d.category }),
+      el("span", { class: "kd-layer l-" + d.layer, text: d.layer }),
+      el("b", { class: "kd-title", text: d.title }),
+      el("span", { class: "dim tiny-note", text: `${d.type} · conf ${K.confidence(d)} · fresh ${K.freshness(d)} · ${d.uses || 0} use(s) · ${K.linksFor(d.id).length} link(s)${d.verified === "verified" ? " · ✔ verified" : ""}` })
+    ]);
+  }
+
+  function kDocModal(d) {
+    const linked = K.linksFor(d.id).map(l => K.doc(l.from === d.id ? l.to : l.from)).filter(Boolean);
+    const b = el("div", { class: "modal-body" });
+    b.appendChild(el("div", { class: "dim small-note", text: [
+      `category ${d.category} · layer ${d.layer} · type ${d.type}`,
+      `source ${d.source} · owner ${d.owner}`,
+      `created ${new Date(d.createdAt).toLocaleString()} · updated ${timeAgo(d.updatedAt)}`,
+      `confidence ${K.confidence(d)}/100 · freshness ${K.freshness(d)}/100 · ${d.verified} · ${d.uses || 0} retrieval(s)`
+    ].join("\n"), style: "white-space:pre-line;margin-bottom:10px" }));
+    if (d.body) b.appendChild(el("pre", { class: "output-pre", text: d.body }));
+    if (linked.length) {
+      b.appendChild(el("div", { class: "field-label", text: "LINKED KNOWLEDGE", style: "margin-top:10px" }));
+      linked.forEach(o => b.appendChild(el("a", { class: "kd-link", text: "🔗 " + o.title, onclick: () => { U.closeModal(); setTimeout(() => kDocModal(o), 220); } })));
+    }
+    const linkSel = el("select", { class: "input", style: "margin-top:10px" });
+    linkSel.appendChild(el("option", { value: "", text: "— link to another document —" }));
+    K.docs().filter(o => o.id !== d.id && !linked.some(x => x.id === o.id)).forEach(o => linkSel.appendChild(el("option", { value: o.id, text: o.title })));
+    b.appendChild(linkSel);
+    U.modal({
+      title: "📚 " + d.title, cls: "wide", body: b, actions: [
+        { label: d.verified === "verified" ? "Un-verify" : "✔ Verify", onClick: () => { K.verifyDoc(d.id); toast("Verification updated — confidence " + K.confidence(K.doc(d.id)) + "/100.", "ok"); go("#/knowledge"); } },
+        { label: "Add link", onClick: () => { if (linkSel.value) { K.addLink(d.id, linkSel.value, "manual"); toast("Documents linked.", "ok"); } go("#/knowledge/graph"); } },
+        { label: "Delete", cls: "danger ghost", onClick: () => { K.deleteDoc(d.id); toast("Document removed.", "info"); go("#/knowledge"); } },
+        { label: "Close", cls: "ghost" }
+      ]
+    });
+  }
+
+  /* ---- MODULE 1 + 5 — vault browser + add form ---- */
+  function kVault(body) {
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "📥 Add knowledge" })]));
+    form.appendChild(field("Title", f, "title", el("input", { class: "input", placeholder: "e.g. Cold Email Framework v2" })));
+    form.appendChild(field("Content (markdown / notes / paste anything)", f, "body", el("textarea", { class: "input", rows: 4, placeholder: "frameworks · SOPs · research · prompts · lessons · playbooks · meeting notes · decisions…" })));
+    const typeSel = el("select", { class: "input" });
+    K.TYPES.forEach(t => typeSel.appendChild(el("option", { value: t, text: t })));
+    const catSel = el("select", { class: "input" });
+    catSel.appendChild(el("option", { value: "auto", text: "Auto-classify" }));
+    K.CATEGORIES.forEach(c2 => catSel.appendChild(el("option", { value: c2, text: c2 })));
+    const layerSel = el("select", { class: "input" });
+    Object.entries(K.LAYERS).forEach(([k2, l]) => layerSel.appendChild(el("option", { value: k2, text: l })));
+    layerSel.value = "intelligence";
+    form.appendChild(el("div", { class: "two-col" }, [
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Type" }), typeSel]),
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Category" }), catSel])
+    ]));
+    form.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Memory layer" }), layerSel]));
+    form.appendChild(field("Tags (comma-separated)", f, "tags", el("input", { class: "input", placeholder: "cold-email, outreach" })));
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "Store & index", onclick: () => {
+        if (!f.title.value.trim()) { toast("Title required.", "err"); return; }
+        const d = K.addDoc({ title: f.title.value, body: f.body.value, type: typeSel.value, category: catSel.value, layer: layerSel.value, tags: f.tags.value.split(","), source: "manual" });
+        toast(`Stored — auto-classified ${d.category}, ${K.linksFor(d.id).length} auto-link(s).`, "ok");
+        go("#/knowledge");
+      } })
+    ]));
+    body.appendChild(form);
+
+    const catFilter = el("select", { class: "input inline-select" });
+    ["all"].concat(K.CATEGORIES).forEach(c2 => catFilter.appendChild(el("option", { value: c2, text: "Category: " + c2 })));
+    const layerFilter = el("select", { class: "input inline-select" });
+    [["all", "Layer: all"]].concat(Object.keys(K.LAYERS).map(k2 => [k2, "Layer: " + k2])).forEach(([v, l]) => layerFilter.appendChild(el("option", { value: v, text: l })));
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: `Knowledge Vault (${K.docs().length})` }),
+      el("div", { class: "filter-row" }, [catFilter, layerFilter])
+    ]));
+    const list = el("div", {});
+    function draw() {
+      list.innerHTML = "";
+      const ds = K.docs().slice().reverse().filter(d =>
+        (catFilter.value === "all" || d.category === catFilter.value) &&
+        (layerFilter.value === "all" || d.layer === layerFilter.value));
+      if (!ds.length) list.appendChild(el("p", { class: "empty-note", text: "Nothing here yet — add knowledge above or let the Learning Engine feed the vault." }));
+      ds.slice(0, 30).forEach(d => list.appendChild(kDocRow(d)));
+    }
+    catFilter.addEventListener("change", draw); layerFilter.addEventListener("change", draw);
+    draw();
+    panel.appendChild(list);
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 3 — semantic search ---- */
+  function kSearch(body) {
+    const q = el("input", { class: "input", placeholder: `try: "what did we learn about cold email" · "my best landing page framework"` });
+    const results = el("div", {});
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🔎 Search by meaning, not filename" })]));
+    panel.appendChild(q);
+    panel.appendChild(el("p", { class: "dim tiny-note", text: "meaning-expanded retrieval: synonym graph + weighted title/tag/body scoring, re-ranked by confidence & freshness" }));
+    function draw() {
+      results.innerHTML = "";
+      if (!q.value.trim()) return;
+      const hits = K.search(q.value, { limit: 10 });
+      if (!hits.length) { results.appendChild(el("p", { class: "empty-note", text: "No knowledge matches — feed the vault and try again." })); return; }
+      hits.forEach(h => {
+        const row = kDocRow(h.doc);
+        row.appendChild(el("span", { class: "dim tiny-note", text: ` · matched: ${h.matched.slice(0, 5).join(", ")}` }));
+        results.appendChild(row);
+      });
+    }
+    q.addEventListener("input", draw);
+    panel.appendChild(results);
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 4 + 9 — knowledge graph + explorer ---- */
+  function kGraph(body) {
+    const ds = K.docs().slice(-24);
+    const ls = K.links().filter(l => ds.some(d => d.id === l.from) && ds.some(d => d.id === l.to));
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: `🕸 Knowledge graph — ${ds.length} node(s), ${K.links().length} link(s)` }),
+      el("span", { class: "dim small-note", text: "node size = retrievals · color = memory layer · click to open" })
+    ]));
+    if (ds.length < 2) panel.appendChild(el("p", { class: "empty-note", text: "Add a few documents to grow the graph." }));
+    else {
+      const W = 720, H = 420, cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 50;
+      const pos = {};
+      ds.forEach((d, i) => {
+        const ang = (i / ds.length) * Math.PI * 2 - Math.PI / 2;
+        pos[d.id] = { x: cx + R * Math.cos(ang), y: cy + R * Math.sin(ang) };
+      });
+      const LAYER_COLOR = { personal: "#f5c542", operational: "#0f9bbd", business: "#0ca30c", intelligence: "#9085e9", system: "#85847c" };
+      const svgNS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.setAttribute("class", "kg-svg");
+      ls.forEach(l => {
+        const a = pos[l.from], b2 = pos[l.to];
+        const line = document.createElementNS(svgNS, "line");
+        line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+        line.setAttribute("x2", b2.x); line.setAttribute("y2", b2.y);
+        line.setAttribute("class", "kg-edge");
+        svg.appendChild(line);
+      });
+      ds.forEach(d => {
+        const p2 = pos[d.id];
+        const g = document.createElementNS(svgNS, "g");
+        g.setAttribute("class", "kg-node");
+        g.addEventListener("click", () => kDocModal(d));
+        const c2 = document.createElementNS(svgNS, "circle");
+        c2.setAttribute("cx", p2.x); c2.setAttribute("cy", p2.y);
+        c2.setAttribute("r", 6 + Math.min(10, (d.uses || 0) * 2));
+        c2.setAttribute("fill", LAYER_COLOR[d.layer] || "#85847c");
+        const t = document.createElementNS(svgNS, "text");
+        t.setAttribute("x", p2.x); t.setAttribute("y", p2.y + (p2.y > cy ? 26 : -16));
+        t.setAttribute("text-anchor", "middle");
+        t.setAttribute("class", "kg-label");
+        t.textContent = d.title.slice(0, 22) + (d.title.length > 22 ? "…" : "");
+        g.appendChild(c2); g.appendChild(t);
+        svg.appendChild(g);
+      });
+      const box = el("div", { class: "kg-box" });
+      box.appendChild(svg);
+      panel.appendChild(box);
+    }
+    body.appendChild(panel);
+
+    const s2 = K.stats();
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Recent additions" })]),
+      ...s2.recent.map(d => kDocRow(d))
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Most used knowledge" })]),
+      ...(s2.mostUsed.filter(d => d.uses > 0).length ? s2.mostUsed.filter(d => d.uses > 0).map(d => kDocRow(d)) : [el("p", { class: "empty-note", text: "No retrievals yet." })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Most referenced" })]),
+      ...(s2.mostRef.filter(x => x.n > 0).length ? s2.mostRef.filter(x => x.n > 0).map(x => kDocRow(x.d)) : [el("p", { class: "empty-note", text: "No links yet." })])
+    ]));
+    body.appendChild(grid);
+  }
+
+  /* ---- MODULE 10 — intelligence dashboard ---- */
+  function kDashboard(body) {
+    const s2 = K.stats();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "KNOWLEDGE ITEMS" }), el("div", { class: "kpi-value", text: String(s2.items) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "LINKS" }), el("div", { class: "kpi-value", text: String(s2.links) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "RETRIEVALS" }), el("div", { class: "kpi-value", text: String(s2.retrievals) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "QUALITY (AVG CONF · VERIFIED)" }), el("div", { class: "kpi-value", text: s2.avgConfidence + " · " + s2.verifiedPct + "%" })])
+    ]));
+
+    /* knowledge growth — docs per day, last 14 days */
+    const days = [];
+    for (let i = 13; i >= 0; i--) {
+      const d2 = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+      days.push({ label: d2.slice(5), value: s2.perDay[d2] || 0 });
+    }
+    const growth = el("div", { class: "panel" });
+    growth.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Knowledge growth — items added per day" })]));
+    const chartBox = el("div", { class: "chart-box" });
+    growth.appendChild(chartBox);
+    U.barChart(chartBox, { labels: days.map(d2 => d2.label), values: days.map(d2 => d2.value), height: 150, label: "knowledge growth" });
+    body.appendChild(growth);
+
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Most active categories" })]),
+      ...(s2.byCat.length ? s2.byCat.slice(0, 6).map(([c2, n]) => el("div", { class: "act-row" }, [el("span", { class: "cap-chip on", text: c2 }), el("b", { text: n + " item(s)" })])) : [el("p", { class: "empty-note", text: "Empty vault." })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Recently learned (Learning Engine)" })]),
+      ...(s2.recentLearned.length ? s2.recentLearned.map(d2 => kDocRow(d2)) : [el("p", { class: "empty-note", text: "Rate a runtime mission 4★+ and the Learning Engine writes the lesson here." })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Retrieval frequency" })]),
+      ...(s2.mostUsed.filter(d2 => d2.uses > 0).length ? s2.mostUsed.filter(d2 => d2.uses > 0).map(d2 => el("div", { class: "act-row" }, [el("b", { text: d2.title.slice(0, 40) }), el("span", { class: "dim small-note", text: d2.uses + " retrieval(s)" })])) : [el("p", { class: "empty-note", text: "Workers haven't retrieved yet — run a mission." })])
+    ]));
+    body.appendChild(grid);
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -3775,6 +4032,7 @@
                 logic: onboardRefs._logic || "", decision: onboardRefs._decision || "",
                 cta: onboardRefs._cta || ""
               }, demoChk.checked);
+              K.boot(); /* Phase Delta: the freshly trained DNA seeds the Knowledge Vault */
               U.sfx("evolve"); U.evolveFlash();
               overlay.classList.remove("show");
               setTimeout(() => overlay.remove(), 400);
@@ -3805,6 +4063,7 @@
     B.boot(); /* Phase Alpha: bring the Bridge online, provision placeholders */
     P.boot(); /* Phase H0: register providers, route intelligence through the Manager */
     X.boot(); /* Phase Gamma: arm the Execution Layer (integrations, actions, vault) */
+    K.boot(); /* Phase Delta: seed + index the Knowledge & Memory Network */
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();
