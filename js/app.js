@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -28,6 +28,7 @@
     else if (view === "bridge") renderBridge(main, parts[1]);
     else if (view === "intelligence") renderIntelligence(main, parts[1]);
     else if (view === "runtime") renderRuntime(main);
+    else if (view === "integrations") renderIntegrationCenter(main, parts[1]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
@@ -2506,7 +2507,10 @@
     if (!B.can("Integrations", "read")) { body.appendChild(permDenied("Integrations")); return; }
     B.ensureIntegrations();
     const canManage = B.can("Integrations", "write");
-    body.appendChild(el("p", { class: "dim small-note", text: "Placeholder framework — cards are provisioned but no live APIs connect in Phase Alpha (both specs mandate this). Future credentials plug in here." }));
+    body.appendChild(el("p", { class: "dim small-note" }, [
+      el("span", { text: "Phase Alpha placeholder framework. The full control panel — adapters, action registry, credential vault, dry/live modes, worker permissions — now lives in the " }),
+      el("a", { href: "#/integrations", text: "Phase Gamma Integration Center →" })
+    ]));
     const grid = el("div", { class: "int-grid" });
     S.state.integrations.forEach(it => {
       grid.appendChild(el("div", { class: "int-card" }, [
@@ -2646,7 +2650,9 @@
       "GET /vault": () => B.api.vault.list(),
       "GET /workflows": () => B.api.workflows.list(),
       "GET /providers": () => B.api.providers.list(),
-      "GET /providers/analytics": () => B.api.providers.analytics()
+      "GET /providers/analytics": () => B.api.providers.analytics(),
+      "GET /actions": () => B.api.actions.list(),
+      "GET /executions": () => B.api.executions.list()
     };
     const btns = el("div", { class: "api-btns" });
     Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
@@ -3031,7 +3037,13 @@
             U.stars(0, (n) => {
               const res = RT.evaluate(exec.id, n);
               if (res.ok) { U.sfx("rate"); toast(`Evaluation stored — ${n}/5. Lesson written to memory.`, "ok"); go("#/runtime"); }
-            })
+            }),
+            el("button", { class: "btn tiny", text: "📤 Publish via Execution Layer", onclick: async () => {
+              const res = await X.execute({ workerId: c.id, actionId: "queue.publish", params: { text: exec.output.slice(0, 400), title: exec.taskType + " — " + exec.topic }, mode: "live" });
+              if (res.ok) toast("Queued to the Broadcast Queue via the Execution Engine.", "ok");
+              else if (res.denied) toast("Denied — grant this worker Publishing in Integration Permissions.", "err");
+              else toast(res.rec.error, "err");
+            } })
           ])
         ]));
       });
@@ -3286,6 +3298,252 @@
     wrap.appendChild(exPanel);
 
     main.appendChild(wrap);
+  }
+
+  /* =============================== integration center (PHASE GAMMA) =============================== */
+  const XC_TABS = [
+    ["integrations", "🔌 Integrations"],
+    ["actions", "⚡ Actions"],
+    ["monitor", "🖥 Monitor"],
+    ["history", "🧾 History"],
+    ["vault", "🔐 Vault"],
+    ["permissions", "🛡 Worker Permissions"]
+  ];
+
+  function renderIntegrationCenter(main, tab) {
+    tab = tab || "integrations";
+    X.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `INTEGRATION CENTER <span class="dim">// phase gamma — real-world execution layer</span>` }),
+        el("p", { class: "page-sub", text: "Every external action routes Worker → Bridge → Execution Engine → adapter. Dry Run (default) touches nothing; Live mode is real only where the browser can genuinely reach (Telegram, webhooks, Supabase, Broadcast Queue) — everything else says so instead of pretending. No silent failures." })
+      ])
+    ]));
+    const tabs = el("div", { class: "bridge-tabs" });
+    XC_TABS.forEach(([k, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k === tab ? " on" : ""), href: "#/integrations/" + k, text: label
+    })));
+    wrap.appendChild(tabs);
+    const body = el("div", { class: "bridge-body" });
+    ({
+      integrations: xcIntegrations, actions: xcActions, monitor: xcMonitor,
+      history: xcHistory, vault: xcVault, permissions: xcPermissions
+    }[tab] || xcIntegrations)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  /* ---- MODULE 1 — integration cards ---- */
+  function xcIntegrations(body) {
+    if (!B.can("Integrations", "read")) { body.appendChild(permDenied("Integrations")); return; }
+    const canManage = B.can("Integrations", "write");
+    const grid = el("div", { class: "int-grid" });
+    X.gammaIntegrations().forEach(it => {
+      const def = X.DEFS[it.key];
+      const nActions = (def.actions || []).filter(a => !a.inbound).length;
+      const auth = def.internal ? "internal — no credentials needed" : (X.vaultHas(it.key) ? `credentials in vault (${X.vaultFields(it.key).length})` : "no credentials");
+      grid.appendChild(el("div", { class: "int-card" + (it.mode === "live" ? " live-card" : "") }, [
+        el("div", { class: "int-top" }, [
+          el("div", {}, [el("b", { text: it.name }), el("span", { class: "dim small-note", text: " · " + it.group })]),
+          el("span", { class: "int-status st-" + it.status, text: it.status.replace("_", " ") })
+        ]),
+        el("div", { class: "int-meta", text: `auth: ${auth}` }),
+        el("div", { class: "int-meta", text: `last sync: ${it.lastSync ? timeAgo(it.lastSync) : "never"} · ${nActions} action(s) · ${it.logs.length} log(s)` }),
+        el("div", { class: "int-meta", text: def.internal ? "transport: internal (REAL)" : def.live ? `live transport: ${def.live} (browser-reachable)` : "live: needs server relay — dry run only" }),
+        canManage ? el("div", { class: "vi-actions" }, [
+          el("button", { class: "btn tiny " + (it.mode === "live" ? "gold-btn" : ""), text: it.mode === "live" ? "LIVE" : "Dry Run", title: "toggle test mode", onclick: () => { X.setMode(it.key, it.mode === "live" ? "dry" : "live"); go("#/integrations"); } }),
+          def.credSchema.length ? el("button", { class: "btn tiny", text: "Configure", onclick: () => xcVaultModal(it.key) }) : null,
+          el("button", { class: "btn tiny", text: "Logs", onclick: () => U.modal({ title: it.name + " — logs", cls: "wide", body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("pre", { class: "output-pre", text: it.logs.slice(-30).join("\n") })); return b; })(), actions: [{ label: "Close", cls: "ghost" }] }) })
+        ].filter(Boolean)) : el("div", { class: "dim tiny-note", text: "read-only for this role" })
+      ]));
+    });
+    body.appendChild(grid);
+  }
+
+  /* ---- MODULE 5 — vault configure modal (schema-driven) ---- */
+  function xcVaultModal(intKey) {
+    const def = X.DEFS[intKey];
+    const inputs = {};
+    const b = el("div", { class: "modal-body" }, [
+      el("p", { class: "dim small-note", text: `Credentials for ${def.name} — encrypted at rest (AES-GCM, device key) and decrypted only inside the Execution Engine. Workers never see them. Note: browser-local encryption protects casual inspection, not a compromised device.` })
+    ]);
+    def.credSchema.forEach(fld => {
+      const inp = el("input", { class: "input", type: fld.type === "password" ? "password" : "text", placeholder: fld.label });
+      inputs[fld.key] = inp;
+      b.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: fld.label }), inp]));
+    });
+    if (X.vaultHas(intKey)) b.appendChild(el("p", { class: "dim tiny-note", text: "Stored: " + X.vaultFields(intKey).map(f => f.field + " " + f.masked).join(" · ") + " (leave blank to keep)" }));
+    U.modal({
+      title: "🔐 Configure " + def.name, body: b, actions: [
+        { label: "Save to vault", cls: "primary", onClick: async () => {
+          for (const k of Object.keys(inputs)) {
+            if (inputs[k].value.trim()) await X.vaultSet(intKey, k, inputs[k].value.trim());
+          }
+          toast(def.name + " credentials stored in the vault.", "ok");
+          go("#/integrations");
+        } },
+        { label: "Cancel", cls: "ghost" }
+      ]
+    });
+  }
+
+  /* ---- MODULE 4 + 9 — action registry + execute ---- */
+  function xcActions(body) {
+    if (!B.can("Integrations", "read")) { body.appendChild(permDenied("Integrations")); return; }
+    const acts = X.actions();
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⚡ Execute an action" })]));
+    const wSel = el("select", { class: "input" });
+    wSel.appendChild(el("option", { value: "", text: "GOD CORE (owner — manual)" }));
+    B.workers().filter(w => w.type !== "executor").forEach(w => wSel.appendChild(el("option", { value: w.id, text: `${B.WORKER_TYPES[w.type].icon} ${w.name}` })));
+    const aSel = el("select", { class: "input" });
+    acts.forEach(a => aSel.appendChild(el("option", { value: a.id, text: `${a.label} — ${a.integrationName}` })));
+    const mSel = el("select", { class: "input" });
+    [["dry", "Dry Run — simulate, touch nothing"], ["live", "Live — real (where reachable)"]].forEach(([v, l]) => mSel.appendChild(el("option", { value: v, text: l })));
+    form.appendChild(el("div", { class: "two-col" }, [
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Acting worker" }), wSel]),
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Mode (Module 9 — test mode)" }), mSel])
+    ]));
+    form.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Action (from the registry — workers never call integrations directly)" }), aSel]));
+    const paramBox = el("div", {});
+    const paramInputs = {};
+    function drawParams() {
+      paramBox.innerHTML = "";
+      Object.keys(paramInputs).forEach(k => delete paramInputs[k]);
+      const a = X.action(aSel.value);
+      (a ? a.params : []).forEach(p => {
+        const inp = el("input", { class: "input", placeholder: p.ph || p.label });
+        paramInputs[p.key] = inp;
+        paramBox.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: p.label }), inp]));
+      });
+    }
+    aSel.addEventListener("change", drawParams);
+    drawParams();
+    form.appendChild(paramBox);
+    const monitor = el("div", { class: "panel rt-monitor xc-live", hidden: true });
+    const result = el("pre", { class: "output-pre", hidden: true });
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "▶ Execute through the Engine", onclick: async () => {
+        const params = {};
+        Object.keys(paramInputs).forEach(k => { params[k] = paramInputs[k].value; });
+        monitor.hidden = false;
+        const res = await X.execute({ workerId: wSel.value || null, actionId: aSel.value, params, mode: mSel.value }, (rec) => xcDrawMonitor(monitor, rec));
+        result.hidden = false;
+        result.textContent = (res.ok ? "✓ " : res.denied ? "🛡 " : "✗ ") + (res.rec.result || res.rec.error);
+        toast(res.ok ? "Action completed." : res.denied ? "Denied — least privilege." : "Action failed — see history.", res.ok ? "ok" : "err");
+      } })
+    ]));
+    form.appendChild(monitor);
+    form.appendChild(result);
+    body.appendChild(form);
+
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Action registry (${acts.length})` })]));
+    acts.forEach(a => panel.appendChild(el("div", { class: "act-row" }, [
+      el("span", { class: "cap-chip on", text: X.CATEGORIES[a.category] }),
+      el("b", { text: a.label }),
+      el("span", { class: "dim small-note", text: a.integrationName }),
+      el("span", { class: "dim tiny-note", text: a.liveTransport ? "live-capable" : "dry run only" })
+    ])));
+    body.appendChild(panel);
+  }
+
+  function xcDrawMonitor(monitor, rec) {
+    monitor.hidden = false;
+    monitor.innerHTML = "";
+    monitor.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "🖥 Execution monitor" }),
+      el("span", { class: "q-state q-" + (rec.status === "success" ? "completed" : rec.status === "running" ? "running" : "failed"), text: rec.status })
+    ]));
+    monitor.appendChild(el("div", { class: "rt-grid" }, [
+      rtFact("CURRENT ACTION", rec.action),
+      rtFact("INTEGRATION", rec.integration + " (" + rec.mode + ")"),
+      rtFact("WORKER", rec.workerName),
+      rtFact("DURATION", rec.ms ? (rec.ms / 1000).toFixed(2) + "s" : "running…"),
+      rtFact("RETRY COUNT", String(rec.retries)),
+      rtFact("COST", "$" + (rec.cost || 0))
+    ]));
+    if (rec.error) monitor.appendChild(el("p", { class: "empty-note", text: "⚠ " + rec.error + (rec.manualReview ? " — manual review suggested." : "") }));
+  }
+
+  /* ---- MODULE 6 — monitoring ---- */
+  function xcMonitor(body) {
+    const s2 = X.stats();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "EXECUTIONS" }), el("div", { class: "kpi-value", text: String(s2.total) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "SUCCESS / FAILED / DENIED" }), el("div", { class: "kpi-value", text: `${s2.success} / ${s2.failed} / ${s2.denied}` })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "AVG DURATION" }), el("div", { class: "kpi-value", text: s2.avgMs < 50 ? "instant" : (s2.avgMs / 1000).toFixed(1) + "s" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "MANUAL REVIEW" }), el("div", { class: "kpi-value", text: String(s2.review) })])
+    ]));
+    const panel = el("div", { class: "panel rt-monitor", style: "border-color: var(--line-strong); box-shadow: none;" });
+    if (s2.inFlight) xcDrawMonitor(panel, s2.inFlight);
+    else if (s2.last) { xcDrawMonitor(panel, s2.last); panel.insertBefore(el("p", { class: "dim small-note", text: "No execution in flight — showing the most recent." }), panel.firstChild); }
+    else panel.appendChild(el("p", { class: "empty-note", text: "No executions yet — run an action from the Actions tab." }));
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 8 — history ---- */
+  function xcHistory(body) {
+    const h = X.history();
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `🧾 Execution history (${h.length})` }), el("span", { class: "dim small-note", text: "timestamp · worker · provider · integration · action · result · runtime · status" })]));
+    if (!h.length) panel.appendChild(el("p", { class: "empty-note", text: "Nothing executed yet." }));
+    h.slice(0, 25).forEach(x => panel.appendChild(el("div", { class: "exec-row", onclick: () => U.modal({
+      title: "🧾 " + x.action, cls: "wide",
+      body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(el("pre", { class: "output-pre", text: JSON.stringify(x, null, 2) })); return b; })(),
+      actions: [{ label: "Close", cls: "ghost" }]
+    }) }, [
+      el("span", { class: "exec-ok " + (x.status === "success" ? "ok" : "bad"), text: x.status === "success" ? "✓" : x.status === "denied" ? "🛡" : "✗" }),
+      el("span", { class: "exec-name", text: `${x.action} · ${x.integration}` }),
+      el("span", { class: "dim tiny-note", text: `${new Date(x.at).toLocaleTimeString()} · ${x.workerName} · ${x.mode} · ${(x.ms / 1000).toFixed(1)}s · ${x.retries} retr${x.retries === 1 ? "y" : "ies"}${x.manualReview ? " · ⚠ review" : ""}` })
+    ])));
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 5 — vault tab ---- */
+  function xcVault(body) {
+    if (!B.can("Integrations", "write")) { body.appendChild(permDenied("the Credential Vault")); return; }
+    body.appendChild(el("p", { class: "dim small-note", text: "API keys, OAuth tokens, secrets and webhook URLs — encrypted at rest (AES-GCM with a device key), never exposed to Workers, decrypted only inside the Execution Engine. Browser-local encryption deters casual inspection; a server vault takes over when PRISM-X grows a backend." }));
+    const panel = el("div", { class: "panel" });
+    X.gammaIntegrations().forEach(it => {
+      const def = X.DEFS[it.key];
+      if (!def.credSchema.length) return;
+      const fields = X.vaultFields(it.key);
+      panel.appendChild(el("div", { class: "vault-row" }, [
+        el("b", { class: "hm-name", text: it.name }),
+        el("span", { class: "dim small-note", text: fields.length ? fields.map(f => `${f.field}: ${f.masked}`).join(" · ") : "empty" }),
+        el("div", { class: "vi-actions", style: "margin-left:auto" }, [
+          el("button", { class: "btn tiny", text: "Configure", onclick: () => xcVaultModal(it.key) }),
+          fields.length ? el("button", { class: "btn tiny danger ghost", text: "Clear", onclick: () => { X.vaultClear(it.key); go("#/integrations/vault"); } }) : null
+        ].filter(Boolean))
+      ]));
+    });
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 10 — worker permissions ---- */
+  function xcPermissions(body) {
+    if (!B.can("Integrations", "write")) { body.appendChild(permDenied("Integration Permissions")); return; }
+    body.appendChild(el("p", { class: "dim small-note", text: "Least privilege by default — a Worker with no grant is denied. GOD CORE owner actions pass through the Phase Alpha Permission Engine instead." }));
+    const ws = B.workers().filter(w => w.type !== "executor");
+    if (!ws.length) { body.appendChild(el("p", { class: "empty-note", text: "No AI workers yet." })); return; }
+    const cats = Object.keys(X.CATEGORIES);
+    const panel = el("div", { class: "panel", style: "overflow-x:auto" });
+    const table = el("div", { class: "cap-table", style: `grid-template-columns: 160px repeat(${cats.length}, 1fr); min-width: ${160 + cats.length * 92}px` });
+    table.appendChild(el("div", { class: "cap-head", text: "WORKER" }));
+    cats.forEach(cx => table.appendChild(el("div", { class: "cap-head", text: X.CATEGORIES[cx] })));
+    ws.slice(0, 14).forEach(w => {
+      table.appendChild(el("div", { class: "cap-prov", text: `${B.WORKER_TYPES[w.type].icon} ${w.name}` }));
+      cats.forEach(cx => {
+        const on = !!X.permsFor(w.id)[cx];
+        const cell = el("div", { class: "cap-cell perm-toggle " + (on ? "on" : "off"), text: on ? "✔" : "✖", title: "click to toggle" });
+        cell.addEventListener("click", () => { X.setPerm(w.id, cx, !on); go("#/integrations/permissions"); });
+        table.appendChild(cell);
+      });
+    });
+    panel.appendChild(table);
+    body.appendChild(panel);
   }
 
   /* =============================== system memory =============================== */
@@ -3546,6 +3804,7 @@
   function boot() {
     B.boot(); /* Phase Alpha: bring the Bridge online, provision placeholders */
     P.boot(); /* Phase H0: register providers, route intelligence through the Manager */
+    X.boot(); /* Phase Gamma: arm the Execution Layer (integrations, actions, vault) */
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();

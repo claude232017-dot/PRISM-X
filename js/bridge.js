@@ -125,7 +125,7 @@ PRISM.bridge = (function () {
     audit: "evolution", upgrade: "evolution", dna: "evolution", repeat: "automation",
     share: "memory", workflow: "automation", integration: "system",
     memory: "memory", api: "system", permission: "system", bridge: "system",
-    provider: "intelligence", runtime: "execution"
+    provider: "intelligence", runtime: "execution", action: "execution"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 
@@ -231,12 +231,17 @@ PRISM.bridge = (function () {
   ];
   function ensureIntegrations() {
     const st = S().state;
-    if (st.integrations && st.integrations.length) return;
-    st.integrations = DEFAULT_INTEGRATIONS.map(i => ({
-      id: uid("int"), key: i.key, name: i.name, group: i.group,
-      enabled: false, status: "not_connected", lastSync: null,
-      config: "", logs: [`${new Date().toLocaleString()} · card provisioned (placeholder)`]
-    }));
+    st.integrations = st.integrations || [];
+    /* top-up: older saves gain newly provisioned cards without losing state */
+    DEFAULT_INTEGRATIONS.forEach(i => {
+      if (!st.integrations.find(x => x.key === i.key)) {
+        st.integrations.push({
+          id: uid("int"), key: i.key, name: i.name, group: i.group,
+          enabled: false, status: "not_connected", lastSync: null,
+          config: "", logs: [`${new Date().toLocaleString()} · card provisioned (placeholder)`]
+        });
+      }
+    });
   }
   function toggleIntegration(id) {
     const it = S().state.integrations.find(i => i.id === id);
@@ -420,6 +425,23 @@ PRISM.bridge = (function () {
     workflows: {
       list: () => { const r = S().state.workflows; logApi("GET /workflows", r.length); return r; }
     },
+    /* Phase Gamma — the Execution Layer speaks Bridge API too */
+    actions: {
+      list: () => {
+        const X = window.PRISM && PRISM.execution ? PRISM.execution : null;
+        const r = X ? X.actions().map(a => ({ id: a.id, label: a.label, integration: a.integrationName, category: a.category })) : [];
+        logApi("GET /actions", r.length);
+        return r;
+      }
+    },
+    executions: {
+      list: () => {
+        const X = window.PRISM && PRISM.execution ? PRISM.execution : null;
+        const r = X ? X.history().slice(0, 25) : [];
+        logApi("GET /executions", r.length);
+        return r;
+      }
+    },
     /* Phase H0 — the Intelligence Provider Layer speaks Bridge API too */
     providers: {
       list: () => {
@@ -436,7 +458,7 @@ PRISM.bridge = (function () {
       }
     }
   };
-  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics"];
+  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions"];
 
   /* ================================================================== *
    * MODULE 2 — Bridge dispatch (single routing choke point)

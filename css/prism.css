@@ -981,3 +981,15 @@ select.input { appearance: auto; }
 .exec-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .insp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 4px; }
+
+/* ============================================================ *
+ * PHASE GAMMA — Real-World Execution Layer
+ * ============================================================ */
+.int-card.live-card { border-color: rgba(245,197,66,.45); }
+.act-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.act-row:last-child { border-bottom: none; }
+.vault-row { display: flex; align-items: center; gap: 12px; padding: 10px 6px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.vault-row:last-child { border-bottom: none; }
+.perm-toggle { cursor: pointer; transition: background .15s; }
+.perm-toggle:hover { background: var(--surface-2) !important; }
+.xc-live { margin-top: 14px; }

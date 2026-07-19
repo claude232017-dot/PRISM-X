@@ -249,6 +249,49 @@ executable intelligence. One Worker, one task at a time, until it's reliable.
   cost per execution; owner feedback (1–5★) feeds the same performance
   economics as Phase 1 and writes winning patterns to global Shared Memory.
 
+## Phase Gamma — Real-World Execution Layer (`#/integrations`)
+
+The universal execution layer: every external action from any Worker, Ghost,
+Shell or future module routes Worker → Bridge → Execution Engine → Integration
+Adapter, with the result written back to Shared Memory and the Event Bus. No
+module calls an external API directly.
+
+- **Integration Center** — cards for Make.com, n8n, Supabase, Vapi, Bland AI,
+  Gmail, Telegram, Discord, Stripe, GitHub, Notion, Google Drive, Airtable,
+  Slack, Future Integrations (+ the internal Broadcast Queue): connection
+  status, authentication state, health, last sync, available actions, logs,
+  Configure, and a per-integration **Dry Run / Live** mode toggle.
+- **Universal Execution Engine** (`js/execution.js`) — permissions gate →
+  adapter dispatch → retry policy → history record → Shared Memory → events
+  (`execution` category). Each worker's resolved intelligence provider is
+  recorded on every execution for context.
+- **Integration Adapters** — one standardized interface; ~30 registered
+  actions (Send Email, Trigger Scenario, Execute Workflow, Read/Insert/Update
+  Data, Generate Voice, Publish Content, Create CRM Lead…).
+- **Honesty line** — Dry Run (the default) simulates and touches nothing.
+  Live mode is real only where a browser can genuinely reach: Telegram Bot
+  API, Make/n8n/Discord/Slack webhooks, Supabase REST, and the internal
+  Broadcast Queue (a real local effect). Everything else honestly reports
+  that it needs a server-side relay instead of pretending.
+- **Credential Vault** — API keys, tokens, secrets, webhook URLs; AES-GCM
+  encrypted at rest (WebCrypto, device key), masked in every UI, never
+  exposed to Workers — decrypted only inside the Execution Engine. (Browser-
+  local encryption deters casual inspection; a server vault takes over when
+  PRISM-X grows a backend.)
+- **Monitoring + History** — live monitor (current action, integration,
+  duration, success, failure reason, retry count, cost) and a complete
+  execution history (timestamp, worker, provider, integration, action,
+  result, runtime, status).
+- **Retry & Recovery** — up to 2 retries with backoff; final failures log to
+  the integration, raise a high-priority event, notify GOD CORE via System
+  Memory and flag the record for manual review. No silent failures.
+- **Worker Permissions** — least privilege by default: per-worker grants by
+  action category (Communication, Automation, Data, Publishing, Files,
+  Voice, Payments, Dev); ungranted workers are denied with a logged event.
+  Owner-manual actions pass the Phase Alpha Permission Engine instead.
+- Runtime tie-in: an evaluated First Intelligence mission can be published
+  through the Execution Layer (`Publish Content` → real Broadcast Queue item).
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -286,4 +329,5 @@ Vanilla HTML/CSS/JS — zero dependencies. `js/data.js` (roles, tones, templates
 persistence), `js/ui.js` (components, charts, sound FX), `js/ghosts.js`
 (Product Ghosts), `js/shells.js` (Outer Shells), `js/matrix.js` (Matrix Merge),
 `js/bridge.js` (Phase Alpha Bridge), `js/providers.js` (Phase H0 Intelligence
-Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/app.js` (views).
+Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/execution.js`
+(Phase Gamma Execution Layer), `js/app.js` (views).
