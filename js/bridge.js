@@ -127,7 +127,7 @@ PRISM.bridge = (function () {
     memory: "memory", api: "system", permission: "system", bridge: "system",
     provider: "intelligence", runtime: "execution", action: "execution",
     knowledge: "knowledge", mission: "mission", evolve: "evolution",
-    org: "enterprise", extension: "system"
+    org: "enterprise", extension: "system", node: "network"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 
@@ -429,6 +429,15 @@ PRISM.bridge = (function () {
     workflows: {
       list: () => { const r = S().state.workflows; logApi("GET /workflows", r.length); return r; }
     },
+    /* Phase Iota — the Network speaks Bridge API too */
+    network: {
+      summary: () => {
+        const NW = window.PRISM && PRISM.network ? PRISM.network : null;
+        const r = NW ? Object.assign(NW.stats(), { alerts: NW.alerts().length }) : {};
+        logApi("GET /network", 1);
+        return r;
+      }
+    },
     /* Phase Eta — the Enterprise OS speaks Bridge API too */
     enterprise: {
       summary: () => {
@@ -511,7 +520,7 @@ PRISM.bridge = (function () {
       }
     }
   };
-  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search", "GET /missions", "GET /evolution", "GET /enterprise"];
+  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search", "GET /missions", "GET /evolution", "GET /enterprise", "GET /network"];
 
   /* ================================================================== *
    * MODULE 2 — Bridge dispatch (single routing choke point)

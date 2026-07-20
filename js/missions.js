@@ -175,7 +175,7 @@ PRISM.missions = (function () {
    * · provider fit) with manual override
    * ================================================================== */
   function busy(workerId) {
-    return missions().some(m2 => m2.tasks.some(t => t.status === "running" && t.assignedWorkerId === workerId));
+    return missions().some(m2 => (m2.tasks || []).some(t => t.status === "running" && t.assignedWorkerId === workerId));
   }
   function scoreWorker(c, task) {
     const role = D().ROLES[c.role] || { taskTypes: [] };
@@ -210,6 +210,12 @@ PRISM.missions = (function () {
     task.assignedWorkerId = c.id;
     task.assignedWorkerName = c.name;
     task.assignmentReason = reason;
+    /* Phase Iota: record which network node carries this task */
+    if (!task.nodeId && window.PRISM && PRISM.network) {
+      const nd = PRISM.network.nodeOf(c.id);
+      task.nodeId = nd.id;
+      task.nodeName = nd.name;
+    }
     emit(`Task assigned — "${task.label}" → ${c.name} (${reason}).`, { workerId: c.id });
     S().save();
     return c;
@@ -415,7 +421,7 @@ PRISM.missions = (function () {
     if (m.status === "completed") return "completed";
     if (m.status === "paused") return "paused";
     if (m.deadline && Date.now() > m.deadline) return "delayed";
-    return m.tasks.some(t => t.status === "failed") ? "at risk" : "on track";
+    return (m.tasks || []).some(t => t.status === "failed") ? "at risk" : "on track";
   }
   function stats() {
     ensure();

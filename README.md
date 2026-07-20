@@ -483,6 +483,44 @@ extension through one manager — the core (frozen at v1.0.0) never changes.
   alerts on threshold expenses, composers, focus pages…); community
   extensions later use the same SDK and manager with zero redesign.
 
+## Phase Iota — Distributed Intelligence Network (`#/network`)
+
+The architecture for infinite scale: nodes, distributed missions, global
+knowledge sync, a network worker pool, a resource scheduler, organization
+federation and disaster recovery.
+
+- **Network Control Center** — connected nodes, active orgs/workers, running
+  missions, network health, global events, session uptime, resource usage.
+- **Node architecture** — this browser is the real **PRIME** node with real
+  telemetry (JS heap, stored-state size, live queues). Additional nodes
+  (cloud/VPS/workspace/AI-server/edge) register as provisioned topology;
+  their telemetry is a **labeled simulation** until a remote runtime
+  connects — the UI marks every simulated number as such.
+- **Distributed Mission Engine** — spread a mission's task graph across
+  online nodes, load-balanced; remote tasks execute locally *on behalf of*
+  their node (and the mission log says exactly that) until remote runtimes
+  connect.
+- **Global Knowledge Synchronization** — export a sync payload, import one
+  with real conflict resolution (higher confidence wins, freshness breaks
+  ties) under automatic / manual / read-only policies; a full sync log.
+- **Distributed Worker Pool + Resource Scheduler** — workers are network
+  resources; the scheduler picks by skills, availability, node capacity,
+  provider access, current load and organization permissions, and a
+  balancer redistributes workers across online nodes.
+- **Organization Federation** — orgs are isolated by default (the scheduler
+  refuses to lend an org's workers to another org's missions); opt into
+  sharing knowledge / workers / extensions / templates / integrations /
+  blueprints per asset class.
+- **Disaster Recovery** — automatic boot snapshots (throttled), manual
+  restore points in localStorage, a restore wizard, and **node failover**:
+  a failed node's tasks and workers move to the healthiest survivor so
+  missions continue — verified end to end.
+- **Global Monitoring + Scalability Framework** — network health, mission
+  distribution, worker/provider utilization, cost analytics, alerts, plus a
+  capacity-headroom panel. Enterprise path: swap `store.js` for a server
+  adapter and every Bridge/API surface stays identical — horizontal scale
+  is just more nodes.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -524,4 +562,5 @@ Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/execution.js`
 (Phase Gamma Execution Layer), `js/knowledge.js` (Phase Delta Knowledge
 Network), `js/missions.js` (Phase Epsilon Mission Control), `js/evolution.js`
 (Phase Zeta Evolution Engine), `js/enterprise.js` (Phase Eta Enterprise OS),
-`js/extensions.js` (Phase Theta Extension Ecosystem), `js/app.js` (views).
+`js/extensions.js` (Phase Theta Extension Ecosystem), `js/network.js` (Phase Iota
+Distributed Network), `js/app.js` (views).

@@ -67,7 +67,10 @@ PRISM.store = (function () {
     enterpriseReady: false,
     /* Phase Theta — Extension Ecosystem */
     extensionsState: {},
-    extensionsReady: false
+    extensionsReady: false,
+    /* Phase Iota — Distributed Intelligence Network */
+    network: { nodes: [], syncLog: [], federation: {}, snapshotsMeta: [], nodeAssignments: {}, bootAt: 0 },
+    networkReady: false
   });
 
   let state = load();

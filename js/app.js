@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise, XT = PRISM.extensions;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise, XT = PRISM.extensions, NW = PRISM.network;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -36,6 +36,7 @@
     else if (view === "enterprise") renderEnterprise(main, parts[1]);
     else if (view === "extensions") renderExtensions(main, parts[1]);
     else if (view === "ext" && parts[1] && parts[2]) renderExtensionPage(main, parts[1], parts[2]);
+    else if (view === "network") renderNetwork(main, parts[1]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
@@ -2699,7 +2700,8 @@
       "GET /knowledge/search": () => B.api.knowledge.search("cold email"),
       "GET /missions": () => B.api.missions.list(),
       "GET /evolution": () => B.api.evolution.summary(),
-      "GET /enterprise": () => B.api.enterprise.summary()
+      "GET /enterprise": () => B.api.enterprise.summary(),
+      "GET /network": () => B.api.network.summary()
     };
     const btns = el("div", { class: "api-btns" });
     Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
@@ -5013,6 +5015,282 @@
     main.appendChild(wrap);
   }
 
+  /* =============================== distributed network (PHASE IOTA) =============================== */
+  const NW_TABS = [
+    ["control", "🌍 Control"],
+    ["missions", "🎯 Distribution"],
+    ["sync", "🔄 Knowledge Sync"],
+    ["pool", "👥 Worker Pool"],
+    ["federation", "🏢 Federation"],
+    ["recovery", "🛟 Recovery"],
+    ["monitor", "📊 Monitor"]
+  ];
+
+  function renderNetwork(main, tab) {
+    tab = tab || "control";
+    NW.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `NETWORK CONTROL CENTER <span class="dim">// phase iota — distributed intelligence</span>` }),
+        el("p", { class: "page-sub", text: "This browser is the real PRIME node. Registered nodes are provisioned topology — coordination, scheduling, failover, sync and backups are fully real; remote telemetry is a labeled simulation and remote tasks execute locally on behalf of their node until remote runtimes connect. Enterprise path: swap the store for a server adapter, every API stays identical." })
+      ])
+    ]));
+    const tabs = el("div", { class: "bridge-tabs" });
+    NW_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/network/" + k2, text: label
+    })));
+    wrap.appendChild(tabs);
+    const body = el("div", { class: "bridge-body" });
+    ({
+      control: nwControl, missions: nwMissions, sync: nwSync, pool: nwPool,
+      federation: nwFederation, recovery: nwRecovery, monitor: nwMonitor
+    }[tab] || nwControl)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  /* ---- MODULES 1 + 2 — control center + nodes ---- */
+  function nwControl(body) {
+    const s2 = NW.stats();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "NODES (ONLINE / FAILED)" }), el("div", { class: "kpi-value", text: `${s2.nodes} (${s2.online} / ${s2.failed})` })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "ORGS · WORKERS" }), el("div", { class: "kpi-value", text: s2.orgs + " · " + s2.workers })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "RUNNING MISSIONS" }), el("div", { class: "kpi-value", text: String(s2.missionsRunning) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "NETWORK HEALTH" }), el("div", { class: "kpi-value", text: s2.health + "/100" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "SESSION UPTIME" }), el("div", { class: "kpi-value", text: Math.round(s2.uptimeMs / 60000) + "m" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "GLOBAL EVENTS" }), el("div", { class: "kpi-value", text: String(s2.events) })])
+    ]));
+
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "➕ Register a node" })]));
+    const kindSel = el("select", { class: "input" });
+    NW.NODE_KINDS.forEach(k2 => kindSel.appendChild(el("option", { value: k2, text: k2 })));
+    const polSel = el("select", { class: "input" });
+    NW.SYNC_POLICIES.forEach(p2 => polSel.appendChild(el("option", { value: p2, text: "sync: " + p2 })));
+    form.appendChild(el("div", { class: "two-col" }, [
+      field("Node name", f, "name", el("input", { class: "input", placeholder: "e.g. Hetzner VPS · EU-1" })),
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Kind" }), kindSel])
+    ]));
+    form.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Sync policy" }), polSel]));
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "🌍 Register node", onclick: () => {
+        if (!f.name.value.trim()) { toast("Name the node.", "err"); return; }
+        NW.registerNode({ name: f.name.value, kind: kindSel.value, syncPolicy: polSel.value });
+        toast("Node registered — provisioned topology.", "ok");
+        go("#/network");
+      } })
+    ]));
+    body.appendChild(form);
+
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Nodes (${NW.nodes().length})` })]));
+    NW.nodes().forEach(n => {
+      const t = NW.telemetry(n);
+      const h = NW.nodeHealth(n);
+      panel.appendChild(el("div", { class: "ms-row" }, [
+        el("div", { class: "ms-top" }, [
+          el("b", { text: (n.real ? "⭐ " : "🌐 ") + n.name }),
+          el("span", { class: "ms-health h-" + (n.status === "failed" ? "delayed" : n.real ? "on-track" : "paused"), text: n.status }),
+          el("span", { class: "dim tiny-note", text: `${n.kind} · v${n.version} · sync ${n.syncPolicy}` })
+        ]),
+        el("div", { class: "dim tiny-note", text: t.real
+          ? `REAL telemetry — heap ${t.memMB != null ? t.memMB + "MB" : "n/a"} · state ${t.storageKB}KB · queue ${t.queue} · ${t.missions} active mission(s) · load ${NW.nodeLoad(n)}`
+          : `SIMULATED telemetry (no live link) — cpu ${t.cpu}% · mem ${t.memMB}MB · queue ${t.queue} · load ${NW.nodeLoad(n)} · ${h}` }),
+        !n.real ? el("div", { class: "vi-actions", style: "margin-top:6px" }, [
+          n.status !== "failed"
+            ? el("button", { class: "btn tiny danger ghost", text: "⚡ Simulate failure", onclick: () => { NW.failNode(n.id); toast("Node failed — failover engaged.", "err"); go("#/network"); } })
+            : el("button", { class: "btn tiny gold-btn", text: "↻ Revive", onclick: () => { NW.reviveNode(n.id); go("#/network"); } }),
+          el("button", { class: "btn tiny danger ghost", text: "Remove", onclick: () => { NW.removeNode(n.id); go("#/network"); } })
+        ]) : null
+      ].filter(Boolean)));
+    });
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 3 — distributed missions ---- */
+  function nwMissions(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Distribute a mission's task graph across online nodes. Coordination is real; remote tasks execute locally on behalf of their node (and the mission log says so) until remote runtimes connect." }));
+    const ms2 = MS.missions();
+    if (!ms2.length) { body.appendChild(el("p", { class: "empty-note", text: "No missions — plan one in Mission Control." })); return; }
+    ms2.slice().reverse().forEach(m => {
+      const used = Array.from(new Set(m.tasks.filter(t => t.nodeName).map(t => t.nodeName)));
+      const panel = el("div", { class: "panel" });
+      panel.appendChild(el("div", { class: "panel-head" }, [
+        el("h2", { class: "panel-title", text: `${m.icon} ${m.name} — ${m.status}` }),
+        m.status === "active" ? el("button", { class: "btn small gold-btn", text: "🌍 Distribute across nodes", onclick: () => {
+          const r = NW.distributeMission(m.id);
+          toast(`Distributed across ${r.nodesUsed.length} node(s).`, "ok");
+          go("#/network/missions");
+        } }) : el("span", { class: "dim small-note", text: used.length ? used.join(" → ") : "" })
+      ]));
+      m.tasks.forEach(t => panel.appendChild(el("div", { class: "act-row" }, [
+        el("span", { class: "q-state q-" + (t.status === "done" ? "completed" : t.status === "ready" ? "waiting" : "pending"), text: t.status }),
+        el("b", { text: t.label }),
+        el("span", { class: "dim tiny-note", text: t.nodeName ? "🌐 " + t.nodeName + (t.assignedWorkerName ? " · " + t.assignedWorkerName : "") : "unrouted" })
+      ])));
+      body.appendChild(panel);
+    });
+  }
+
+  /* ---- MODULE 4 — knowledge sync ---- */
+  function nwSync(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Knowledge scopes: local (this node) · organization (owner-tagged docs) · global (shared memory). Export a sync payload, import one with automatic conflict resolution (higher confidence wins, freshness breaks ties), or hold a node read-only." }));
+    const out = el("textarea", { class: "input", rows: 4, placeholder: "sync payload (JSON) — export fills this, or paste an incoming payload here" });
+    const polSel = el("select", { class: "input inline-select" });
+    NW.SYNC_POLICIES.forEach(p2 => polSel.appendChild(el("option", { value: p2, text: "policy: " + p2 })));
+    const panel = el("div", { class: "panel form-panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🔄 Synchronize knowledge" })]));
+    panel.appendChild(out);
+    panel.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn small", text: "⬆ Export from this node", onclick: () => { out.value = NW.exportKnowledge(); toast("Sync payload exported.", "ok"); } }),
+      polSel,
+      el("button", { class: "btn small primary", text: "⬇ Import payload", onclick: () => {
+        const r = NW.importKnowledge(out.value, polSel.value);
+        toast(r.ok ? (r.readOnly ? "Read-only — inspected, wrote nothing." : `Synced: +${r.added} new · ${r.resolved} incoming won · ${r.kept} local kept.`) : r.reason, r.ok ? "ok" : "err");
+        go("#/network/sync");
+      } })
+    ]));
+    body.appendChild(panel);
+    const logPanel = el("div", { class: "panel" });
+    logPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Synchronization log" })]));
+    const log = NW.syncLog();
+    if (!log.length) logPanel.appendChild(el("p", { class: "empty-note", text: "No sync activity yet." }));
+    log.slice(0, 12).forEach(l => logPanel.appendChild(el("div", { class: "dim tiny-note", text: `${new Date(l.at).toLocaleTimeString()} · ${l.text}` })));
+    body.appendChild(logPanel);
+  }
+
+  /* ---- MODULES 5 + 6 — worker pool + scheduler ---- */
+  function nwPool(body) {
+    body.appendChild(el("div", { class: "form-actions", style: "justify-content:flex-start;margin-bottom:12px" }, [
+      el("button", { class: "btn small primary", text: "⚖ Balance workloads across nodes", onclick: () => {
+        const r = NW.balance();
+        toast(r.moves ? `${r.moves} worker(s) redistributed.` : r.note || "Already balanced.", "info");
+        go("#/network/pool");
+      } })
+    ]));
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Network worker pool (${NW.pool().length})` })]));
+    NW.pool().forEach(w => panel.appendChild(el("div", { class: "act-row" }, [
+      el("b", { text: w.name }),
+      el("span", { class: "cap-chip on", text: w.role }),
+      el("span", { class: "dim small-note", text: `🌐 ${w.node}${w.org ? " · 🏢 " + w.org : " · common pool"} · load ${w.load}${w.rating ? " · ★" + w.rating : ""}` })
+    ])));
+    body.appendChild(panel);
+
+    const test = el("div", { class: "panel form-panel" });
+    test.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧮 Ask the scheduler" })]));
+    const typeSel = el("select", { class: "input inline-select" });
+    ["Write Tweet", "Build Offer", "Landing Page Copy", "Market Narrative Scan", "Opening DM"].forEach(t => typeSel.appendChild(el("option", { value: t, text: t })));
+    const res = el("pre", { class: "output-pre", text: "// pick a task type and ask" });
+    test.appendChild(el("div", { class: "rt-addrow" }, [typeSel, el("button", { class: "btn small", text: "Who should take this?", onclick: () => {
+      const r = NW.schedule({ taskType: typeSel.value });
+      res.textContent = r.pick
+        ? `→ ${r.pick.worker} on ${r.pick.node}\n   ${r.pick.reason}` + (r.excluded.length ? `\n\nexcluded by federation:\n` + r.excluded.map(x => `   ${x.worker} — ${x.reason}`).join("\n") : "")
+        : "no eligible worker";
+    } })]));
+    test.appendChild(res);
+    body.appendChild(test);
+  }
+
+  /* ---- MODULE 7 — federation ---- */
+  function nwFederation(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Organizations are isolated by default — the scheduler will not hand their workers to other orgs' missions. Opt into sharing per asset class." }));
+    const orgs = EN.orgs();
+    if (!orgs.length) { body.appendChild(el("p", { class: "empty-note", text: "No organizations yet — deploy one in the Enterprise OS." })); return; }
+    orgs.forEach(o => {
+      const fed = NW.federation(o.id);
+      const panel = el("div", { class: "panel" });
+      panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `${o.logo} ${o.name} — shares with the network` })]));
+      const row = el("div", { class: "deliv-row" });
+      NW.SHAREABLES.forEach(sh => {
+        const cb = el("input", { type: "checkbox" });
+        cb.checked = !!fed[sh];
+        cb.addEventListener("change", () => { NW.setShare(o.id, sh, cb.checked); });
+        row.appendChild(el("label", { class: "check-row", style: "margin:0 16px 6px 0" }, [cb, el("span", { class: "small-note", text: sh })]));
+      });
+      panel.appendChild(row);
+      body.appendChild(panel);
+    });
+  }
+
+  /* ---- MODULE 8 — disaster recovery ---- */
+  function nwRecovery(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Automatic snapshots on boot (max every 6h), manual restore points, and node failover (a failed node's tasks and workers move to the healthiest survivor — missions continue). Restoring swaps the live state and reloads." }));
+    body.appendChild(el("div", { class: "form-actions", style: "justify-content:flex-start;margin-bottom:12px" }, [
+      el("button", { class: "btn small primary", text: "📸 Take snapshot now", onclick: () => {
+        const r = NW.takeSnapshot("manual");
+        toast(r.ok ? "Restore point captured." : r.reason, r.ok ? "ok" : "err");
+        go("#/network/recovery");
+      } })
+    ]));
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `🛟 Restore points (${NW.snapshots().length}/5)` })]));
+    if (!NW.snapshots().length) panel.appendChild(el("p", { class: "empty-note", text: "No restore points yet — take one above." }));
+    NW.snapshots().forEach(s2 => panel.appendChild(el("div", { class: "act-row" }, [
+      el("b", { text: s2.label }),
+      el("span", { class: "dim small-note", text: `${new Date(s2.at).toLocaleString()} · ${s2.sizeKB} KB` }),
+      el("div", { class: "vi-actions", style: "margin-left:auto" }, [
+        el("button", { class: "btn tiny gold-btn", text: "↻ Restore", onclick: () => {
+          U.modal({
+            title: "🛟 Recovery wizard", body: (() => {
+              const b2 = el("div", { class: "modal-body" });
+              b2.appendChild(el("p", { text: `Restore "${s2.label}" from ${new Date(s2.at).toLocaleString()}? The current state will be replaced and PRISM-X will reload.` }));
+              return b2;
+            })(),
+            actions: [
+              { label: "Restore & reload", cls: "primary", onClick: () => { const r = NW.restoreSnapshot(s2.key); if (r.ok) location.reload(); else toast(r.reason, "err"); } },
+              { label: "Cancel", cls: "ghost" }
+            ]
+          });
+        } }),
+        el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { NW.deleteSnapshot(s2.key); go("#/network/recovery"); } })
+      ])
+    ])));
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULES 9 + 10 — global monitoring + scalability ---- */
+  function nwMonitor(body) {
+    const s2 = NW.stats();
+    const al = NW.alerts();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "NETWORK HEALTH" }), el("div", { class: "kpi-value", text: s2.health + "/100" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "WORKER UTILIZATION" }), el("div", { class: "kpi-value", text: (EN.executive().workerUtilization) + "%" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "PROVIDER COST (EST)" }), el("div", { class: "kpi-value", text: "$" + EN.executive().providerCosts })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "KNOWLEDGE OBJECTS" }), el("div", { class: "kpi-value", text: String(K.docs().length) })])
+    ]));
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🚨 Alerts" })]),
+      ...(al.length ? al.map(a => el("div", { class: "dim small-note", text: "• " + a })) : [el("p", { class: "empty-note", text: "All clear." })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Mission distribution" })]),
+      ...NW.nodes().map(n => el("div", { class: "act-row" }, [
+        el("b", { text: n.name }),
+        el("span", { class: "dim small-note", text: NW.nodeLoad(n) + " task load" + (n.real ? " (real)" : " (sim)") })
+      ]))
+    ]));
+    body.appendChild(grid);
+
+    const cap = el("div", { class: "panel" });
+    cap.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "📈 Scalability framework — capacity headroom" }),
+      el("span", { class: "dim small-note", text: "rings + caps keep the browser tier honest; horizontal scale = more nodes; the server adapter swap keeps every API identical" })
+    ]));
+    NW.capacity().forEach(c2 => {
+      const pct = Math.min(100, Math.round((c2.used / c2.cap) * 100));
+      cap.appendChild(el("div", { class: "act-row" }, [
+        el("b", { text: c2.name }),
+        el("div", { class: "rt-bar ms-bar", style: "width:160px;margin:0" }, [el("div", { class: "rt-bar-fill", style: `width:${pct}%` })]),
+        el("span", { class: "dim small-note", text: `${c2.used} / ${c2.cap} (${pct}%)` })
+      ]));
+    });
+    body.appendChild(cap);
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -5246,6 +5524,7 @@
               EV.boot(); /* Phase Zeta: baseline prompt versions for the new squadron */
               EN.boot(); /* Phase Eta: enterprise OS comes online with the operator */
               XT.boot(); /* Phase Theta: extension platform announces itself */
+              NW.boot(); /* Phase Iota: the network comes online with the operator */
               U.sfx("evolve"); U.evolveFlash();
               overlay.classList.remove("show");
               setTimeout(() => overlay.remove(), 400);
@@ -5280,6 +5559,7 @@
     EV.boot(); /* Phase Zeta: version prompts, start the evolution timeline */
     EN.boot(); /* Phase Eta: bring the Enterprise OS online */
     XT.boot(); /* Phase Theta: load enabled extensions through the manager */
+    NW.boot(); /* Phase Iota: register PRIME, arm auto-backups + failover */
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();
