@@ -125,6 +125,7 @@ PRISM.missions = (function () {
       status: "active",
       templateId: tpl ? tpl.id : null,
       createdAt: Date.now(), startedAt: null, completedAt: null,
+      clientId: input.clientId || null,
       requiredKnowledge: kn,
       requiredIntegrations: steps.filter(s2 => s2.action).map(s2 => (X() && X().action(s2.action) ? X().action(s2.action).integrationName : s2.action)),
       decisions: [`Planned from ${tpl ? 'template "' + tpl.name + '"' : "a custom objective (generic pipeline)"} — ${steps.length} tasks, graph built before execution.`],
@@ -218,10 +219,16 @@ PRISM.missions = (function () {
    * MODULES 3 + 9 — execution with collaboration chain + recovery
    * ================================================================== */
   function chainFor(m, task) {
-    return task.needs
+    const chain = task.needs
       .map(k2 => m.tasks.find(x => x.key === k2))
       .filter(t => t && t.status === "done" && t.output)
       .map(t => ({ from: t.assignedWorkerName || "worker", step: t.label, excerpt: t.output.slice(0, 300) }));
+    /* Phase Eta: missions carrying a CRM client hand every worker the brief */
+    if (m.clientId && window.PRISM && PRISM.enterprise) {
+      const brief = PRISM.enterprise.clientBrief(m.clientId);
+      if (brief) chain.unshift({ from: "CRM", step: "Client brief", excerpt: brief.slice(0, 300) });
+    }
+    return chain;
   }
 
   async function runTask(missionId, taskId, onTick) {

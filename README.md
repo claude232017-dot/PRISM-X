@@ -401,6 +401,46 @@ experiments — but deploys **nothing** without owner approval.
 - **Evolution Timeline** — every applied change, prompt version, experiment
   and accept/reject/rollback lands in a permanent evolutionary history.
 
+## Phase Eta — Enterprise Operating System (`#/enterprise`)
+
+One operating system for every business built inside PRISM-X — AI agency,
+SaaS, content brand, affiliate, consulting, ecommerce — all inheriting the
+same infrastructure.
+
+- **Organizations** — multiple orgs with logo, industry, status, live
+  revenue/expenses/profit, team roster, active missions and KPIs.
+- **CRM** — pipeline (lead → qualified → proposal → negotiation → won/lost),
+  worker + human assignments, contracts, notes, and a communication
+  timeline. Missions carrying a client automatically hand every worker the
+  **client brief** as structured context — the CRM genuinely feeds
+  execution.
+- **Revenue Center** — a real bookkeeping ledger: revenue/expense/refund
+  entries with categories, recurring flags driving MRR/ARR, live financial
+  dashboards. Simulated agent-network earnings can be imported but are
+  always tagged **[SIM]** and called out — never silently mixed with truth.
+- **Projects** — objectives, deadline, budget, deliverables, and a
+  one-click **Connect to Mission Control** that plans a real mission and
+  mirrors its progress back onto the project.
+- **Team Management** — humans, workers, ghosts and shells on one roster
+  with enterprise roles (Owner → Viewer) mapped onto the Phase Alpha
+  Permission Engine.
+- **Automation Hub** — the Client Acquisition Pipeline actually
+  orchestrates: CRM stage advance → mission planned with the client brief →
+  auto-run → proposal assets → draft invoice in the ledger → review request
+  on the timeline.
+- **Financial Intelligence** — most profitable clients, CLV, CAC, revenue
+  growth, category breakdown, real provider-cost estimates, tool costs.
+- **Executive Dashboard** — revenue, active missions, worker utilization,
+  provider costs, client health, a composite Business Health Score,
+  upcoming risks and recent wins.
+- **Business Templates** — six blueprints; one click deploys a complete
+  workspace: organization + CRM + a real forged worker + vault playbook +
+  ops workflow + automation + KPIs.
+- **Executive Reports** — daily/weekly/monthly/quarterly, compiled from
+  live data: revenue, growth, mission success, worker performance,
+  financial summary, Evolution-Engine recommendations and upcoming
+  priorities.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -441,4 +481,5 @@ persistence), `js/ui.js` (components, charts, sound FX), `js/ghosts.js`
 Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/execution.js`
 (Phase Gamma Execution Layer), `js/knowledge.js` (Phase Delta Knowledge
 Network), `js/missions.js` (Phase Epsilon Mission Control), `js/evolution.js`
-(Phase Zeta Evolution Engine), `js/app.js` (views).
+(Phase Zeta Evolution Engine), `js/enterprise.js` (Phase Eta Enterprise OS),
+`js/app.js` (views).

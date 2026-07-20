@@ -1047,3 +1047,8 @@ select.input { appearance: auto; }
 .sg-row { display: flex; align-items: flex-start; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--line); }
 .sg-row:last-child { border-bottom: none; }
 .sg-row .vi-actions { flex: none; }
+
+/* ============================================================ *
+ * PHASE ETA — Enterprise OS
+ * ============================================================ */
+.deliv-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }

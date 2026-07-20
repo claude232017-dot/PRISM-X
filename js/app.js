@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -33,6 +33,7 @@
     else if (view === "missions") renderMissions(main, parts[1]);
     else if (view === "mission" && parts[1]) renderMissionView(main, parts[1]);
     else if (view === "evolution") renderEvolution(main, parts[1]);
+    else if (view === "enterprise") renderEnterprise(main, parts[1]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
@@ -2678,7 +2679,8 @@
       "GET /knowledge": () => B.api.knowledge.list(),
       "GET /knowledge/search": () => B.api.knowledge.search("cold email"),
       "GET /missions": () => B.api.missions.list(),
-      "GET /evolution": () => B.api.evolution.summary()
+      "GET /evolution": () => B.api.evolution.summary(),
+      "GET /enterprise": () => B.api.enterprise.summary()
     };
     const btns = el("div", { class: "api-btns" });
     Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
@@ -4352,6 +4354,410 @@
     body.appendChild(panel);
   }
 
+  /* =============================== enterprise OS (PHASE ETA) =============================== */
+  const EN_TABS = [
+    ["executive", "🏛 Executive"],
+    ["orgs", "🏢 Organizations"],
+    ["crm", "🤝 CRM"],
+    ["revenue", "💰 Revenue"],
+    ["projects", "📁 Projects"],
+    ["team", "👥 Team"],
+    ["automations", "🔁 Automations"]
+  ];
+
+  function renderEnterprise(main, tab) {
+    tab = tab || "executive";
+    EN.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `ENTERPRISE OS <span class="dim">// phase eta — the business operating system</span>` }),
+        el("p", { class: "page-sub", text: "Every business built inside PRISM-X runs on the same infrastructure: organizations, CRM, ledger, projects wired to Mission Control, teams, automations and executive reporting. The ledger is real bookkeeping — simulated agent-network earnings can be imported but are always tagged [SIM], never mixed in silently." })
+      ])
+    ]));
+    const tabs = el("div", { class: "bridge-tabs" });
+    EN_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/enterprise/" + k2, text: label
+    })));
+    wrap.appendChild(tabs);
+    const body = el("div", { class: "bridge-body" });
+    ({
+      executive: enExecutive, orgs: enOrgs, crm: enCrm, revenue: enRevenue,
+      projects: enProjects, team: enTeam, automations: enAutomations
+    }[tab] || enExecutive)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  /* ---- MODULES 8 + 10 — executive dashboard + reports ---- */
+  function enExecutive(body) {
+    const ex = EN.executive();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "REVENUE (LEDGER)" }), el("div", { class: "kpi-value", text: EN.money(ex.revenue) }), ex.simulated ? el("div", { class: "kpi-delta", text: EN.money(ex.simulated) + " tagged [SIM]" }) : null].filter(Boolean)),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "PROFIT · MRR" }), el("div", { class: "kpi-value", text: EN.money(ex.profit) + " · " + EN.money(ex.mrr) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "BUSINESS HEALTH" }), el("div", { class: "kpi-value", text: ex.health + "/100" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "ACTIVE MISSIONS" }), el("div", { class: "kpi-value", text: String(ex.activeMissions) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "WORKER UTILIZATION" }), el("div", { class: "kpi-value", text: ex.workerUtilization + "%" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "CLIENTS (WON / AT RISK)" }), el("div", { class: "kpi-value", text: `${ex.clientHealth.total} (${ex.clientHealth.won} / ${ex.clientHealth.atRisk})` })])
+    ]));
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⚠ Upcoming risks" })]),
+      ...(ex.risks.length ? ex.risks.map(r => el("div", { class: "dim small-note", text: "• " + r })) : [el("p", { class: "empty-note", text: "No risks detected." })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🏆 Recent wins" })]),
+      ...(ex.wins.length ? ex.wins.map(w => el("div", { class: "dim small-note", text: "• " + w })) : [el("p", { class: "empty-note", text: "Wins land here — close a client or complete a mission." })])
+    ]));
+    body.appendChild(grid);
+
+    const repPanel = el("div", { class: "panel" });
+    const perSel = el("select", { class: "input inline-select" });
+    Object.keys(EN.PERIODS).forEach(p2 => perSel.appendChild(el("option", { value: p2, text: p2 })));
+    perSel.value = "weekly";
+    repPanel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: `📄 Executive reports (${EN.reports().length})` }),
+      el("div", { class: "filter-row" }, [perSel, el("button", { class: "btn small primary", text: "Generate report", onclick: () => {
+        EN.generateReport(perSel.value);
+        toast("Report generated from live system data.", "ok");
+        go("#/enterprise");
+      } })])
+    ]));
+    EN.reports().slice(0, 5).forEach(r => repPanel.appendChild(el("div", { class: "exec-row", onclick: () => U.modal({
+      title: "📄 " + r.period + " report — " + new Date(r.at).toLocaleDateString(), cls: "wide",
+      body: (() => { const b2 = el("div", { class: "modal-body" }); b2.appendChild(el("pre", { class: "output-pre", text: r.text })); return b2; })(),
+      actions: [{ label: "Copy", onClick: () => U.copyText(r.text) }, { label: "Close", cls: "ghost" }]
+    }) }, [
+      el("span", { class: "exec-ok ok", text: "📄" }),
+      el("span", { class: "exec-name", text: r.period.toUpperCase() + " — " + new Date(r.at).toLocaleString() })
+    ])));
+    if (!EN.reports().length) repPanel.appendChild(el("p", { class: "empty-note", text: "Generate the first report — it compiles revenue, growth, missions, worker performance, recommendations and priorities from live data." }));
+    body.appendChild(repPanel);
+  }
+
+  /* ---- MODULES 1 + 9 — organizations + business templates ---- */
+  function enOrgs(body) {
+    const tplPanel = el("div", { class: "panel" });
+    tplPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧩 Business templates — one click deploys a complete workspace" })]));
+    const tplGrid = el("div", { class: "int-grid" });
+    EN.BIZ_TEMPLATES.forEach(t => tplGrid.appendChild(el("div", { class: "int-card" }, [
+      el("div", { class: "int-top" }, [el("b", { text: `${t.icon} ${t.name}` }), el("span", { class: "dim small-note", text: t.industry })]),
+      el("div", { class: "int-meta", text: "KPIs: " + t.kpis.join(" · ") },),
+      el("div", { class: "int-meta", text: `deploys: org + CRM + ${t.cloneRole} worker + playbook + ops workflow + automation` }),
+      el("div", { class: "vi-actions" }, [
+        el("button", { class: "btn tiny primary", text: "🏛 Deploy", onclick: () => {
+          const res = EN.deployTemplate(t.id);
+          U.sfx("spawn"); U.evolveFlash();
+          toast(`${res.org.name} deployed — worker ${res.clone.name} forged, workspace ready.`, "ok");
+          go("#/enterprise/orgs");
+        } })
+      ])
+    ])));
+    tplPanel.appendChild(tplGrid);
+    body.appendChild(tplPanel);
+
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Organizations (${EN.orgs().length})` })]));
+    if (!EN.orgs().length) panel.appendChild(el("p", { class: "empty-note", text: "No organizations yet — deploy a template above." }));
+    EN.orgs().forEach(o => {
+      const fs = EN.financeStats(o.id);
+      const activeMissions = o.missionIds.map(id => MS.mission(id)).filter(m => m && m.status === "active").length;
+      panel.appendChild(el("div", { class: "ms-row", onclick: () => enOrgModal(o) }, [
+        el("div", { class: "ms-top" }, [
+          el("b", { text: `${o.logo} ${o.name}` }),
+          el("span", { class: "ms-health h-" + (o.status === "active" ? "on-track" : "paused"), text: o.status }),
+          el("span", { class: "dim tiny-note", text: o.industry })
+        ]),
+        el("div", { class: "dim tiny-note", text: `revenue ${EN.money(fs.revenue)} · expenses ${EN.money(fs.expenses)} · profit ${EN.money(fs.profit)} · team ${o.team.length} · ${activeMissions} active mission(s) · integrations ${o.integrationKeys.length || "org-wide"}` })
+      ]));
+    });
+    body.appendChild(panel);
+  }
+
+  function enOrgModal(o) {
+    const fs = EN.financeStats(o.id);
+    const b = el("div", { class: "modal-body" });
+    b.appendChild(el("pre", { class: "output-pre", text: [
+      `${o.logo} ${o.name} — ${o.industry} · ${o.status}`,
+      o.description,
+      ``,
+      `Revenue:  ${EN.money(fs.revenue)}   Expenses: ${EN.money(fs.expenses)}   Profit: ${EN.money(fs.profit)}`,
+      `MRR: ${EN.money(fs.mrr)} · ARR: ${EN.money(fs.arr)}`,
+      `Team: ${o.team.map(t => `${t.name} (${t.role})`).join(", ") || "—"}`,
+      `KPIs: ${o.kpis.join(" · ") || "—"}`,
+      `Missions: ${o.missionIds.length}`
+    ].join("\n") }));
+    U.modal({ title: o.logo + " " + o.name, cls: "wide", body: b, actions: [{ label: "Close", cls: "ghost" }] });
+  }
+
+  /* ---- MODULE 2 — CRM ---- */
+  function enCrm(body) {
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "➕ Add client" })]));
+    const orgSel = el("select", { class: "input" });
+    EN.orgs().forEach(o => orgSel.appendChild(el("option", { value: o.id, text: `${o.logo} ${o.name}` })));
+    form.appendChild(el("div", { class: "two-col" }, [
+      field("Name", f, "name", el("input", { class: "input", placeholder: "client name" })),
+      field("Company", f, "company", el("input", { class: "input", placeholder: "company" }))
+    ]));
+    form.appendChild(el("div", { class: "two-col" }, [
+      field("Email", f, "email", el("input", { class: "input", placeholder: "email" })),
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Organization" }), orgSel])
+    ]));
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "Add to pipeline", onclick: () => {
+        if (!f.name.value.trim()) { toast("Name required.", "err"); return; }
+        if (!EN.orgs().length) { toast("Deploy an organization first.", "err"); return; }
+        EN.addClient({ name: f.name.value, company: f.company.value, email: f.email.value, orgId: orgSel.value });
+        toast("Client added as a lead.", "ok");
+        go("#/enterprise/crm");
+      } })
+    ]));
+    body.appendChild(form);
+
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: `Pipeline (${EN.clients().length})` }),
+      el("span", { class: "dim small-note", text: EN.STAGES.join(" → ") })
+    ]));
+    if (!EN.clients().length) panel.appendChild(el("p", { class: "empty-note", text: "Empty pipeline — add the first lead." }));
+    EN.clients().slice().reverse().forEach(c => panel.appendChild(el("div", { class: "ms-row", onclick: () => enClientModal(c) }, [
+      el("div", { class: "ms-top" }, [
+        el("b", { text: c.name }),
+        el("span", { class: "q-state q-" + (c.stage === "won" ? "completed" : c.stage === "lost" ? "failed" : "waiting"), text: c.stage }),
+        el("span", { class: "dim tiny-note", text: (c.company ? c.company + " · " : "") + EN.money(EN.clientRevenue(c.id)) + " lifetime" })
+      ]),
+      el("div", { class: "dim tiny-note", text: c.timeline.slice(-1).map(t => t.text).join("") })
+    ])));
+    body.appendChild(panel);
+  }
+
+  function enClientModal(c) {
+    const b = el("div", { class: "modal-body" });
+    b.appendChild(el("div", { class: "dim small-note", style: "white-space:pre-line;margin-bottom:8px", text: [
+      `${c.name}${c.company ? " · " + c.company : ""}`,
+      `${c.email || "no email"} · ${c.phone || "no phone"}`,
+      `Lifetime revenue: ${EN.money(EN.clientRevenue(c.id))} · contracts: ${c.contracts.length}`
+    ].join("\n") }));
+    const stageSel = el("select", { class: "input" });
+    EN.STAGES.forEach(s2 => { const o = el("option", { value: s2, text: "stage: " + s2 }); if (s2 === c.stage) o.selected = true; stageSel.appendChild(o); });
+    stageSel.addEventListener("change", () => { EN.setStage(c.id, stageSel.value); toast("Stage updated.", "ok"); });
+    const wSel = el("select", { class: "input" });
+    wSel.appendChild(el("option", { value: "", text: "assigned worker: —" }));
+    S.state.clones.forEach(cl => { const o = el("option", { value: cl.id, text: "worker: " + cl.name }); if (cl.id === c.assignedWorkerId) o.selected = true; wSel.appendChild(o); });
+    wSel.addEventListener("change", () => { c.assignedWorkerId = wSel.value || null; S.save(); });
+    const hSel = el("select", { class: "input" });
+    hSel.appendChild(el("option", { value: "", text: "assigned human: —" }));
+    S.state.executors.forEach(x => { const o = el("option", { value: x.id, text: "human: " + x.name }); if (x.id === c.assignedHumanId) o.selected = true; hSel.appendChild(o); });
+    hSel.addEventListener("change", () => { c.assignedHumanId = hSel.value || null; S.save(); });
+    b.appendChild(el("div", { class: "two-col" }, [
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Pipeline stage" }), stageSel]),
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Assignments" }), el("div", {}, [wSel, hSel])])
+    ]));
+    const note = el("input", { class: "input", placeholder: "add a note…" });
+    b.appendChild(el("div", { class: "rt-addrow" }, [note, el("button", { class: "btn small", text: "+ Note", onclick: () => {
+      if (!note.value.trim()) return;
+      c.notes.push({ at: Date.now(), text: note.value.trim() });
+      EN.clientTimeline(c.id, "note", note.value.trim());
+      note.value = "";
+      toast("Note saved to the timeline.", "ok");
+    } })]));
+    b.appendChild(el("div", { class: "field-label", text: "COMMUNICATION TIMELINE", style: "margin-top:10px" }));
+    c.timeline.slice().reverse().slice(0, 10).forEach(t => b.appendChild(el("div", { class: "dim tiny-note", text: `${new Date(t.at).toLocaleString()} · ${t.kind} — ${t.text}` })));
+    U.modal({ title: "🤝 " + c.name, cls: "wide", body: b, actions: [{ label: "Close", cls: "ghost" }] });
+  }
+
+  /* ---- MODULES 3 + 7 — revenue center + financial intelligence ---- */
+  function enRevenue(body) {
+    if (!B.can("Revenue", "read")) { body.appendChild(permDenied("Revenue")); return; }
+    const fs = EN.financeStats(null);
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "REVENUE" }), el("div", { class: "kpi-value", text: EN.money(fs.revenue) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "EXPENSES · REFUNDS" }), el("div", { class: "kpi-value", text: EN.money(fs.expenses) + " · " + EN.money(fs.refunds) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "PROFIT" }), el("div", { class: "kpi-value", text: EN.money(fs.profit) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "MRR · ARR" }), el("div", { class: "kpi-value", text: EN.money(fs.mrr) + " · " + EN.money(fs.arr) })])
+    ]));
+    if (fs.simulated) body.appendChild(el("p", { class: "dim small-note", text: `⚠ ${EN.money(fs.simulated)} of the ledger is tagged [SIM] — imported from the agent networks' labeled simulations, kept separate from bookkeeping truth.` }));
+
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "➕ Record an entry" })]));
+    const kindSel = el("select", { class: "input" });
+    ["revenue", "expense", "refund"].forEach(k2 => kindSel.appendChild(el("option", { value: k2, text: k2 })));
+    const catSel = el("select", { class: "input" });
+    function drawCats() {
+      catSel.innerHTML = "";
+      (kindSel.value === "expense" ? EN.EXP_CATS : EN.REV_CATS).forEach(c2 => catSel.appendChild(el("option", { value: c2, text: c2 })));
+    }
+    kindSel.addEventListener("change", drawCats);
+    drawCats();
+    const rec = el("input", { type: "checkbox" });
+    form.appendChild(el("div", { class: "two-col" }, [
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Kind" }), kindSel]),
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Category" }), catSel])
+    ]));
+    form.appendChild(el("div", { class: "two-col" }, [
+      field("Amount ($)", f, "amount", el("input", { class: "input", type: "number", min: 0, step: 1 })),
+      field("Note", f, "note", el("input", { class: "input", placeholder: "what was this?" }))
+    ]));
+    form.appendChild(el("label", { class: "check-row" }, [rec, el("span", { text: "Recurring (counts toward MRR/ARR)" })]));
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "Record", onclick: () => {
+        const amt = +f.amount.value;
+        if (!amt) { toast("Amount required.", "err"); return; }
+        EN.addFinance({ kind: kindSel.value, category: catSel.value, amount: amt, note: f.note.value, recurring: rec.checked });
+        toast("Recorded in the ledger.", "ok");
+        go("#/enterprise/revenue");
+      } }),
+      el("button", { class: "btn ghost", text: "Import SIM earnings (labeled)", onclick: () => {
+        const n = EN.importSimEarnings(EN.orgs()[0] ? EN.orgs()[0].id : null);
+        toast(n == null ? "Already imported." : n ? n + " simulated line(s) imported — tagged [SIM]." : "No simulated earnings to import.", "info");
+        go("#/enterprise/revenue");
+      } })
+    ]));
+    body.appendChild(form);
+
+    const fi = EN.intelligence(null);
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧮 Financial intelligence" })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Customer lifetime value" }), el("span", { class: "dim small-note", text: EN.money(fi.clv) })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Acquisition cost (CAC)" }), el("span", { class: "dim small-note", text: EN.money(fi.cac) })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Revenue growth (wk/wk)" }), el("span", { class: "dim small-note", text: fi.growthPct + "%" })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Provider costs (real est)" }), el("span", { class: "dim small-note", text: "$" + fi.providerCosts })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Tool costs" }), el("span", { class: "dim small-note", text: EN.money(fi.toolCosts) })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Most profitable clients" })]),
+      ...(fi.topClients.length ? fi.topClients.map(c2 => el("div", { class: "act-row" }, [el("b", { text: c2.name }), el("span", { class: "dim small-note", text: `${c2.stage} · ${EN.money(c2.revenue)}` })])) : [el("p", { class: "empty-note", text: "No client revenue yet." })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Revenue by category" })]),
+      ...fi.byCat.map(([c2, v]) => el("div", { class: "act-row" }, [el("b", { text: c2 }), el("span", { class: "dim small-note", text: EN.money(v) })]))
+    ]));
+    body.appendChild(grid);
+
+    const list = el("div", { class: "panel" });
+    list.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Ledger (${fs.entries})` })]));
+    EN.ensure().finance.slice().reverse().slice(0, 12).forEach(fe => list.appendChild(el("div", { class: "act-row" }, [
+      el("span", { class: "exec-ok " + (fe.kind === "revenue" ? "ok" : "bad"), text: fe.kind === "revenue" ? "+" : "−" }),
+      el("b", { text: EN.money(fe.amount) }),
+      el("span", { class: "dim small-note", text: `${fe.kind} · ${fe.category}${fe.recurring ? " · recurring" : ""}${fe.simulated ? " · [SIM]" : ""}${fe.note ? " · " + fe.note : ""} · ${new Date(fe.at).toLocaleDateString()}` })
+    ])));
+    body.appendChild(list);
+  }
+
+  /* ---- MODULE 4 — projects ---- */
+  function enProjects(body) {
+    const f = {};
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "➕ Open a project" })]));
+    form.appendChild(field("Project name", f, "name", el("input", { class: "input", placeholder: "e.g. Client onboarding sprint" })));
+    form.appendChild(field("Objectives", f, "obj", el("input", { class: "input", placeholder: "what done looks like" })));
+    form.appendChild(field("Budget ($)", f, "budget", el("input", { class: "input", type: "number", min: 0 })));
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "Open project", onclick: () => {
+        if (!f.name.value.trim()) { toast("Name required.", "err"); return; }
+        EN.addProject({ name: f.name.value, objectives: f.obj.value, budget: f.budget.value });
+        toast("Project opened.", "ok");
+        go("#/enterprise/projects");
+      } })
+    ]));
+    body.appendChild(form);
+
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Projects (${EN.projects().length})` })]));
+    if (!EN.projects().length) panel.appendChild(el("p", { class: "empty-note", text: "No projects yet." }));
+    EN.projects().slice().reverse().forEach(p2 => {
+      const prog = EN.projectProgress(p2);
+      const m = p2.missionId && MS.mission(p2.missionId);
+      panel.appendChild(el("div", { class: "ms-row" }, [
+        el("div", { class: "ms-top" }, [
+          el("b", { text: "📁 " + p2.name }),
+          m ? el("span", { class: "ms-health h-on-track", text: "mission: " + m.status }) : el("button", { class: "btn tiny gold-btn", text: "🎯 Connect to Mission Control", onclick: (ev2) => { ev2.stopPropagation(); EN.connectMission(p2.id); toast("Mission planned from the project.", "ok"); go("#/enterprise/projects"); } }),
+          el("span", { class: "dim tiny-note", text: `due ${new Date(p2.deadline).toLocaleDateString()}${p2.budget ? " · budget " + EN.money(p2.budget) : ""}` })
+        ]),
+        el("div", { class: "rt-bar ms-bar" }, [el("div", { class: "rt-bar-fill", style: `width:${prog}%` })]),
+        el("div", { class: "deliv-row" }, p2.deliverables.map(d2 => el("label", { class: "check-row", style: "margin:0 14px 0 0" }, [
+          (() => { const cb = el("input", { type: "checkbox" }); cb.checked = d2.done; cb.addEventListener("change", () => { d2.done = cb.checked; S.save(); go("#/enterprise/projects"); }); return cb; })(),
+          el("span", { class: "small-note", text: d2.title })
+        ])))
+      ]));
+    });
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 5 — team ---- */
+  function enTeam(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Humans, Workers, Ghosts and Shells on one roster per organization. Enterprise roles map onto the Phase Alpha Permission Engine: " + Object.entries(EN.ROLE_MAP).map(([a, b2]) => `${a}→${b2}`).join(" · ") }));
+    if (!EN.orgs().length) { body.appendChild(el("p", { class: "empty-note", text: "Deploy an organization first." })); return; }
+    EN.orgs().forEach(o => {
+      const panel = el("div", { class: "panel" });
+      panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `${o.logo} ${o.name} — team (${o.team.length})` })]));
+      const kindSel = el("select", { class: "input inline-select" });
+      [["worker", "Worker (clone)"], ["human", "Human (executor)"], ["ghost", "Ghost"], ["shell", "Shell"]].forEach(([v, l]) => kindSel.appendChild(el("option", { value: v, text: l })));
+      const refSel = el("select", { class: "input inline-select" });
+      const roleSel = el("select", { class: "input inline-select" });
+      EN.TEAM_ROLES.forEach(r => roleSel.appendChild(el("option", { value: r, text: r })));
+      function drawRefs() {
+        refSel.innerHTML = "";
+        const pool = { human: S.state.executors, worker: S.state.clones, ghost: S.state.ghosts, shell: S.state.shells }[kindSel.value] || [];
+        pool.filter(x => !o.team.some(t => t.refId === x.id)).forEach(x => refSel.appendChild(el("option", { value: x.id, text: x.name })));
+      }
+      kindSel.addEventListener("change", drawRefs);
+      drawRefs();
+      panel.appendChild(el("div", { class: "rt-addrow" }, [kindSel, refSel, roleSel,
+        el("button", { class: "btn small", text: "+ Add", onclick: () => {
+          if (!refSel.value) { toast("Nobody left to add of that kind.", "err"); return; }
+          EN.addTeamMember(o.id, kindSel.value, refSel.value, roleSel.value);
+          go("#/enterprise/team");
+        } })
+      ]));
+      o.team.forEach(t => panel.appendChild(el("div", { class: "act-row" }, [
+        el("span", { class: "cap-chip on", text: t.kind }),
+        el("b", { text: t.name }),
+        el("span", { class: "dim small-note", text: `${t.role} → permissions: ${EN.ROLE_MAP[t.role] || "Viewer"}` })
+      ])));
+      if (!o.team.length) panel.appendChild(el("p", { class: "empty-note", text: "No team yet." }));
+      body.appendChild(panel);
+    });
+  }
+
+  /* ---- MODULE 6 — automation hub ---- */
+  function enAutomations(body) {
+    if (!EN.orgs().length) { body.appendChild(el("p", { class: "empty-note", text: "Deploy an organization first." })); return; }
+    EN.orgs().forEach(o => {
+      EN.automations(o.id).forEach(a => {
+        const panel = el("div", { class: "panel" });
+        panel.appendChild(el("div", { class: "panel-head" }, [
+          el("h2", { class: "panel-title", text: `🔁 ${a.name} — ${o.name}` }),
+          el("span", { class: "dim small-note", text: `${a.runs} run(s)${a.lastRun ? " · last " + timeAgo(a.lastRun) : ""}` })
+        ]));
+        const flow = el("div", { class: "flow-diagram", style: "flex-direction:row;flex-wrap:wrap;gap:6px" });
+        a.steps.forEach((s2, i) => {
+          flow.appendChild(el("div", { class: "flow-node" + (i === 2 ? " hot" : ""), text: s2 }));
+          if (i < a.steps.length - 1) flow.appendChild(el("div", { class: "flow-arrow", text: "→" }));
+        });
+        panel.appendChild(flow);
+        const cliSel = el("select", { class: "input inline-select" });
+        EN.clients().filter(c => c.orgId === o.id || !c.orgId).forEach(c => cliSel.appendChild(el("option", { value: c.id, text: c.name + " (" + c.stage + ")" })));
+        const runBtn = el("button", { class: "btn small primary", text: "▶ Run pipeline (real: CRM → mission → ledger)" });
+        runBtn.addEventListener("click", async () => {
+          if (!cliSel.value) { toast("Add a CRM client first.", "err"); return; }
+          runBtn.disabled = true;
+          runBtn.textContent = "◈ ORCHESTRATING…";
+          const res = await EN.runAutomation(a.id, cliSel.value);
+          toast(res.ok ? "Pipeline complete — mission done, stage advanced, draft invoice logged." : res.reason, res.ok ? "ok" : "err");
+          U.sfx(res.ok ? "evolve" : "click");
+          go("#/enterprise/automations");
+        });
+        panel.appendChild(el("div", { class: "rt-addrow", style: "margin-top:10px" }, [cliSel, runBtn]));
+        body.appendChild(panel);
+      });
+    });
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -4583,6 +4989,7 @@
               }, demoChk.checked);
               K.boot(); /* Phase Delta: the freshly trained DNA seeds the Knowledge Vault */
               EV.boot(); /* Phase Zeta: baseline prompt versions for the new squadron */
+              EN.boot(); /* Phase Eta: enterprise OS comes online with the operator */
               U.sfx("evolve"); U.evolveFlash();
               overlay.classList.remove("show");
               setTimeout(() => overlay.remove(), 400);
@@ -4615,6 +5022,7 @@
     X.boot(); /* Phase Gamma: arm the Execution Layer (integrations, actions, vault) */
     K.boot(); /* Phase Delta: seed + index the Knowledge & Memory Network */
     EV.boot(); /* Phase Zeta: version prompts, start the evolution timeline */
+    EN.boot(); /* Phase Eta: bring the Enterprise OS online */
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();

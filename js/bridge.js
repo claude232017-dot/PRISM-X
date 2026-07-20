@@ -126,7 +126,8 @@ PRISM.bridge = (function () {
     share: "memory", workflow: "automation", integration: "system",
     memory: "memory", api: "system", permission: "system", bridge: "system",
     provider: "intelligence", runtime: "execution", action: "execution",
-    knowledge: "knowledge", mission: "mission", evolve: "evolution"
+    knowledge: "knowledge", mission: "mission", evolve: "evolution",
+    org: "enterprise"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 
@@ -426,6 +427,21 @@ PRISM.bridge = (function () {
     workflows: {
       list: () => { const r = S().state.workflows; logApi("GET /workflows", r.length); return r; }
     },
+    /* Phase Eta — the Enterprise OS speaks Bridge API too */
+    enterprise: {
+      summary: () => {
+        const EN = window.PRISM && PRISM.enterprise ? PRISM.enterprise : null;
+        const r = EN ? {
+          organizations: EN.orgs().length,
+          clients: EN.clients().length,
+          projects: EN.projects().length,
+          health: EN.healthScore(),
+          finance: EN.financeStats(null)
+        } : {};
+        logApi("GET /enterprise", 1);
+        return r;
+      }
+    },
     /* Phase Zeta — the Evolution Engine speaks Bridge API too */
     evolution: {
       summary: () => {
@@ -493,7 +509,7 @@ PRISM.bridge = (function () {
       }
     }
   };
-  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search", "GET /missions", "GET /evolution"];
+  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search", "GET /missions", "GET /evolution", "GET /enterprise"];
 
   /* ================================================================== *
    * MODULE 2 — Bridge dispatch (single routing choke point)

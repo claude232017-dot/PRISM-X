@@ -61,7 +61,10 @@ PRISM.store = (function () {
     missionTemplatesCustom: [],
     /* Phase Zeta — Evolution Engine */
     evolution: { suggestions: [], experiments: [], timeline: [], scoreHistory: { system: [], workers: {} }, lastAnalyzeAt: null },
-    evolutionReady: false
+    evolutionReady: false,
+    /* Phase Eta — Enterprise Operating System */
+    enterprise: { orgs: [], clients: [], projects: [], automations: [], finance: [], reports: [] },
+    enterpriseReady: false
   });
 
   let state = load();
