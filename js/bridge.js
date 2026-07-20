@@ -126,7 +126,7 @@ PRISM.bridge = (function () {
     share: "memory", workflow: "automation", integration: "system",
     memory: "memory", api: "system", permission: "system", bridge: "system",
     provider: "intelligence", runtime: "execution", action: "execution",
-    knowledge: "knowledge", mission: "mission"
+    knowledge: "knowledge", mission: "mission", evolve: "evolution"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 
@@ -426,6 +426,16 @@ PRISM.bridge = (function () {
     workflows: {
       list: () => { const r = S().state.workflows; logApi("GET /workflows", r.length); return r; }
     },
+    /* Phase Zeta — the Evolution Engine speaks Bridge API too */
+    evolution: {
+      summary: () => {
+        const EV = window.PRISM && PRISM.evolution ? PRISM.evolution : null;
+        const s2 = EV ? EV.stats() : {};
+        const r = { score: s2.score, pending: s2.pending, accepted: s2.accepted, experiments: s2.experiments, weeklyImprovements: s2.weeklyImprovements };
+        logApi("GET /evolution", 1);
+        return r;
+      }
+    },
     /* Phase Epsilon — Mission Control speaks Bridge API too */
     missions: {
       list: () => {
@@ -483,7 +493,7 @@ PRISM.bridge = (function () {
       }
     }
   };
-  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search", "GET /missions"];
+  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search", "GET /missions", "GET /evolution"];
 
   /* ================================================================== *
    * MODULE 2 — Bridge dispatch (single routing choke point)

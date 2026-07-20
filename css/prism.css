@@ -1037,3 +1037,13 @@ select.input { appearance: auto; }
 .ms-task-mid { flex: 1; min-width: 0; }
 .ms-svg { max-width: 100%; }
 .ms-node-running { filter: drop-shadow(0 0 8px rgba(245,197,66,.7)); }
+
+/* ============================================================ *
+ * PHASE ZETA — Evolution Engine
+ * ============================================================ */
+.sc-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.sc-row:last-child { border-bottom: none; }
+.sc-score { font: 800 15px/1 var(--mono); color: var(--accent); min-width: 68px; }
+.sg-row { display: flex; align-items: flex-start; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--line); }
+.sg-row:last-child { border-bottom: none; }
+.sg-row .vi-actions { flex: none; }

@@ -366,6 +366,41 @@ workers → execution → mission memory → knowledge → reusable template*.
   Layer's `Publish Content` action live (a real Broadcast Queue item),
   respecting least-privilege worker permissions.
 
+## Phase Zeta — Evolution Engine (`#/evolution`)
+
+The system measures itself, proposes improvements and runs controlled
+experiments — but deploys **nothing** without owner approval.
+
+- **Evolution Center** — system evolution score (with trend sparkline),
+  weekly improvements, pending/monitored/accepted/rejected counts, active
+  experiments, learning velocity, plus dashboard highlights (most improved
+  worker, highest-ROI optimization, most successful experiment).
+- **Performance Analyzer** — measurable insights across workers, missions,
+  workflows, providers, integration reliability and knowledge usefulness;
+  workflow optimization surfaces bottlenecks, duplicate steps and idle
+  workers.
+- **Improvement Suggestions** — deterministic, state-derived proposals
+  (archive unused knowledge, optimize a weak worker's prompt, create a
+  missing role, connect the Neural Link, merge duplicate workflows, adopt
+  an experiment winner). Every one requires explicit approval.
+- **Safe Evolution** — the full state machine: suggested → pending →
+  approved → applied → monitored → accepted or **rolled back**. Applies are
+  real where possible (archiving genuinely removes a doc from retrieval;
+  rollback genuinely restores it; workflow merges and tone switches are
+  reversible) and honestly marked "manual action" where a human must act.
+- **Experiment Engine** — real A/B: two actual generations (current config
+  vs tone-swap or knowledge-ablation), compared on speed, quality, cost;
+  the better version is recommended and tone-swap winners auto-file an
+  approval-gated suggestion.
+- **Prompt Versioning** — every worker's prompt (tone · mindset · skills ·
+  target) is version-controlled with author, date, notes, per-version
+  performance and instant rollback; baselines auto-captured at activation.
+- **Intelligence Scorecards** — accuracy, speed, reliability, cost
+  efficiency, knowledge usage, collaboration and mission success per
+  worker, composited to a score with historical trend sparklines.
+- **Evolution Timeline** — every applied change, prompt version, experiment
+  and accept/reject/rollback lands in a permanent evolutionary history.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -405,4 +440,5 @@ persistence), `js/ui.js` (components, charts, sound FX), `js/ghosts.js`
 `js/bridge.js` (Phase Alpha Bridge), `js/providers.js` (Phase H0 Intelligence
 Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/execution.js`
 (Phase Gamma Execution Layer), `js/knowledge.js` (Phase Delta Knowledge
-Network), `js/missions.js` (Phase Epsilon Mission Control), `js/app.js` (views).
+Network), `js/missions.js` (Phase Epsilon Mission Control), `js/evolution.js`
+(Phase Zeta Evolution Engine), `js/app.js` (views).

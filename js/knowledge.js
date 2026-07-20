@@ -195,7 +195,8 @@ PRISM.knowledge = (function () {
     opts = opts || {};
     const terms = expand(tokenize(query));
     if (!terms.size) return [];
-    const scored = docs().map(d => {
+    /* archived docs (Phase Zeta evolution) drop out of retrieval */
+    const scored = docs().filter(d => !d.archived).map(d => {
       const title = tokenize(d.title), tags = d.tags, body = tokenize(d.body).slice(0, 400);
       let score = 0;
       const matched = [];

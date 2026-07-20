@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -32,6 +32,7 @@
     else if (view === "knowledge") renderKnowledge(main, parts[1]);
     else if (view === "missions") renderMissions(main, parts[1]);
     else if (view === "mission" && parts[1]) renderMissionView(main, parts[1]);
+    else if (view === "evolution") renderEvolution(main, parts[1]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
@@ -2676,7 +2677,8 @@
       "GET /executions": () => B.api.executions.list(),
       "GET /knowledge": () => B.api.knowledge.list(),
       "GET /knowledge/search": () => B.api.knowledge.search("cold email"),
-      "GET /missions": () => B.api.missions.list()
+      "GET /missions": () => B.api.missions.list(),
+      "GET /evolution": () => B.api.evolution.summary()
     };
     const btns = el("div", { class: "api-btns" });
     Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
@@ -4116,6 +4118,240 @@
     return box;
   }
 
+  /* =============================== evolution engine (PHASE ZETA) =============================== */
+  const EV_TABS = [
+    ["center", "🧬 Evolution Center"],
+    ["analyzer", "📐 Analyzer"],
+    ["suggestions", "✅ Suggestions"],
+    ["experiments", "⚗ Experiments"],
+    ["prompts", "📝 Prompt Versions"],
+    ["timeline", "🕰 Timeline"]
+  ];
+
+  function renderEvolution(main, tab) {
+    tab = tab || "center";
+    EV.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `EVOLUTION ENGINE <span class="dim">// phase zeta — safe continuous improvement</span>` }),
+        el("p", { class: "page-sub", text: "The system measures itself, proposes improvements and runs controlled experiments — but deploys nothing without your approval. suggested → pending → approved → applied → monitored → accepted or rolled back." })
+      ])
+    ]));
+    const tabs = el("div", { class: "bridge-tabs" });
+    EV_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/evolution/" + k2, text: label
+    })));
+    wrap.appendChild(tabs);
+    const body = el("div", { class: "bridge-body" });
+    ({
+      center: evCenter, analyzer: evAnalyzer, suggestions: evSuggestions,
+      experiments: evExperiments, prompts: evPrompts, timeline: evTimeline
+    }[tab] || evCenter)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  /* ---- MODULES 1 + 10 — center + dashboard ---- */
+  function evCenter(body) {
+    EV.snapshotScores();
+    const s2 = EV.stats();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "SYSTEM EVOLUTION SCORE" }), el("div", { class: "kpi-value", text: s2.score + "/100" }), s2.trend.length > 1 ? U.sparkline(s2.trend, 120, 26) : null].filter(Boolean)),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "WEEKLY IMPROVEMENTS" }), el("div", { class: "kpi-value", text: String(s2.weeklyImprovements) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "PENDING / MONITORED" }), el("div", { class: "kpi-value", text: s2.pending + " / " + s2.monitored })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "ACCEPTED / REJECTED" }), el("div", { class: "kpi-value", text: s2.accepted + " / " + s2.rejected })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "EXPERIMENTS" }), el("div", { class: "kpi-value", text: String(s2.experiments) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "LEARNING VELOCITY" }), el("div", { class: "kpi-value", text: s2.learningVelocity + "/wk" })])
+    ]));
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Most improved worker" })]),
+      s2.mostImproved
+        ? el("div", { class: "act-row" }, [el("b", { text: s2.mostImproved.name }), el("span", { class: "dim small-note", text: `${s2.mostImproved.score}/100 (${s2.mostImproved.delta >= 0 ? "+" : ""}${s2.mostImproved.delta} since tracking began)` })])
+        : el("p", { class: "empty-note", text: "Tracking begins with the first analysis." })
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Highest-ROI optimization" })]),
+      s2.bestOpt
+        ? el("div", { class: "act-row" }, [el("b", { text: s2.bestOpt.title }), el("span", { class: "dim small-note", text: "impact " + s2.bestOpt.impact + "/10 · accepted" })])
+        : el("p", { class: "empty-note", text: "Accept an improvement to crown one." })
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Most successful experiment" })]),
+      s2.bestExp
+        ? el("div", { class: "act-row" }, [el("b", { text: s2.bestExp.name }), el("span", { class: "dim small-note", text: `winner ${s2.bestExp.winner} · Δquality ${Math.abs(s2.bestExp.b.quality - s2.bestExp.a.quality)}` })])
+        : el("p", { class: "empty-note", text: "Run an experiment from the Experiments tab." })
+    ]));
+    body.appendChild(grid);
+    body.appendChild(el("div", { class: "form-actions", style: "justify-content:flex-start" }, [
+      el("button", { class: "btn primary", text: "📐 Run Performance Analysis", onclick: () => {
+        const r = EV.analyze();
+        const added = EV.generateSuggestions();
+        toast(`${r.insights.length} insight(s) · ${added.length} new suggestion(s) awaiting approval.`, "ok");
+        go("#/evolution/suggestions");
+      } })
+    ]));
+  }
+
+  /* ---- MODULES 2 + 6 + 7 — analyzer + scorecards ---- */
+  function evAnalyzer(body) {
+    const r = EV.analyze();
+    const s2 = EV.stats();
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🎓 Intelligence scorecards" })]));
+    s2.cards.forEach(c2 => {
+      const hist = (S.state.evolution.scoreHistory.workers[c2.id] || []).map(x => x.score);
+      panel.appendChild(el("div", { class: "sc-row" }, [
+        el("b", { class: "hm-name", text: c2.name }),
+        el("span", { class: "sc-score", text: c2.composite + "/100" }),
+        hist.length > 1 ? U.sparkline(hist, 90, 22) : el("span", { class: "dim tiny-note", text: "trend pending" }),
+        el("span", { class: "dim tiny-note", text: `acc ${c2.accuracy} · spd ${c2.speed} · rel ${c2.reliability} · cost ${c2.costEff} · knw ${c2.knowledgeUsage} · collab ${c2.collaboration}${c2.missionRate != null ? " · missions " + c2.missionRate + "%" : ""}` })
+      ]));
+    });
+    body.appendChild(panel);
+
+    const iPanel = el("div", { class: "panel" });
+    iPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `📐 Measured insights (${r.insights.length})` })]));
+    r.insights.forEach(i2 => iPanel.appendChild(el("div", { class: "act-row" }, [
+      el("span", { class: "cap-chip on", text: i2.kind }),
+      el("b", { text: i2.target }),
+      el("span", { class: "dim small-note", text: i2.text })
+    ])));
+    body.appendChild(iPanel);
+
+    const wPanel = el("div", { class: "panel" });
+    wPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⚙ Workflow & mission optimization" })]));
+    if (!r.bottlenecks.length && !r.idle.length) wPanel.appendChild(el("p", { class: "empty-note", text: "No bottlenecks, duplicate steps or idle workers detected right now." }));
+    r.bottlenecks.forEach(b2 => wPanel.appendChild(el("div", { class: "act-row" }, [
+      el("span", { class: "cap-chip off", text: b2.dup ? "duplicate step" : "bottleneck" }),
+      el("b", { text: b2.mission }),
+      el("span", { class: "dim small-note", text: b2.task + (b2.ms ? ` — ${(b2.ms / 1000).toFixed(1)}s` : " — same task type as its predecessor") })
+    ])));
+    if (r.idle.length) wPanel.appendChild(el("div", { class: "act-row" }, [
+      el("span", { class: "cap-chip off", text: "idle workers" }),
+      el("span", { class: "dim small-note", text: r.idle.join(", ") + " — no tasks in 7 days" })
+    ]));
+    body.appendChild(wPanel);
+  }
+
+  /* ---- MODULES 3 + 9 — suggestions + safe evolution flow ---- */
+  function evSuggestions(body) {
+    body.appendChild(el("div", { class: "form-actions", style: "justify-content:flex-start;margin-bottom:14px" }, [
+      el("button", { class: "btn small", text: "🔁 Generate suggestions", onclick: () => { const n = EV.generateSuggestions().length; toast(n ? n + " new suggestion(s)." : "Nothing new to suggest — system already analyzed.", "info"); go("#/evolution/suggestions"); } })
+    ]));
+    const groups = [
+      ["pending", "Pending approval — your call"],
+      ["approved", "Approved — ready to apply"],
+      ["monitored", "Applied & monitored — accept or roll back"],
+      ["accepted", "Accepted"],
+      ["rejected", "Rejected"],
+      ["rolled_back", "Rolled back"]
+    ];
+    groups.forEach(([state2, label]) => {
+      const list = EV.suggestions().filter(s2 => s2.state === state2);
+      if (!list.length && state2 !== "pending") return;
+      const panel = el("div", { class: "panel" });
+      panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: label + ` (${list.length})` })]));
+      if (!list.length) panel.appendChild(el("p", { class: "empty-note", text: "Run a Performance Analysis to generate proposals — nothing deploys without you." }));
+      list.forEach(s2 => panel.appendChild(el("div", { class: "sg-row" }, [
+        el("div", { class: "ms-task-mid" }, [
+          el("b", { text: s2.title }),
+          el("div", { class: "dim tiny-note", text: `${s2.kind} · impact ${s2.impact}/10 · ${s2.auto ? "auto-appliable (reversible)" : "manual action"} · ${s2.detail}` })
+        ]),
+        el("div", { class: "vi-actions" }, [
+          state2 === "pending" ? el("button", { class: "btn tiny primary", text: "✓ Approve", onclick: () => { EV.approve(s2.id); go("#/evolution/suggestions"); } }) : null,
+          state2 === "pending" ? el("button", { class: "btn tiny danger ghost", text: "✕ Reject", onclick: () => { EV.reject(s2.id); go("#/evolution/suggestions"); } }) : null,
+          state2 === "approved" ? el("button", { class: "btn tiny gold-btn", text: "⚡ Apply", onclick: () => { EV.apply(s2.id); toast("Applied — now monitored.", "ok"); go("#/evolution/suggestions"); } }) : null,
+          state2 === "monitored" ? el("button", { class: "btn tiny", text: "✓ Accept", onclick: () => { EV.acceptChange(s2.id); toast("Locked in.", "ok"); go("#/evolution/suggestions"); } }) : null,
+          state2 === "monitored" ? el("button", { class: "btn tiny danger ghost", text: "↩ Roll back", onclick: () => { EV.rollback(s2.id); toast("Previous state restored.", "info"); go("#/evolution/suggestions"); } }) : null
+        ].filter(Boolean))
+      ])));
+      body.appendChild(panel);
+    });
+  }
+
+  /* ---- MODULE 4 — experiments ---- */
+  function evExperiments(body) {
+    const form = el("div", { class: "panel form-panel" });
+    form.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⚗ Run a controlled experiment" })]));
+    const wSel = el("select", { class: "input" });
+    S.state.clones.forEach(c2 => wSel.appendChild(el("option", { value: c2.id, text: c2.name })));
+    const kSel = el("select", { class: "input" });
+    [["knowledge-ablation", "A: with vault knowledge · B: without (ablation)"], ["tone-swap", "A: current tone · B: alternate tone"]].forEach(([v, l]) => kSel.appendChild(el("option", { value: v, text: l })));
+    const topic = el("input", { class: "input", placeholder: "experiment topic, e.g. cold email opener" });
+    form.appendChild(el("div", { class: "two-col" }, [
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Worker" }), wSel]),
+      el("label", { class: "field" }, [el("span", { class: "field-label", text: "Variant design" }), kSel])
+    ]));
+    form.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Topic" }), topic]));
+    form.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn primary", text: "⚗ Run A/B (two real generations)", onclick: async (ev2) => {
+        ev2.currentTarget.disabled = true;
+        const ex = await EV.runExperiment({ cloneId: wSel.value, kind: kSel.value, topic: topic.value });
+        toast(ex ? `Winner: ${ex.winner} — ${ex.recommendation}` : "No worker available.", ex ? "ok" : "err");
+        go("#/evolution/experiments");
+      } })
+    ]));
+    body.appendChild(form);
+
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Experiments (${EV.experiments().length})` })]));
+    if (!EV.experiments().length) panel.appendChild(el("p", { class: "empty-note", text: "No experiments yet." }));
+    EV.experiments().slice().reverse().forEach(ex => panel.appendChild(el("div", { class: "sg-row" }, [
+      el("div", { class: "ms-task-mid" }, [
+        el("b", { text: `${ex.name} — winner ${ex.winner}` }),
+        el("div", { class: "dim tiny-note", text: `${ex.a.label}: quality ${ex.a.quality}, ${(ex.a.ms / 1000).toFixed(1)}s, $${ex.a.cost} · ${ex.b.label}: quality ${ex.b.quality}, ${(ex.b.ms / 1000).toFixed(1)}s, $${ex.b.cost}` }),
+        el("div", { class: "dim tiny-note", text: "→ " + ex.recommendation })
+      ])
+    ])));
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 5 — prompt versioning ---- */
+  function evPrompts(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Every Worker's prompt (tone · mindset · skills · target) is version-controlled. Save a version before editing; roll back instantly." }));
+    S.state.clones.forEach(c2 => {
+      const versions = EV.promptVersions(c2.id);
+      const panel = el("div", { class: "panel" });
+      panel.appendChild(el("div", { class: "panel-head" }, [
+        el("h2", { class: "panel-title", text: `📝 ${c2.name} — v${versions.length || 0}` }),
+        el("button", { class: "btn tiny", text: "+ Save current as new version", onclick: () => {
+          const v = EV.savePromptVersion(c2.id, "manual snapshot");
+          toast(`${c2.name} prompt saved as v${v.v}.`, "ok");
+          go("#/evolution/prompts");
+        } })
+      ]));
+      versions.slice().reverse().forEach(v => panel.appendChild(el("div", { class: "act-row" }, [
+        el("span", { class: "cap-chip on", text: "v" + v.v }),
+        el("div", { class: "ms-task-mid" }, [
+          el("span", { class: "dim small-note", text: `${new Date(v.at).toLocaleString()} · ${v.author}${v.notes ? " · " + v.notes : ""}` }),
+          el("div", { class: "dim tiny-note", text: `tone ${v.snapshot.tone} · perf since: ${EV.versionPerf(c2, v) != null ? EV.versionPerf(c2, v) + "/5 avg" : "no ratings yet"}` })
+        ]),
+        el("button", { class: "btn tiny", text: "↩ Restore", onclick: () => {
+          EV.rollbackPrompt(c2.id, v.v);
+          toast(`${c2.name} restored to prompt v${v.v}.`, "ok");
+          go("#/evolution/prompts");
+        } })
+      ])));
+      body.appendChild(panel);
+    });
+  }
+
+  /* ---- MODULE 8 — timeline ---- */
+  function evTimeline(body) {
+    const list = EV.timelineList();
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `🕰 Evolution timeline (${list.length})` })]));
+    if (!list.length) panel.appendChild(el("p", { class: "empty-note", text: "The evolutionary history starts with your first analysis." }));
+    list.forEach(t => panel.appendChild(el("div", { class: "log-row" }, [
+      el("span", { class: "ev-time", text: new Date(t.at).toLocaleString() }),
+      el("span", { class: "cap-chip on", text: t.kind }),
+      el("span", { class: "log-text", text: t.text })
+    ])));
+    body.appendChild(panel);
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -4346,6 +4582,7 @@
                 cta: onboardRefs._cta || ""
               }, demoChk.checked);
               K.boot(); /* Phase Delta: the freshly trained DNA seeds the Knowledge Vault */
+              EV.boot(); /* Phase Zeta: baseline prompt versions for the new squadron */
               U.sfx("evolve"); U.evolveFlash();
               overlay.classList.remove("show");
               setTimeout(() => overlay.remove(), 400);
@@ -4377,6 +4614,7 @@
     P.boot(); /* Phase H0: register providers, route intelligence through the Manager */
     X.boot(); /* Phase Gamma: arm the Execution Layer (integrations, actions, vault) */
     K.boot(); /* Phase Delta: seed + index the Knowledge & Memory Network */
+    EV.boot(); /* Phase Zeta: version prompts, start the evolution timeline */
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();

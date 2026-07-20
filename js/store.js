@@ -58,7 +58,10 @@ PRISM.store = (function () {
     knowledgeReady: false,
     /* Phase Epsilon — Autonomous Orchestration */
     missions: [],
-    missionTemplatesCustom: []
+    missionTemplatesCustom: [],
+    /* Phase Zeta — Evolution Engine */
+    evolution: { suggestions: [], experiments: [], timeline: [], scoreHistory: { system: [], workers: {} }, lastAnalyzeAt: null },
+    evolutionReady: false
   });
 
   let state = load();
