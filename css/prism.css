@@ -1052,3 +1052,11 @@ select.input { appearance: auto; }
  * PHASE ETA — Enterprise OS
  * ============================================================ */
 .deliv-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+
+/* ============================================================ *
+ * PHASE THETA — Extension Ecosystem
+ * ============================================================ */
+.xt-widgets { margin-bottom: 18px; }
+.xt-widget { min-height: 92px; }
+.xt-mount { margin-top: 6px; }
+.xt-card .vi-actions { flex-wrap: wrap; }

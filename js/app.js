@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise, XT = PRISM.extensions;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -34,6 +34,8 @@
     else if (view === "mission" && parts[1]) renderMissionView(main, parts[1]);
     else if (view === "evolution") renderEvolution(main, parts[1]);
     else if (view === "enterprise") renderEnterprise(main, parts[1]);
+    else if (view === "extensions") renderExtensions(main, parts[1]);
+    else if (view === "ext" && parts[1] && parts[2]) renderExtensionPage(main, parts[1], parts[2]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
@@ -52,6 +54,7 @@
         (view === "clone" && a.dataset.view === "dashboard") ||
         (view === "worker" && a.dataset.view === "runtime") ||
         (view === "mission" && a.dataset.view === "missions") ||
+        (view === "ext" && a.dataset.view === "extensions") ||
         (ghostViews && a.dataset.view === "ghosts") ||
         (shellViews && a.dataset.view === "shells"));
     });
@@ -324,6 +327,22 @@
         el("button", { class: "btn small " + (mss.total ? "" : "gold-btn"), text: "🎯 Mission Control", onclick: () => go("#/missions") })
       ])
     ]));
+
+    /* ---- Phase Theta: extension dashboard widgets ---- */
+    const xw = XT.widgets();
+    if (xw.length) {
+      const wgrid = el("div", { class: "kpi-row xt-widgets" });
+      xw.forEach(({ extId, extName, widget }) => {
+        const box = el("div", { class: "kpi xt-widget" });
+        box.appendChild(el("div", { class: "kpi-label", text: (typeof widget.title === "function" ? widget.title(XT.api(extId)) : widget.title) + " · 📦 " + extName }));
+        const mountEl = el("div", { class: "xt-mount" });
+        box.appendChild(mountEl);
+        try { widget.mount(mountEl, XT.api(extId)); }
+        catch (err) { mountEl.appendChild(el("p", { class: "dim tiny-note", text: "widget error: " + err.message })); }
+        wgrid.appendChild(box);
+      });
+      wrap.appendChild(wgrid);
+    }
 
     /* ---- clone grid ---- */
     wrap.appendChild(el("div", { class: "panel-head standalone" }, [
@@ -4758,6 +4777,242 @@
     });
   }
 
+  /* =============================== extension ecosystem (PHASE THETA) =============================== */
+  const XT_TABS = [
+    ["center", "📦 Extension Center"],
+    ["registry", "🗄 Registry"],
+    ["marketplace", "🛍 Marketplace"],
+    ["dev", "🧪 Developer"]
+  ];
+
+  function renderExtensions(main, tab) {
+    tab = tab || "center";
+    XT.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `EXTENSION CENTER <span class="dim">// phase theta — the platform layer · core v${XT.CORE_VERSION}</span>` }),
+        el("p", { class: "page-sub", text: "Every future capability installs as an extension through one manager — the core never changes. One SDK, permission-gated APIs, a pub/sub event bus, owner approval before activation. Today's catalog is private (owner-authored); community extensions plug in later with zero redesign." })
+      ])
+    ]));
+    const tabs = el("div", { class: "bridge-tabs" });
+    XT_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/extensions/" + k2, text: label
+    })));
+    wrap.appendChild(tabs);
+    const body = el("div", { class: "bridge-body" });
+    ({ center: xtCenter, registry: xtRegistry, marketplace: xtMarketplace, dev: xtDev }[tab] || xtCenter)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  function xtCard(m, rec) {
+    const installedNow = !!rec;
+    const active = installedNow && XT.isActive(m.id);
+    const upd = installedNow && XT.updateAvailable(m.id);
+    return el("div", { class: "int-card xt-card" + (active ? " live-card" : "") }, [
+      el("div", { class: "int-top" }, [
+        el("div", {}, [el("b", { text: m.name }), el("span", { class: "dim small-note", text: ` v${installedNow ? rec.version : m.version} · ${m.author}` })]),
+        el("span", { class: "int-status " + (active ? "st-healthy" : installedNow && !rec.approved ? "st-configured" : ""), text: !installedNow ? "available" : !rec.approved ? "awaiting approval" : rec.enabled ? "active" : "disabled" })
+      ]),
+      el("div", { class: "int-meta", text: m.category + (m.dependencies.length ? " · needs: " + m.dependencies.join(", ") : "") + " · requires core " + m.requires }),
+      el("p", { class: "dim small-note", text: m.description }),
+      el("div", { class: "int-meta", text: "permissions: " + (m.permissions.join(", ") || "none") }),
+      installedNow ? el("div", { class: "int-meta", text: `health: ${rec.health} · installed ${timeAgo(rec.installedAt)}${upd ? " · ⬆ UPDATE AVAILABLE v" + m.version : ""}` }) : null,
+      el("div", { class: "vi-actions" }, [
+        !installedNow ? el("button", { class: "btn tiny primary", text: "⬇ Install", onclick: () => {
+          const r = XT.install(m.id);
+          toast(r.ok ? (r.pendingApproval ? "Installed — approve its permissions to activate." : "Installed and active.") : r.reason, r.ok ? "ok" : "err");
+          go("#/extensions");
+        } }) : null,
+        installedNow && !rec.approved ? el("button", { class: "btn tiny gold-btn", text: "🛡 Approve permissions", onclick: () => {
+          U.modal({
+            title: "🛡 " + m.name + " requests permissions",
+            body: (() => { const b2 = el("div", { class: "modal-body" }); m.permissions.forEach(p2 => b2.appendChild(el("div", { class: "small-note", text: "• " + p2 }))); b2.appendChild(el("p", { class: "dim tiny-note", text: "Owner approval is mandatory before activation. The extension will only reach these APIs." })); return b2; })(),
+            actions: [
+              { label: "Approve & activate", cls: "primary", onClick: () => { XT.approve(m.id); toast(m.name + " active.", "ok"); go("#/extensions"); } },
+              { label: "Not now", cls: "ghost" }
+            ]
+          });
+        } }) : null,
+        upd ? el("button", { class: "btn tiny gold-btn", text: "⬆ Update", onclick: () => { XT.update(m.id); toast("Updated to v" + m.version + ".", "ok"); go("#/extensions"); } }) : null,
+        installedNow && rec.approved ? el("button", { class: "btn tiny " + (rec.enabled ? "cyan-btn" : ""), text: rec.enabled ? "Enabled" : "Enable", onclick: () => { XT.setEnabled(m.id, !rec.enabled); go("#/extensions"); } }) : null,
+        installedNow && (m.configSchema || []).length ? el("button", { class: "btn tiny", text: "Configure", onclick: () => xtConfigModal(m, rec) }) : null,
+        installedNow ? el("button", { class: "btn tiny danger ghost", text: "Uninstall", onclick: () => {
+          const r = XT.uninstall(m.id);
+          toast(r.ok ? m.name + " removed — core untouched." : r.reason, r.ok ? "info" : "err");
+          go("#/extensions");
+        } }) : null,
+        ...XT.pages().filter(x => x.extId === m.id).map(x => el("a", { class: "btn tiny", href: "#/ext/" + m.id + "/" + x.page.id, text: (x.page.icon || "📄") + " Open " + x.page.title }))
+      ].filter(Boolean))
+    ].filter(Boolean));
+  }
+
+  function xtConfigModal(m, rec) {
+    const inputs = {};
+    const b = el("div", { class: "modal-body" });
+    (m.configSchema || []).forEach(f => {
+      const inp = el("input", { class: "input", placeholder: f.label });
+      inp.value = rec.config[f.key] != null ? rec.config[f.key] : (f.def || "");
+      inputs[f.key] = inp;
+      b.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: f.label }), inp]));
+    });
+    U.modal({
+      title: "⚙ Configure " + m.name, body: b, actions: [
+        { label: "Save", cls: "primary", onClick: () => {
+          const cfg = {};
+          Object.keys(inputs).forEach(k2 => { cfg[k2] = inputs[k2].value; });
+          XT.setConfig(m.id, cfg);
+          toast("Configuration saved.", "ok");
+          go("#/extensions");
+        } },
+        { label: "Cancel", cls: "ghost" }
+      ]
+    });
+  }
+
+  /* ---- MODULE 1 — center ---- */
+  function xtCenter(body) {
+    const s2 = XT.stats();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "INSTALLED / ACTIVE" }), el("div", { class: "kpi-value", text: s2.installed + " / " + s2.active })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "AVAILABLE" }), el("div", { class: "kpi-value", text: String(s2.available) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "AWAITING APPROVAL" }), el("div", { class: "kpi-value", text: String(s2.pending) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "UPDATES" }), el("div", { class: "kpi-value", text: String(s2.updates) })])
+    ]));
+    const inst = XT.installed();
+    if (inst.length) {
+      const p1 = el("div", { class: "panel" });
+      p1.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Installed extensions" })]));
+      const g1 = el("div", { class: "int-grid" });
+      inst.forEach(x => g1.appendChild(xtCard(x.manifest, x)));
+      p1.appendChild(g1);
+      body.appendChild(p1);
+    }
+    const avail = XT.catalog().filter(m => !XT.stateOf(m.id));
+    const p2 = el("div", { class: "panel" });
+    p2.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Available (private catalog)" }), el("span", { class: "dim small-note", text: "system + private extensions · community slot reserved" })]));
+    const g2 = el("div", { class: "int-grid" });
+    avail.forEach(m => g2.appendChild(xtCard(m, null)));
+    if (!avail.length) p2.appendChild(el("p", { class: "empty-note", text: "Everything from the catalog is installed." }));
+    p2.appendChild(g2);
+    body.appendChild(p2);
+  }
+
+  /* ---- MODULE 8 — registry ---- */
+  function xtRegistry(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Every installed module tracked: version, compatibility, dependencies, permissions, author, update history, signature (future), health." }));
+    const inst = XT.installed();
+    if (!inst.length) { body.appendChild(el("p", { class: "empty-note", text: "Nothing installed yet." })); return; }
+    inst.forEach(x => body.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: x.manifest.name }), el("span", { class: "dim small-note", text: "health: " + x.health })]),
+      el("pre", { class: "output-pre", text: [
+        `installed: v${x.version} · catalog: v${x.manifest.version} · compatible: core ≥ ${x.manifest.requires} (running ${XT.CORE_VERSION})`,
+        `author: ${x.manifest.author} · category: ${x.manifest.category}`,
+        `dependencies: ${x.manifest.dependencies.join(", ") || "none"}`,
+        `permissions: requested [${x.manifest.permissions.join(", ") || "none"}] · granted [${(x.granted || []).join(", ") || "none"}]`,
+        `signature: unsigned (digital signatures arrive with community extensions)`,
+        `update history:`,
+        ...x.updateHistory.map(h => `  ${new Date(h.at).toLocaleString()} — ${h.note}`)
+      ].join("\n") })
+    ])));
+  }
+
+  /* ---- MODULE 10 — marketplace foundation ---- */
+  function xtMarketplace(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "The marketplace foundation: categories are live, the catalog is private (owner-authored) today, and community extensions plug into the same SDK + manager later — no redesign required." }));
+    XT.CATEGORIES.forEach(cat => {
+      const items = XT.catalog().filter(m => m.category === cat);
+      const panel = el("div", { class: "panel" });
+      panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: cat + ` (${items.length})` })]));
+      if (!items.length) panel.appendChild(el("p", { class: "empty-note", text: "Open slot — future extensions land here." }));
+      items.forEach(m => panel.appendChild(el("div", { class: "act-row" }, [
+        el("b", { text: m.name }),
+        el("span", { class: "cap-chip " + (XT.stateOf(m.id) ? "on" : "off"), text: XT.stateOf(m.id) ? "installed" : "available" }),
+        el("span", { class: "dim small-note", text: m.description })
+      ])));
+      body.appendChild(panel);
+    });
+  }
+
+  /* ---- MODULE 9 — developer console ---- */
+  function xtDev(body) {
+    const d2 = XT.devData();
+    body.appendChild(el("p", { class: "dim small-note", text: "⚠ " + d2.contractNote }));
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🛰 Installed APIs" })]),
+      ...d2.apis.map(a => el("div", { class: "tiny-note dim", text: "api." + a }))
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🛡 Permission viewer" })]),
+      ...(d2.permissions.length ? d2.permissions.map(p2 => el("div", { class: "tiny-note dim", text: `${p2.name}: ${p2.approved ? "granted [" + p2.granted.join(", ") + "]" : "PENDING [" + p2.requested.join(", ") + "]"}` })) : [el("p", { class: "empty-note", text: "No extensions installed." })])
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⏱ Performance monitor" })]),
+      ...(Object.keys(d2.perf).length ? Object.entries(d2.perf).map(([id, v]) => el("div", { class: "tiny-note dim", text: `${id}: ${v.calls} listener call(s) · ${v.ms.toFixed(1)}ms total · ${v.errors} error(s)` })) : [el("p", { class: "empty-note", text: "No listener activity yet." })])
+    ]));
+    body.appendChild(grid);
+
+    const evPanel = el("div", { class: "panel" });
+    evPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `📡 Event monitor (${d2.busRing.length})` }), el("span", { class: "dim small-note", text: "the extension bus — core events + named platform events" })]));
+    d2.busRing.slice(0, 15).forEach(e2 => evPanel.appendChild(el("div", { class: "log-row" }, [
+      el("span", { class: "ev-time", text: new Date(e2.at).toLocaleTimeString() }),
+      el("span", { class: "cap-chip on", text: e2.name }),
+      el("span", { class: "log-text dim", text: e2.payload })
+    ])));
+    if (!d2.busRing.length) evPanel.appendChild(el("p", { class: "empty-note", text: "Bus is quiet — do anything and events flow." }));
+    body.appendChild(evPanel);
+
+    const logPanel = el("div", { class: "panel" });
+    logPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧾 Extension logs" })]));
+    const logKeys = Object.keys(d2.logs);
+    if (!logKeys.length) logPanel.appendChild(el("p", { class: "empty-note", text: "No logs yet." }));
+    logKeys.forEach(id => {
+      logPanel.appendChild(el("div", { class: "field-label", text: id, style: "margin-top:6px" }));
+      d2.logs[id].slice(-4).forEach(l => logPanel.appendChild(el("div", { class: "tiny-note dim", text: `${new Date(l.at).toLocaleTimeString()} · ${l.text}` })));
+    });
+    body.appendChild(logPanel);
+
+    /* sandbox */
+    const sb = el("div", { class: "panel form-panel" });
+    sb.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧪 Sandbox — test against the scoped API" })]));
+    const code = el("textarea", { class: "input", rows: 3, placeholder: `return api.knowledge.top("cold email", 2);` });
+    const out = el("pre", { class: "output-pre", text: "// result appears here" });
+    sb.appendChild(code);
+    sb.appendChild(el("div", { class: "form-actions" }, [
+      el("button", { class: "btn small primary", text: "▶ Run snippet", onclick: () => {
+        const r = XT.sandbox(code.value || "return 'nothing to run';");
+        out.textContent = (r.ok ? "" : "✗ ") + r.result;
+      } }),
+      el("button", { class: "btn small", text: "📣 Publish test event", onclick: () => {
+        XT.publish("MissionCompleted", { text: "🎯 Mission COMPLETED — sandbox test event (Developer Console)" });
+        toast("Test MissionCompleted published to the bus.", "info");
+        go("#/extensions/dev");
+      } })
+    ]));
+    sb.appendChild(out);
+    body.appendChild(sb);
+  }
+
+  /* ---- MODULE 7 — extension-provided sidebar pages ---- */
+  function renderExtensionPage(main, extId, pageId) {
+    const hit = XT.page(extId, pageId);
+    if (!hit) { go("#/extensions"); return; }
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("a", { class: "back-link", href: "#/extensions", text: "← extension center" }),
+        el("h1", { class: "page-title", html: `${hit.page.icon || "📄"} ${esc(hit.page.title.toUpperCase())} <span class="dim">// 📦 ${esc(hit.extName)}</span>` })
+      ])
+    ]));
+    const mountEl = el("div", {});
+    try { hit.page.render(mountEl, XT.api(extId)); }
+    catch (err) { mountEl.appendChild(el("p", { class: "empty-note", text: "extension page error: " + err.message })); }
+    wrap.appendChild(mountEl);
+    main.appendChild(wrap);
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -4990,6 +5245,7 @@
               K.boot(); /* Phase Delta: the freshly trained DNA seeds the Knowledge Vault */
               EV.boot(); /* Phase Zeta: baseline prompt versions for the new squadron */
               EN.boot(); /* Phase Eta: enterprise OS comes online with the operator */
+              XT.boot(); /* Phase Theta: extension platform announces itself */
               U.sfx("evolve"); U.evolveFlash();
               overlay.classList.remove("show");
               setTimeout(() => overlay.remove(), 400);
@@ -5023,6 +5279,7 @@
     K.boot(); /* Phase Delta: seed + index the Knowledge & Memory Network */
     EV.boot(); /* Phase Zeta: version prompts, start the evolution timeline */
     EN.boot(); /* Phase Eta: bring the Enterprise OS online */
+    XT.boot(); /* Phase Theta: load enabled extensions through the manager */
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();

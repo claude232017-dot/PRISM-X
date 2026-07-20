@@ -127,7 +127,7 @@ PRISM.bridge = (function () {
     memory: "memory", api: "system", permission: "system", bridge: "system",
     provider: "intelligence", runtime: "execution", action: "execution",
     knowledge: "knowledge", mission: "mission", evolve: "evolution",
-    org: "enterprise"
+    org: "enterprise", extension: "system"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 
@@ -145,6 +145,8 @@ PRISM.bridge = (function () {
     };
     st.events.push(ev);
     if (st.events.length > 500) st.events.shift();
+    /* Phase Theta: every core event also feeds the extension Event Bus */
+    if (window.PRISM && PRISM.extensions) { try { PRISM.extensions.onCoreEvent(ev); } catch (_) {} }
     return ev;
   }
   /* Retrofit: store.logMemory calls this, so every action across all four

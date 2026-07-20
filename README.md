@@ -441,6 +441,48 @@ same infrastructure.
   financial summary, Evolution-Engine recommendations and upcoming
   priorities.
 
+## Phase Theta — Extension Ecosystem (`#/extensions`)
+
+PRISM-X becomes a platform: every future capability installs as an
+extension through one manager — the core (frozen at v1.0.0) never changes.
+
+- **Extension Center** — installed / available / awaiting-approval /
+  updates, with per-card version, author, category, dependencies,
+  permissions, health, update, configure, enable/disable, uninstall.
+- **Extension Manager** — install, load, unload, update, remove; dependency
+  validation (uninstalling a dependency of an installed extension is
+  refused), core-version compatibility (an extension requiring core 2.0 is
+  honestly refused, not faked), startup initialization for everything
+  enabled.
+- **Extension SDK** — one manifest shape (metadata, version, permissions,
+  required APIs, config schema, UI components, listeners, docs), validated
+  before install; nothing bypasses it.
+- **Internal Event Bus** — pub/sub tapped off the Bridge with one line of
+  core code: every system event becomes `core:<kind>` plus named platform
+  events (MissionCompleted, WorkerStarted, KnowledgeStored, ClientCreated,
+  PaymentReceived, WorkflowFinished, ProviderConnected…). Extensions
+  subscribe only to what they need.
+- **Public API Layer + Permission Framework** — extensions touch the system
+  only through permission-scoped facades (Mission/Worker/Knowledge/
+  Provider/Integration/CRM/Revenue/Organization/Event APIs); every
+  permission requires owner approval before activation, and ungranted
+  calls throw. Honest caveat, printed in the Developer Console: in a
+  same-page runtime this contract is convention-enforced, not
+  sandbox-enforced — iframe isolation is the future hardening.
+- **UI Extension Framework** — dashboard widgets mount automatically
+  (System Pulse, CRM Funnel) and extensions can register full sidebar
+  pages (LinkedIn Composer, Daily Focus) at `#/ext/<id>/<page>`.
+- **Registry** — versions, compatible core, dependencies, permissions,
+  author, update history, signature (future), health per module.
+- **Developer Console** — installed APIs, live event monitor, per-extension
+  logs, performance monitor, permission viewer, and a sandbox that runs
+  snippets against the scoped API + publishes test events.
+- **Marketplace Foundation** — ten categories live; today's catalog is
+  seven private, owner-authored extensions with real behavior (a recap
+  writer that stores knowledge on MissionCompleted, a ledger guard that
+  alerts on threshold expenses, composers, focus pages…); community
+  extensions later use the same SDK and manager with zero redesign.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -482,4 +524,4 @@ Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/execution.js`
 (Phase Gamma Execution Layer), `js/knowledge.js` (Phase Delta Knowledge
 Network), `js/missions.js` (Phase Epsilon Mission Control), `js/evolution.js`
 (Phase Zeta Evolution Engine), `js/enterprise.js` (Phase Eta Enterprise OS),
-`js/app.js` (views).
+`js/extensions.js` (Phase Theta Extension Ecosystem), `js/app.js` (views).

@@ -64,7 +64,10 @@ PRISM.store = (function () {
     evolutionReady: false,
     /* Phase Eta — Enterprise Operating System */
     enterprise: { orgs: [], clients: [], projects: [], automations: [], finance: [], reports: [] },
-    enterpriseReady: false
+    enterpriseReady: false,
+    /* Phase Theta — Extension Ecosystem */
+    extensionsState: {},
+    extensionsReady: false
   });
 
   let state = load();
