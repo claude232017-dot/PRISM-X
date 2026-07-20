@@ -1756,7 +1756,7 @@
         el("summary", {}, [
           el("span", { class: "post-plat", text: p.platform }),
           el("span", { text: ` ${p.format} — ${p.hook} ${p.topic}` }),
-          p.metrics ? el("span", { class: "post-metrics", text: ` · ${U.fmtCompact(p.metrics.views)} views · +${p.metrics.follows} fo` }) : null
+          p.metrics ? el("span", { class: "post-metrics", text: ` · ${U.fmtCompact(p.metrics.views)} views · +${U.fmtCompact(p.metrics.follows)} followers` }) : null
         ].filter(Boolean)),
         el("pre", { class: "output-pre", text: p.body + (p.broll ? "\n\nB-ROLL:\n• " + p.broll.join("\n• ") : "") + `\n\nTREND SOURCE (sim): ${p.trend}` }),
         el("div", { class: "vi-actions" }, [
