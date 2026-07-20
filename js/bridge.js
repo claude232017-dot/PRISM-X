@@ -127,7 +127,7 @@ PRISM.bridge = (function () {
     memory: "memory", api: "system", permission: "system", bridge: "system",
     provider: "intelligence", runtime: "execution", action: "execution",
     knowledge: "knowledge", mission: "mission", evolve: "evolution",
-    org: "enterprise", extension: "system", node: "network"
+    org: "enterprise", extension: "system", node: "network", security: "system"
   };
   const PRIORITY = { delete: "high", upgrade: "high", dna: "high", integration: "medium", workflow: "medium" };
 
@@ -429,6 +429,15 @@ PRISM.bridge = (function () {
     workflows: {
       list: () => { const r = S().state.workflows; logApi("GET /workflows", r.length); return r; }
     },
+    /* Phase Omega — production readiness speaks Bridge API too */
+    readiness: {
+      latest: () => {
+        const OM = window.PRISM && PRISM.omega ? PRISM.omega : null;
+        const r = OM ? (OM.reports()[0] || { summary: "no report yet — run the Validation Suite" }) : {};
+        logApi("GET /readiness", 1);
+        return r;
+      }
+    },
     /* Phase Iota — the Network speaks Bridge API too */
     network: {
       summary: () => {
@@ -520,7 +529,7 @@ PRISM.bridge = (function () {
       }
     }
   };
-  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search", "GET /missions", "GET /evolution", "GET /enterprise", "GET /network"];
+  const API_ENDPOINTS = ["GET /workers", "GET /workers/:id", "GET /tasks", "GET /memory", "GET /events", "GET /analytics/summary", "GET /vault", "GET /workflows", "GET /providers", "GET /providers/analytics", "GET /actions", "GET /executions", "GET /knowledge", "GET /knowledge/search", "GET /missions", "GET /evolution", "GET /enterprise", "GET /network", "GET /readiness"];
 
   /* ================================================================== *
    * MODULE 2 — Bridge dispatch (single routing choke point)

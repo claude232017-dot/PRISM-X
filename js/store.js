@@ -12,7 +12,7 @@ PRISM.store = (function () {
     version: 1,
     onboarded: false,
     dna: { tone: "", mindset: "", logic: "", decision: "", cta: "" },
-    settings: { engine: "local", apiKey: "", model: "claude-opus-4-8", sound: false },
+    settings: { engine: "local", apiKey: "", model: "claude-opus-4-8", sound: false, compact: false, digests: true, sessionTimeoutMin: 60, envProfile: "development" },
     godBrainVersion: 1,
     clones: [],
     tasks: [],
@@ -70,7 +70,11 @@ PRISM.store = (function () {
     extensionsReady: false,
     /* Phase Iota — Distributed Intelligence Network */
     network: { nodes: [], syncLog: [], federation: {}, snapshotsMeta: [], nodeAssignments: {}, bootAt: 0 },
-    networkReady: false
+    networkReady: false,
+    /* Phase Omega — Production Readiness */
+    security: { enabled: false, passHash: null, passSalt: null, session: null, authLog: [] },
+    readinessReports: [],
+    omegaReady: false
   });
 
   let state = load();
@@ -91,9 +95,46 @@ PRISM.store = (function () {
     }
   }
 
-  function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); }
-    catch (e) { console.error("PRISM-X: save failed", e); }
+  /* Phase Omega performance: mutations coalesce into one trailing write
+   * (the full-state JSON is a few hundred KB — writing it on every single
+   * mutation was the hottest path in the app). flush() forces an
+   * immediate write; suspendSaves() arms restore/reset flows against a
+   * pending timer resurrecting replaced state. */
+  let saveTimer = null, savesSuspended = false;
+  const saveStatsData = { writes: 0, coalesced: 0, totalMs: 0, lastBytes: 0 };
+  function persist() {
+    if (savesSuspended) return;
+    const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    try {
+      const json = JSON.stringify(state);
+      localStorage.setItem(KEY, json);
+      saveStatsData.lastBytes = json.length;
+      saveStatsData.writes += 1;
+      saveStatsData.totalMs += (typeof performance !== "undefined" ? performance.now() : Date.now()) - t0;
+    } catch (e) { console.error("PRISM-X: save failed", e); }
+  }
+  function save(immediate) {
+    if (savesSuspended) return;
+    if (immediate) {
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      persist();
+      return;
+    }
+    if (saveTimer) { saveStatsData.coalesced += 1; return; }
+    saveTimer = setTimeout(() => { saveTimer = null; persist(); }, 150);
+  }
+  function flush() { save(true); }
+  function suspendSaves() {
+    savesSuspended = true;
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  }
+  function saveStats() {
+    return {
+      writes: saveStatsData.writes,
+      coalesced: saveStatsData.coalesced,
+      avgMs: saveStatsData.writes ? +(saveStatsData.totalMs / saveStatsData.writes).toFixed(1) : 0,
+      lastKB: Math.round(saveStatsData.lastBytes / 1024)
+    };
   }
 
   function uid(prefix) {
@@ -455,7 +496,7 @@ PRISM.store = (function () {
 
   return {
     get state() { return state; },
-    save, uid,
+    save, flush, suspendSaves, saveStats, uid,
     addClone, replicate, deleteClone, topPerformer,
     addTask, rateTask, setTaskFlag,
     addVaultItem, deleteVaultItem,

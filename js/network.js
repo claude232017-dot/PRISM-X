@@ -270,6 +270,7 @@ PRISM.network = (function () {
     const json = snapshotJson(key);
     if (!json) return { ok: false, reason: "snapshot missing" };
     try { JSON.parse(json); } catch (_) { return { ok: false, reason: "snapshot corrupt" }; }
+    S().suspendSaves(); /* Omega: no pending throttled write may clobber the restore */
     try { localStorage.setItem("prismx_state_v1", json); } catch (e) { return { ok: false, reason: "storage error" }; }
     emit("Restore point applied — reloading into the recovered state.", { priority: "high" });
     return { ok: true, reload: true };

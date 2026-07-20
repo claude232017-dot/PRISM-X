@@ -521,6 +521,52 @@ federation and disaster recovery.
   adapter and every Bridge/API surface stays identical — horizontal scale
   is just more nodes.
 
+## Phase Omega — Production Readiness (`#/production`)
+
+The hardening capstone: no new empire features, just everything already
+built made secure, observable, recoverable, fast, configurable, documented
+and validated as one platform. Nine tabs in the Production Center.
+
+- **Security & Identity** — an optional passcode lock (SHA-256 + salt via
+  WebCrypto) with session timeout, a key inventory, links to the live RBAC
+  matrix / worker action-grants / extension permissions, and an **audit
+  trail** stamping every sensitive action with the acting role. Honest
+  scope, stated on the page: browser-local protection deters casual access
+  on a shared machine — it is not disk-level security.
+- **Health Center** — overall score plus per-component diagnostics
+  (Storage, Bridge, Providers, Workers, Execution, Knowledge Index, Mission
+  Engine, Extensions, Network, Error Rate), each with a plain-language
+  recommended action.
+- **Observability** — searchable structured logs filterable by component,
+  execution traces (runtime missions + external actions, step by step), and
+  a one-click export bundle (events + traces + audit).
+- **Backup & Recovery** — snapshot **validation** before any restore and
+  **selective recovery** (restore just Organizations / Knowledge / Missions,
+  leave everything else untouched), on top of Iota's full-restore + auto
+  snapshots; plus configuration export/import.
+- **Performance** — saves are now **throttled and coalesced** (the biggest
+  hot path — writing the full-state JSON on every mutation — collapses into
+  one trailing write, flushed on tab-hide/unload), with live write stats in
+  the Health Center; an optional **Compact appearance** densifies the whole
+  UI.
+- **Configuration Center** — platform policies (compact, digests, sound,
+  session timeout) in one place, with deep links to every subsystem's own
+  config page.
+- **Deployment & Versioning** — version + state-version info, environment
+  profiles (development / staging / **production** — production disables the
+  extension sandbox), configuration validation, a snapshot-first migration
+  runner with rollback, and the full release-notes changelog.
+- **Documentation Hub** — nine in-app guides (overview, architecture, user,
+  developer, **live** API reference + SDK guide generated from the running
+  system, troubleshooting, FAQ, changelog).
+- **Guided Setup** — a seven-step first-run checklist detected from live
+  state (no fakeable checkboxes) with a jump link per step.
+- **Production Validation Suite** — automated checks across permissions,
+  integrations, provider connectivity, workflow integrity, knowledge index,
+  mission engine, extension compatibility, network status and storage
+  health, producing a **Production Readiness Report** (and exposed at
+  `GET /readiness`).
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,
@@ -563,4 +609,5 @@ Provider Layer), `js/runtime.js` (Phase Beta Worker Runtime), `js/execution.js`
 Network), `js/missions.js` (Phase Epsilon Mission Control), `js/evolution.js`
 (Phase Zeta Evolution Engine), `js/enterprise.js` (Phase Eta Enterprise OS),
 `js/extensions.js` (Phase Theta Extension Ecosystem), `js/network.js` (Phase Iota
-Distributed Network), `js/app.js` (views).
+Distributed Network), `js/omega.js` (Phase Omega Production Readiness),
+`js/app.js` (views).

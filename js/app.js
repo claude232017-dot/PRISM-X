@@ -3,7 +3,7 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise, XT = PRISM.extensions, NW = PRISM.network;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise, XT = PRISM.extensions, NW = PRISM.network, OM = PRISM.omega;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
@@ -37,6 +37,7 @@
     else if (view === "extensions") renderExtensions(main, parts[1]);
     else if (view === "ext" && parts[1] && parts[2]) renderExtensionPage(main, parts[1], parts[2]);
     else if (view === "network") renderNetwork(main, parts[1]);
+    else if (view === "production") renderProduction(main, parts[1]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "settings") renderSettings(main);
@@ -326,6 +327,24 @@
       ]),
       el("div", { class: "cc-actions" }, [
         el("button", { class: "btn small " + (mss.total ? "" : "gold-btn"), text: "🎯 Mission Control", onclick: () => go("#/missions") })
+      ])
+    ]));
+
+    /* ---- Phase Omega strip: production readiness / guided setup ---- */
+    const setup = OM.setupProgress();
+    const lastReport = OM.reports()[0];
+    wrap.appendChild(el("div", { class: "panel ghost-strip" }, [
+      el("div", { class: "gs-left" }, [
+        el("span", { class: "gs-glyph", text: "🌌" }),
+        el("div", {}, [
+          el("div", { class: "panel-title", text: "Production Center — the platform, hardened" }),
+          el("p", { class: "dim small-note", text: setup.done < setup.total
+            ? `Guided setup ${setup.done}/${setup.total} · ${lastReport ? lastReport.summary : "run the Validation Suite for a readiness report"}`
+            : `Setup complete · ${lastReport ? lastReport.summary : "run the Validation Suite to confirm production readiness"}` })
+        ])
+      ]),
+      el("div", { class: "cc-actions" }, [
+        el("button", { class: "btn small " + (setup.done < setup.total ? "gold-btn" : ""), text: "🌌 Production Center", onclick: () => go("#/production") })
       ])
     ]));
 
@@ -2701,7 +2720,8 @@
       "GET /missions": () => B.api.missions.list(),
       "GET /evolution": () => B.api.evolution.summary(),
       "GET /enterprise": () => B.api.enterprise.summary(),
-      "GET /network": () => B.api.network.summary()
+      "GET /network": () => B.api.network.summary(),
+      "GET /readiness": () => B.api.readiness.latest()
     };
     const btns = el("div", { class: "api-btns" });
     Object.keys(runners).forEach(ep => btns.appendChild(el("button", {
@@ -4976,7 +4996,14 @@
     });
     body.appendChild(logPanel);
 
-    /* sandbox */
+    /* sandbox — disabled in the production environment profile (Omega) */
+    if (S.state.settings.envProfile === "production") {
+      body.appendChild(el("div", { class: "panel" }, [
+        el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧪 Sandbox" })]),
+        el("p", { class: "empty-note", text: "Disabled in the production environment profile — switch to development in Production → Deploy to test snippets." })
+      ]));
+      return;
+    }
     const sb = el("div", { class: "panel form-panel" });
     sb.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧪 Sandbox — test against the scoped API" })]));
     const code = el("textarea", { class: "input", rows: 3, placeholder: `return api.knowledge.top("cold email", 2);` });
@@ -5291,6 +5318,366 @@
     body.appendChild(cap);
   }
 
+  /* =============================== production readiness (PHASE OMEGA) =============================== */
+  const OM_TABS = [
+    ["security", "🛡 Security"],
+    ["health", "🩺 Health Center"],
+    ["logs", "🧾 Observability"],
+    ["recovery", "🛟 Recovery"],
+    ["config", "⚙ Configuration"],
+    ["deploy", "🚀 Deploy"],
+    ["docs", "📖 Docs"],
+    ["setup", "🧭 Guided Setup"],
+    ["validate", "✅ Validation"]
+  ];
+
+  function renderProduction(main, tab) {
+    tab = tab || "security";
+    OM.ensure();
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `PRODUCTION CENTER <span class="dim">// phase omega — core v${OM.CORE_VERSION}</span>` }),
+        el("p", { class: "page-sub", text: "No new empire features — this is where everything already built becomes secure, observable, recoverable, fast, configurable, documented and validated as one platform." })
+      ])
+    ]));
+    const tabs = el("div", { class: "bridge-tabs" });
+    OM_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
+      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/production/" + k2, text: label
+    })));
+    wrap.appendChild(tabs);
+    const body = el("div", { class: "bridge-body" });
+    ({
+      security: omSecurity, health: omHealth, logs: omLogs, recovery: omRecovery,
+      config: omConfig, deploy: omDeploy, docs: omDocs, setup: omSetup, validate: omValidate
+    }[tab] || omSecurity)(body);
+    wrap.appendChild(body);
+    main.appendChild(wrap);
+  }
+
+  /* ---- MODULE 1 — security & identity ---- */
+  function omSecurity(body) {
+    const sec = S.state.security;
+    body.appendChild(el("p", { class: "dim small-note", text: "Honest scope: the passcode (SHA-256 + salt, WebCrypto) keeps casual hands off this app on a shared machine — it cannot stop someone with access to this browser profile's disk. Credentials live AES-GCM-encrypted in the Gamma vault; roles gate the Bridge; workers and extensions hold least-privilege grants." }));
+    const lockPanel = el("div", { class: "panel form-panel" });
+    lockPanel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "🔐 Access lock & sessions" }),
+      el("span", { class: "int-status " + (sec.enabled ? "st-healthy" : ""), text: sec.enabled ? "enabled" : "disabled" })
+    ]));
+    const pass = el("input", { class: "input", type: "password", placeholder: sec.enabled ? "enter passcode to disable" : "set a passcode (min 4 chars)" });
+    lockPanel.appendChild(el("div", { class: "rt-addrow" }, [
+      pass,
+      !sec.enabled ? el("button", { class: "btn small primary", text: "Enable lock", onclick: async () => {
+        const r = await OM.enableLock(pass.value);
+        toast(r.ok ? "Lock enabled — passcode required on load." : r.reason, r.ok ? "ok" : "err");
+        go("#/production/security");
+      } }) : null,
+      sec.enabled ? el("button", { class: "btn small danger ghost", text: "Disable", onclick: async () => {
+        const r = await OM.unlock(pass.value);
+        if (r.ok) { OM.disableLock(); toast("Lock disabled.", "info"); } else toast("Wrong passcode.", "err");
+        go("#/production/security");
+      } }) : null,
+      sec.enabled ? el("button", { class: "btn small", text: "🔒 Lock now", onclick: () => { OM.lockNow(); renderLockScreen(); } }) : null
+    ].filter(Boolean)));
+    lockPanel.appendChild(el("p", { class: "dim tiny-note", text: `session timeout: ${S.state.settings.sessionTimeoutMin} min (Configuration tab) · session ${sec.session && sec.session.until > Date.now() ? "active until " + new Date(sec.session.until).toLocaleTimeString() : "none"}` }));
+    body.appendChild(lockPanel);
+
+    const grid = el("div", { class: "insp-grid" });
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🔑 Key inventory" })]),
+      ...OM.keyInventory().map(k2 => el("div", { class: "act-row" }, [
+        el("b", { text: k2.name }),
+        el("span", { class: "dim small-note", text: `${k2.where} · ${k2.masked || (k2.present ? "present" : "—")}` })
+      ]))
+    ]));
+    grid.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🧬 RBAC & fine-grained permissions" })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Roles × resources" }), el("a", { class: "dim small-note", href: "#/bridge/permissions", text: B.ROLES.length + " roles · " + B.RESOURCES.length + " resources →" })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Worker action grants" }), el("a", { class: "dim small-note", href: "#/integrations/permissions", text: Object.keys(S.state.execPerms).length + " worker grant set(s) →" })]),
+      el("div", { class: "act-row" }, [el("b", { text: "Extension permissions" }), el("a", { class: "dim small-note", href: "#/extensions/registry", text: XT.installed().length + " extension(s), approval-gated →" })])
+    ]));
+    body.appendChild(grid);
+
+    const audit = el("div", { class: "panel" });
+    audit.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "📋 Audit trail — every sensitive action, traceable" })]));
+    OM.auditTrail(25).forEach(a => audit.appendChild(el("div", { class: "log-row" }, [
+      el("span", { class: "ev-time", text: new Date(a.at).toLocaleString() }),
+      el("span", { class: "cap-chip on", text: a.action }),
+      el("span", { class: "log-text dim", text: `[${a.actor}] ${a.detail}` })
+    ])));
+    body.appendChild(audit);
+  }
+
+  function renderLockScreen() {
+    const root = $("#modal-root");
+    root.innerHTML = "";
+    const pass = el("input", { class: "input", type: "password", placeholder: "passcode", style: "max-width:280px" });
+    const msg = el("p", { class: "dim small-note", text: "PRISM-X is locked. Enter your passcode to open a session." });
+    const tryUnlock = async () => {
+      const r = await OM.unlock(pass.value);
+      if (r.ok) { root.innerHTML = ""; toast("Session opened.", "ok"); route(); }
+      else { msg.textContent = "Wrong passcode — attempt logged."; pass.value = ""; }
+    };
+    pass.addEventListener("keydown", (ev2) => { if (ev2.key === "Enter") tryUnlock(); });
+    const box = el("div", { class: "modal-box lock-box" }, [
+      el("div", { class: "hero-glyph", text: "🔒" }),
+      el("h2", { text: "GOD CORE SECURED" }),
+      msg, pass,
+      el("div", { class: "modal-actions" }, [el("button", { class: "btn primary", text: "Unlock", onclick: tryUnlock })])
+    ]);
+    root.appendChild(el("div", { class: "modal-overlay show lock-overlay" }, [box]));
+    setTimeout(() => pass.focus(), 50);
+  }
+
+  /* ---- MODULE 2 — health center ---- */
+  function omHealth(body) {
+    const h = OM.overallHealth();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "OVERALL SYSTEM HEALTH" }), el("div", { class: "kpi-value", text: h.score + "/100" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "COMPONENTS" }), el("div", { class: "kpi-value", text: h.comps.length + " checked" })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "WARNINGS / FAILURES" }), el("div", { class: "kpi-value", text: h.warns + " / " + h.fails })])
+    ]));
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Component diagnostics + recommended actions" })]));
+    h.comps.forEach(c2 => panel.appendChild(el("div", { class: "hm-row" }, [
+      healthDot(c2.status === "ok" ? "online" : c2.status === "warn" ? "auth_required" : "rate_limited"),
+      el("b", { class: "hm-name", text: c2.name }),
+      el("div", { class: "ms-task-mid" }, [
+        el("div", { class: "small-note", text: c2.diag }),
+        el("div", { class: "dim tiny-note", text: "→ " + c2.rec })
+      ])
+    ])));
+    body.appendChild(panel);
+  }
+
+  /* ---- MODULE 3 — observability ---- */
+  function omLogs(body) {
+    const q = el("input", { class: "input inline-select", placeholder: "search logs…", style: "width:220px" });
+    const catSel = el("select", { class: "input inline-select" });
+    B.eventCategories().forEach(c2 => catSel.appendChild(el("option", { value: c2, text: "Component: " + c2 })));
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [
+      el("h2", { class: "panel-title", text: "🧾 Structured logs" }),
+      el("div", { class: "filter-row" }, [q, catSel, el("button", { class: "btn tiny", text: "⬇ Export", onclick: () => { U.copyText(OM.exportLogs(), "Log bundle copied — paste into a file to archive."); } })])
+    ]));
+    const list = el("div", { class: "log-list" });
+    function draw() {
+      list.innerHTML = "";
+      const rows = OM.logs({ q: q.value, category: catSel.value });
+      if (!rows.length) list.appendChild(el("p", { class: "empty-note", text: "No log lines match." }));
+      rows.forEach(e2 => list.appendChild(eventRow(e2)));
+    }
+    q.addEventListener("input", draw);
+    catSel.addEventListener("change", draw);
+    draw();
+    panel.appendChild(list);
+    body.appendChild(panel);
+
+    const tPanel = el("div", { class: "panel" });
+    tPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🔬 Execution traces" })]));
+    const trs = OM.traces();
+    if (!trs.length) tPanel.appendChild(el("p", { class: "empty-note", text: "No traces yet — run a mission or an action." }));
+    trs.slice(0, 12).forEach(t => tPanel.appendChild(el("div", { class: "exec-row", onclick: () => U.modal({
+      title: "🔬 Trace — " + t.label, body: (() => { const b2 = el("div", { class: "modal-body" }); b2.appendChild(el("pre", { class: "output-pre", text: [`id: ${t.id}`, `at: ${new Date(t.at).toLocaleString()}`, `duration: ${(t.ms / 1000).toFixed(2)}s`, ``, ...t.steps.map((s2, i) => `${i + 1}. ${s2}`)].join("\n") })); return b2; })(),
+      actions: [{ label: "Close", cls: "ghost" }]
+    }) }, [
+      el("span", { class: "exec-ok ok", text: t.kind === "runtime" ? "⚡" : "🔌" }),
+      el("span", { class: "exec-name", text: t.label }),
+      el("span", { class: "dim tiny-note", text: `${new Date(t.at).toLocaleTimeString()} · ${(t.ms / 1000).toFixed(1)}s` })
+    ])));
+    body.appendChild(tPanel);
+  }
+
+  /* ---- MODULE 4 — recovery ---- */
+  function omRecovery(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "Full restore lives in Network → Recovery. This adds selective recovery (restore one slice, leave everything else), snapshot validation before any restore, and configuration export/import." }));
+    const snaps = NW.snapshots();
+    const panel = el("div", { class: "panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🎯 Selective recovery" })]));
+    if (!snaps.length) panel.appendChild(el("p", { class: "empty-note", text: "No snapshots yet — take one in Network → Recovery." }));
+    else {
+      const snapSel = el("select", { class: "input inline-select" });
+      snaps.forEach(s2 => snapSel.appendChild(el("option", { value: s2.key, text: `${s2.label} — ${new Date(s2.at).toLocaleString()}` })));
+      const sliceSel = el("select", { class: "input inline-select" });
+      Object.keys(OM.RECOVERY_SLICES).forEach(s2 => sliceSel.appendChild(el("option", { value: s2, text: "restore only: " + s2 })));
+      const valOut = el("pre", { class: "output-pre", text: "// validation report appears here", style: "margin-top:10px" });
+      panel.appendChild(el("div", { class: "rt-addrow" }, [
+        snapSel, sliceSel,
+        el("button", { class: "btn small", text: "🔍 Validate", onclick: () => {
+          const v = OM.validateSnapshot(NW.snapshotJson(snapSel.value) || "");
+          valOut.textContent = v.ok
+            ? `✓ VALID — ${v.stats.clones} clone(s) · ${v.stats.docs} doc(s) · ${v.stats.missions} mission(s) · ${v.stats.sizeKB}KB`
+            : "✗ INVALID — " + v.problems.join(", ");
+        } }),
+        el("button", { class: "btn small primary", text: "↻ Restore slice", onclick: () => {
+          const r = OM.selectiveRestore(snapSel.value, sliceSel.value);
+          toast(r.ok ? `"${sliceSel.value}" restored — everything else untouched.` : r.reason, r.ok ? "ok" : "err");
+          go("#/production/recovery");
+        } })
+      ]));
+      panel.appendChild(valOut);
+    }
+    body.appendChild(panel);
+
+    body.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🗂 Configuration export / import" })]),
+      el("p", { class: "dim small-note", text: "The full-system JSON export (Settings → Data) doubles as the configuration bundle; import validates before applying. Scheduled backups run automatically on boot (max one per 6h) — see Network → Recovery for restore points." }),
+      el("div", { class: "vi-actions" }, [
+        el("button", { class: "btn small", text: "⬇ Export full config", onclick: () => U.copyText(S.exportJSON(), "Full configuration copied — save it as a .json file.") }),
+        el("a", { class: "btn small", href: "#/settings", text: "Import via Settings →" })
+      ])
+    ]));
+  }
+
+  /* ---- MODULE 6 — configuration center ---- */
+  function omConfig(body) {
+    body.appendChild(el("p", { class: "dim small-note", text: "One place for every knob. Deep systems keep their own pages — linked here — while platform-wide policies live below." }));
+    const st = S.state.settings;
+    const panel = el("div", { class: "panel form-panel" });
+    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Platform policies" })]));
+    const mkToggle = (label, key, onChange) => {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = !!st[key];
+      cb.addEventListener("change", () => { st[key] = cb.checked; S.save(); if (onChange) onChange(cb.checked); });
+      return el("label", { class: "check-row" }, [cb, el("span", { text: label })]);
+    };
+    panel.appendChild(mkToggle("Compact appearance (denser paddings across the whole UI)", "compact", (on) => document.documentElement.classList.toggle("compact", on)));
+    panel.appendChild(mkToggle("Wake-up digest toasts (ghost/shell/matrix catch-up notifications)", "digests"));
+    panel.appendChild(mkToggle("Sound FX", "sound"));
+    const timeout = el("input", { class: "input", type: "number", min: 5, max: 480, value: st.sessionTimeoutMin, style: "max-width:120px" });
+    timeout.addEventListener("change", () => { st.sessionTimeoutMin = Math.max(5, parseInt(timeout.value, 10) || 60); S.save(); });
+    panel.appendChild(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Security session timeout (minutes)" }), timeout]));
+    body.appendChild(panel);
+
+    const links = el("div", { class: "panel" });
+    links.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Deep configuration" })]));
+    [
+      ["Providers & models", "#/intelligence", P.list().length + " providers"],
+      ["Integrations & vault", "#/integrations", S.state.integrations.length + " integrations"],
+      ["Organizations & teams", "#/enterprise/orgs", EN.orgs().length + " org(s)"],
+      ["Users & roles (RBAC)", "#/bridge/permissions", B.ROLES.length + " roles"],
+      ["Workers", "#/dashboard", S.state.clones.length + " clone(s)"],
+      ["Knowledge", "#/knowledge", K.docs().length + " doc(s)"],
+      ["Extensions", "#/extensions", XT.installed().length + " installed"],
+      ["Generation engine & data", "#/settings", st.engine + " engine"]
+    ].forEach(([label, href, meta]) => links.appendChild(el("div", { class: "act-row" }, [
+      el("b", { text: label }),
+      el("span", { class: "dim small-note", text: meta }),
+      el("a", { class: "btn tiny", href, text: "Open →", style: "margin-left:auto" })
+    ])));
+    body.appendChild(links);
+  }
+
+  /* ---- MODULE 7 — deploy & versioning ---- */
+  function omDeploy(body) {
+    const vi = OM.versionInfo();
+    body.appendChild(el("div", { class: "kpi-row" }, [
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "CORE VERSION" }), el("div", { class: "kpi-value", text: "v" + vi.core })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "STATE VERSION" }), el("div", { class: "kpi-value", text: "v" + vi.stateVersion })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "MODULES LOADED" }), el("div", { class: "kpi-value", text: String(vi.modules) })]),
+      el("div", { class: "kpi" }, [el("div", { class: "kpi-label", text: "PHASES SHIPPED" }), el("div", { class: "kpi-value", text: String(vi.phases) })])
+    ]));
+
+    const envPanel = el("div", { class: "panel form-panel" });
+    envPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "🌐 Environment profile" })]));
+    const envSel = el("select", { class: "input", style: "max-width:260px" });
+    OM.ENV_PROFILES.forEach(p2 => { const o = el("option", { value: p2, text: p2 }); if (p2 === vi.profile) o.selected = true; envSel.appendChild(o); });
+    envSel.addEventListener("change", () => { OM.setProfile(envSel.value); toast("Profile: " + envSel.value + (envSel.value === "production" ? " — sandboxes disabled." : "."), "info"); go("#/production/deploy"); });
+    envPanel.appendChild(envSel);
+    envPanel.appendChild(el("p", { class: "dim tiny-note", text: "production disables the extension sandbox and expects a green Validation Suite before deploys; development keeps every tool open." }));
+    const cfg = OM.validateConfig();
+    envPanel.appendChild(el("div", { class: "act-row" }, [
+      el("b", { text: "Configuration validation" }),
+      el("span", { class: "exec-ok " + (cfg.ok ? "ok" : "bad"), text: cfg.ok ? "✓ valid" : "✗ " + cfg.problems.join("; ") })
+    ]));
+    envPanel.appendChild(el("div", { class: "act-row" }, [
+      el("b", { text: "Startup health checks" }),
+      el("span", { class: "dim small-note", text: "boot runs migrations (snapshot-first, rollback kept), storage probe, module census — see Health Center" })
+    ]));
+    body.appendChild(envPanel);
+
+    const notes = el("div", { class: "panel" });
+    notes.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "📜 Release notes — the full evolutionary arc" })]));
+    OM.CHANGELOG.slice().reverse().forEach(c2 => notes.appendChild(el("div", { class: "act-row" }, [
+      el("span", { class: "cap-chip on", text: "v" + c2.v }),
+      el("b", { text: c2.name }),
+      el("span", { class: "dim small-note", text: c2.note })
+    ])));
+    body.appendChild(notes);
+  }
+
+  /* ---- MODULE 8 — documentation hub ---- */
+  function omDocs(body) {
+    const sections = [
+      ["System Overview", () => `PRISM-X is a zero-dependency, browser-native Intelligence Operating System. One state tree (localStorage), ${OM.versionInfo().modules} modules, every phase verified end-to-end. Agent classes: Clones (specialist workers), Ghosts (product agents), Shells (content brands), Executors (humans). Coordination: Bridge → Provider Manager → Runtime → Execution Layer → Knowledge → Missions → Evolution → Enterprise → Extensions → Network.`],
+      ["Architecture Guide", () => `Script order is the dependency order: data → engine → store → ui → ghosts → shells → matrix → bridge → providers → runtime → execution → knowledge → missions → evolution → enterprise → extensions → network → omega → app. Every module is an IIFE on window.PRISM with lazy cross-references. All inter-module traffic flows through the Bridge (events, shared memory, permissions, internal API); the extension bus taps bridge.emit with a single line. Simulations (revenue, engagement, remote telemetry) are labeled at every surface; generated content and coordination logic are real.`],
+      ["User Guide", () => `1) Onboard — train the five DNA layers. 2) Forge clones and run tasks from their consoles. 3) Deploy Ghosts/Shells for product + content loops (sim clock ⏩). 4) Activate the First Intelligence in Runtime and evaluate missions. 5) Plan multi-worker missions in Mission Control. 6) Let the Evolution Engine propose improvements — you approve. 7) Run the business in Enterprise (CRM feeds missions, ledger stays honest). 8) Install extensions; register nodes; take snapshots. Every page's sub-title states what's real vs simulated.`],
+      ["Developer Guide", () => `Add capability as an extension, never a core edit: define a manifest (id, name, version, author, category, requires, permissions, requiredApis, dependencies, configSchema, ui.widgets/pages, listeners, init, docs), register it in the catalog, install through the manager, get a permission-scoped api object. State additions go through store defaults + ensure() migrations. Emit events via bridge kinds; they auto-flow to the Command Center, extension bus and audit trail.`],
+      ["API Reference (live)", () => "Bridge internal endpoints:\n" + B.API_ENDPOINTS.map(e2 => "  " + e2).join("\n") + "\n\nExtension API surface (permission-scoped):\n" + XT.devData().apis.map(a => "  api." + a).join("\n")],
+      ["Extension SDK Guide", () => `Manifest contract (validated before install): metadata + version + permissions[] (from: ${XT.PERMISSIONS.join(", ")}) + requiredApis + dependencies + configSchema + ui + listeners + docs. Events you can subscribe to: ${XT.EVENTS.join(", ")} plus raw core:<kind>. Honest caveat: the API contract is convention-enforced in a same-page runtime; iframe sandboxing is the planned hardening.`],
+      ["Troubleshooting", () => `Blank page → check the browser console; state resets happen only on corrupt JSON (a backup snapshot is kept). Neural Link errors fall back to the Local Cortex automatically and say so in the notes. Locked out → the passcode has no recovery by design (browser-local); clear site data to reset (state is lost — export backups first). Storage full → Network → Monitor shows capacity; delete old snapshots. Something misbehaving → run the Validation Suite; it normalizes known schema gaps.`],
+      ["FAQ", () => `Is the revenue real? Ledger entries you record are real bookkeeping; agent-network earnings are labeled simulations and never mix silently. Does it post to X automatically? No — the Broadcast Queue pre-fills the composer; you always click send. Can it run multi-node for real? The coordination layer is ready; remote runtimes need a server adapter (the API surface is already stable for it). Where are my API keys? AES-GCM-encrypted in the vault, decrypted only inside the Execution Engine.`],
+      ["Changelog", () => OM.CHANGELOG.map(c2 => `v${c2.v} — ${c2.name}: ${c2.note}`).join("\n")]
+    ];
+    const nav2 = el("div", { class: "bridge-tabs docs-nav" });
+    const content = el("div", { class: "panel" });
+    const pre = el("pre", { class: "output-pre docs-pre" });
+    content.appendChild(pre);
+    function show(i) {
+      nav2.querySelectorAll(".bridge-tab").forEach((t, j) => t.classList.toggle("on", j === i));
+      pre.textContent = sections[i][1]();
+    }
+    sections.forEach(([title], i) => nav2.appendChild(el("a", { class: "bridge-tab" + (i === 0 ? " on" : ""), text: title, onclick: () => show(i) })));
+    body.appendChild(nav2);
+    body.appendChild(content);
+    show(0);
+  }
+
+  /* ---- MODULE 9 — guided setup ---- */
+  function omSetup(body) {
+    const p2 = OM.setupProgress();
+    body.appendChild(el("div", { class: "panel" }, [
+      el("div", { class: "panel-head" }, [
+        el("h2", { class: "panel-title", text: `🧭 Guided setup — ${p2.done}/${p2.total} complete` }),
+        el("div", { class: "rt-bar ms-bar", style: "width:180px" }, [el("div", { class: "rt-bar-fill", style: `width:${Math.round((p2.done / p2.total) * 100)}%` })])
+      ]),
+      el("p", { class: "dim small-note", text: "Each step is detected from live state — no checkboxes to fake. Finish all seven and the platform is fully in motion." }),
+      ...p2.steps.map(s2 => el("div", { class: "act-row" }, [
+        el("span", { class: "exec-ok " + (s2.done ? "ok" : "bad"), text: s2.done ? "✓" : "○" }),
+        el("b", { text: s2.label }),
+        s2.done ? el("span", { class: "dim small-note", text: "done" }) : el("a", { class: "btn tiny gold-btn", href: s2.link, text: "Do it →", style: "margin-left:auto" })
+      ]))
+    ]));
+  }
+
+  /* ---- MODULE 10 — validation suite ---- */
+  function omValidate(body) {
+    body.appendChild(el("div", { class: "form-actions", style: "justify-content:flex-start;margin-bottom:12px" }, [
+      el("button", { class: "btn primary", text: "✅ Run Production Validation Suite", onclick: () => {
+        const r = OM.runValidation();
+        U.sfx(r.ready ? "evolve" : "click");
+        toast(r.summary, r.ready ? "ok" : "err");
+        go("#/production/validate");
+      } })
+    ]));
+    const reps = OM.reports();
+    if (!reps.length) { body.appendChild(el("p", { class: "empty-note", text: "No readiness reports yet — run the suite." })); return; }
+    reps.slice(0, 3).forEach((r, i) => {
+      const panel = el("div", { class: "panel" + (i === 0 ? " rt-monitor" : "") });
+      panel.appendChild(el("div", { class: "panel-head" }, [
+        el("h2", { class: "panel-title", text: `📑 Readiness report — ${new Date(r.at).toLocaleString()} (${r.profile})` }),
+        el("span", { class: "ms-health " + (r.ready ? "h-on-track" : "h-delayed"), text: r.ready ? "READY" : "NOT READY" })
+      ]));
+      panel.appendChild(el("p", { class: (r.ready ? "" : "dim ") + "small-note", text: r.summary }));
+      r.checks.forEach(c2 => panel.appendChild(el("div", { class: "act-row" }, [
+        el("span", { class: "exec-ok " + (c2.status === "pass" ? "ok" : "bad"), text: c2.status === "pass" ? "✓" : c2.status === "warn" ? "⚠" : "✗" }),
+        el("b", { text: c2.name }),
+        el("span", { class: "dim small-note", text: c2.msg })
+      ])));
+      body.appendChild(panel);
+    });
+  }
+
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
@@ -5560,9 +5947,15 @@
     EN.boot(); /* Phase Eta: bring the Enterprise OS online */
     XT.boot(); /* Phase Theta: load enabled extensions through the manager */
     NW.boot(); /* Phase Iota: register PRIME, arm auto-backups + failover */
+    OM.boot(); /* Phase Omega: migrations, security, production layer */
+    /* Omega performance: throttled saves flush on any exit path */
+    window.addEventListener("beforeunload", () => S.flush());
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") S.flush(); });
+    document.documentElement.classList.toggle("compact", !!S.state.settings.compact);
     U.$$(".nav-link").forEach(a => a.addEventListener("click", () => U.sfx("click")));
     window.addEventListener("hashchange", route);
     route();
+    if (S.state.onboarded && S.state.security.enabled && !OM.sessionValid()) renderLockScreen();
     if (!S.state.onboarded) renderOnboarding();
     else {
       S.runWeeklyRepeats().then(ran => {

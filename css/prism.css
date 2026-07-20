@@ -1060,3 +1060,22 @@ select.input { appearance: auto; }
 .xt-widget { min-height: 92px; }
 .xt-mount { margin-top: 6px; }
 .xt-card .vi-actions { flex-wrap: wrap; }
+
+/* ============================================================ *
+ * PHASE OMEGA — Production Readiness
+ * ============================================================ */
+.lock-overlay { backdrop-filter: blur(10px); background: rgba(6,6,10,0.9); }
+.lock-box { text-align: center; max-width: 380px; padding: 34px 30px; }
+.lock-box .hero-glyph { font-size: 42px; margin-bottom: 8px; }
+.lock-box h2 { letter-spacing: 3px; font-size: 18px; margin-bottom: 8px; }
+.lock-box .input { margin: 14px auto 0; }
+.docs-nav { flex-wrap: wrap; }
+.docs-pre { max-height: 460px; overflow-y: auto; line-height: 1.7; }
+
+/* Compact appearance policy (Configuration → compact) */
+html.compact #view { padding-top: 18px; padding-bottom: 40px; }
+html.compact .panel { padding: 12px 14px; margin-bottom: 12px; }
+html.compact .kpi { padding: 11px 13px; }
+html.compact .kpi-value { font-size: 22px; }
+html.compact .act-row, html.compact .hm-row, html.compact .exec-row, html.compact .ms-task { padding-top: 6px; padding-bottom: 6px; }
+html.compact .page-head { margin-bottom: 14px; }
