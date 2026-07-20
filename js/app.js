@@ -60,6 +60,11 @@
         (ghostViews && a.dataset.view === "ghosts") ||
         (shellViews && a.dataset.view === "shells"));
     });
+    /* keep the active section visible in the mobile horizontal-scroll nav */
+    const activeLink = $("#nav .nav-link.active");
+    if (activeLink && window.innerWidth <= 760 && activeLink.scrollIntoView) {
+      activeLink.scrollIntoView({ block: "nearest", inline: "center" });
+    }
     const s = S.state.settings;
     const pill = $("#engine-pill");
     if (pill) {
