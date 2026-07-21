@@ -899,6 +899,11 @@ select.input { appearance: auto; }
      mobile; balance them into a clean 2×2 grid (deck cards already fit 4). */
   .prod-stats { display: grid; grid-template-columns: repeat(2, 1fr); }
   .prod-stats .cc-metric { min-width: 0; }
+  /* Phase 4 — Matrix Merge: the executor-portal header is a space-between flex
+     row; at this width the identity text was crushed into a 3-line column
+     colliding with the SCORE badge. Stack them so the badge drops cleanly below. */
+  .portal-head { flex-direction: column; align-items: flex-start; }
+  .portal-head .badge { align-self: flex-start; }
 }
 
 /* Accessibility: a visible keyboard-focus ring on every interactive element
