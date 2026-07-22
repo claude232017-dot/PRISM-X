@@ -3770,7 +3770,7 @@
     const ds = K.docs().slice(-24);
     const ls = K.links().filter(l => ds.some(d => d.id === l.from) && ds.some(d => d.id === l.to));
     const panel = el("div", { class: "panel" });
-    panel.appendChild(el("div", { class: "panel-head" }, [
+    panel.appendChild(el("div", { class: "panel-head head-stack" }, [
       el("h2", { class: "panel-title", text: `🕸 Knowledge graph — ${ds.length} node(s), ${K.links().length} link(s)` }),
       el("span", { class: "dim small-note", text: "node size = retrievals · color = memory layer · click to open" })
     ]));
