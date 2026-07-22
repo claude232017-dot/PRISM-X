@@ -904,6 +904,16 @@ select.input { appearance: auto; }
      colliding with the SCORE badge. Stack them so the badge drops cleanly below. */
   .portal-head { flex-direction: column; align-items: flex-start; }
   .portal-head .badge { align-self: flex-start; }
+  /* Phase Alpha — Foundation Protocol (Bridge): two dense control-center layouts
+     overflowed their panels on narrow screens. */
+  /* (1) the Command Center's 4 event filters are a non-wrapping flex row that
+     spilled off the right edge; let them wrap. (.filter-row is a shared utility —
+     wrapping only engages when items don't fit, so it never alters a fitting row.) */
+  .filter-row { flex-wrap: wrap; }
+  /* (2) the 8-column Permission matrix pushed its header labels past the card
+     edge; make the table scroll horizontally inside its own panel instead. */
+  .perm-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .perm-row { min-width: 640px; }
 }
 
 /* Accessibility: a visible keyboard-focus ring on every interactive element
