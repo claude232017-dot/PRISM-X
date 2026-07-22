@@ -1122,6 +1122,16 @@ textarea:focus-visible, [tabindex]:focus-visible {
 .sg-row { display: flex; align-items: flex-start; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--line); }
 .sg-row:last-child { border-bottom: none; }
 .sg-row .vi-actions { flex: none; }
+/* Phase Zeta — Evolution Engine: a suggestion row pairs its title/detail with
+   its approve/reject/apply/accept/rollback buttons on a non-wrapping row; on
+   phones the fixed-width buttons crushed the title/detail into a thin ragged
+   column (buttonless rows read fine, which pinpoints the cause). Let the row
+   wrap and give the title/detail full width so the buttons drop below it.
+   (Placed after the base .sg-row rules so it wins the cascade.) */
+@media (max-width: 760px) {
+  .sg-row { flex-wrap: wrap; }
+  .sg-row .ms-task-mid { flex-basis: 100%; }
+}
 
 /* ============================================================ *
  * PHASE ETA — Enterprise OS
