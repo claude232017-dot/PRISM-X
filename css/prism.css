@@ -927,6 +927,12 @@ select.input { appearance: auto; }
      and broke "1.7s · est $0" across several lines. Stack the header so the
      meta drops full-width below the title and reads on one line. */
   .eval-card .panel-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+  /* Phase Gamma — Execution Layer: the Execution History header pairs its title
+     with a long field legend (timestamp · worker · provider · …) that the
+     space-between header crushed into a ragged 3-line right column on phones.
+     .head-stack lets any such header stack the legend full-width below the
+     title (applied only to the Gamma history header). */
+  .head-stack { flex-direction: column; align-items: flex-start; gap: 4px; }
 }
 
 /* Accessibility: a visible keyboard-focus ring on every interactive element

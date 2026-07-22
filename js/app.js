@@ -3561,7 +3561,7 @@
   function xcHistory(body) {
     const h = X.history();
     const panel = el("div", { class: "panel" });
-    panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `🧾 Execution history (${h.length})` }), el("span", { class: "dim small-note", text: "timestamp · worker · provider · integration · action · result · runtime · status" })]));
+    panel.appendChild(el("div", { class: "panel-head head-stack" }, [el("h2", { class: "panel-title", text: `🧾 Execution history (${h.length})` }), el("span", { class: "dim small-note", text: "timestamp · worker · provider · integration · action · result · runtime · status" })]));
     if (!h.length) panel.appendChild(el("p", { class: "empty-note", text: "Nothing executed yet." }));
     h.slice(0, 25).forEach(x => panel.appendChild(el("div", { class: "exec-row", onclick: () => U.modal({
       title: "🧾 " + x.action, cls: "wide",
