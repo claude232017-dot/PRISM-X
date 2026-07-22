@@ -914,6 +914,13 @@ select.input { appearance: auto; }
      edge; make the table scroll horizontally inside its own panel instead. */
   .perm-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .perm-row { min-width: 640px; }
+  /* Phase H0 — Intelligence Provider Layer: the health-monitor rows use rigid
+     min-widths (name 130 + state 180 + a right-aligned Test button) that
+     overran the panel on phones. Let the row wrap and release the min-widths so
+     name/state/activity flow and the Test button no longer hangs off the edge. */
+  .hm-row { flex-wrap: wrap; }
+  .hm-name { min-width: 0; }
+  .hm-state { min-width: 0; }
 }
 
 /* Accessibility: a visible keyboard-focus ring on every interactive element
