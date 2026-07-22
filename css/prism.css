@@ -1102,6 +1102,16 @@ textarea:focus-visible, [tabindex]:focus-visible {
 .ms-task-mid { flex: 1; min-width: 0; }
 .ms-svg { max-width: 100%; }
 .ms-node-running { filter: drop-shadow(0 0 8px rgba(245,197,66,.7)); }
+/* Phase Epsilon — Autonomous Orchestration: on phones the mission task row kept
+   its status badge, label/meta, action button and reassign select on one
+   non-wrapping row, crushing the label/meta into a thin ragged column while the
+   controls held fixed width. Let the row wrap and give the label/meta a basis
+   that fills the row minus the badge, so every control drops to a tidy second
+   line. (Placed after the base .ms-task rules so it wins the cascade.) */
+@media (max-width: 760px) {
+  .ms-task { flex-wrap: wrap; align-items: flex-start; row-gap: 8px; }
+  .ms-task-mid { flex: 1 1 calc(100% - 96px); }
+}
 
 /* ============================================================ *
  * PHASE ZETA — Evolution Engine
