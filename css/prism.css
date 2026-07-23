@@ -87,6 +87,8 @@ a { color: var(--accent); text-decoration: none; }
 .nav-link:hover { color: var(--ink); background: var(--surface-2); }
 .nav-link.active { color: var(--accent); background: var(--accent-soft); }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
+/* hamburger toggle — hidden on desktop, shown ≤1024px (see PHASE Ω-2 block) */
+.nav-toggle { display: none; }
 .brain-tag {
   font: 700 10.5px/1 var(--mono); letter-spacing: 1.5px; color: var(--ink-muted);
   padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px;
@@ -872,25 +874,8 @@ select.input { appearance: auto; }
 
 /* ---------------- responsive ---------------- */
 @media (max-width: 760px) {
-  /* topbar becomes two clean rows: [brand ........ pills] / [scrollable nav] */
-  #topbar { flex-wrap: wrap; gap: 10px 12px; padding: 12px 14px; }
-  .brand { flex: 1 1 auto; }
-  .topbar-right { order: 2; }
-  #nav {
-    order: 3; width: 100%;
-    flex-wrap: nowrap;              /* the real fix: was inheriting wrap → 15-item vertical stack */
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    gap: 4px;
-    margin: 0 -14px;               /* bleed the scroll strip to the screen edges */
-    padding: 2px 14px 6px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--line-strong) transparent;
-  }
-  #nav .nav-link { flex: 0 0 auto; padding: 8px 12px; }  /* ≥44px touch height, no wrap */
-  #nav::-webkit-scrollbar { height: 4px; }
-  #nav::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
-  #nav::-webkit-scrollbar-track { background: transparent; }
+  /* The mobile/tablet header (hamburger menu) lives in its own ≤1024px block
+     below — see "PHASE Ω-2". */
   #view { padding: 20px 14px 60px; }
   .page-title { font-size: 21px; }
   .head-actions { width: 100%; }
@@ -1267,4 +1252,65 @@ html.compact .page-head { margin-bottom: 14px; }
   .ac-fab-label { display: none; }
   .ac-fab { padding: 13px; right: 14px; bottom: 14px; }
   .ac-drawer-body { padding: 6px 14px 24px; }
+}
+
+/* ============================================================ *
+ * PHASE Ω-2 — Mobile & tablet header (hamburger menu)
+ * Desktop (>1024px) is untouched: the toggle stays display:none and the
+ * inline wrapping nav renders exactly as before. At ≤1024px the 20-item nav
+ * collapses behind a hamburger that reveals a tidy 2-column tappable menu.
+ * ============================================================ */
+@media (max-width: 1024px) {
+  /* header becomes tidy rows: [brand ....... ☰] / [status pills] / (menu) */
+  #topbar { flex-wrap: wrap; gap: 10px 14px; padding: 12px 16px; align-items: center; }
+  .brand { flex: 1 1 auto; }
+
+  .nav-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    order: 1; flex: none; width: 42px; height: 42px; padding: 0;
+    border: 1px solid var(--line-strong); border-radius: 10px;
+    background: var(--surface-2); color: var(--ink); cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .nav-toggle:hover { border-color: rgba(245,197,66,.5); }
+  #topbar.nav-open .nav-toggle { color: var(--accent); border-color: rgba(245,197,66,.5); background: var(--accent-soft); }
+  /* the three-bar glyph, morphing to an ✕ when open */
+  .nav-toggle-bars, .nav-toggle-bars::before, .nav-toggle-bars::after {
+    content: ""; display: block; width: 20px; height: 2px; border-radius: 2px;
+    background: currentColor; transition: transform .2s ease, top .2s ease, opacity .2s ease;
+  }
+  .nav-toggle-bars { position: relative; }
+  .nav-toggle-bars::before { position: absolute; top: -6px; left: 0; }
+  .nav-toggle-bars::after  { position: absolute; top: 6px; left: 0; }
+  #topbar.nav-open .nav-toggle-bars { background: transparent; }
+  #topbar.nav-open .nav-toggle-bars::before { top: 0; transform: rotate(45deg); }
+  #topbar.nav-open .nav-toggle-bars::after  { top: 0; transform: rotate(-45deg); }
+
+  /* status pills drop to their own row, left-aligned and readable */
+  .topbar-right { order: 2; width: 100%; justify-content: flex-start; gap: 8px; }
+
+  /* the nav: hidden until the hamburger opens it, then a 2-column menu */
+  #nav {
+    order: 3; width: 100%; display: none;
+    margin: 2px -16px 0; padding: 12px 16px 4px;
+    border-top: 1px solid var(--line);
+    max-height: calc(100vh - 140px); overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #topbar.nav-open #nav { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  #nav .nav-link {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 13px 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface-2);
+    font-size: 14px; color: var(--ink-2); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #nav .nav-link:hover { border-color: var(--line-strong); color: var(--ink); }
+  #nav .nav-link.active { color: var(--accent); border-color: rgba(245,197,66,.45); background: var(--accent-soft); }
+  #nav .q-badge { margin-left: auto; }
+}
+
+/* very narrow phones (≤380px): single-column menu so labels never truncate */
+@media (max-width: 380px) {
+  #topbar.nav-open #nav { grid-template-columns: 1fr; }
 }

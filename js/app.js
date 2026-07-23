@@ -10,6 +10,7 @@
   function route() {
     U.closeModal(); /* navigation always dismisses any open modal */
     const acDrawer = $(".ac-drawer-overlay"); if (acDrawer) acDrawer.remove(); /* and any Academy help drawer */
+    closeMobileNav(); /* and the mobile hamburger menu */
     const hash = location.hash || "#/dashboard";
     const parts = hash.replace(/^#\//, "").split("/");
     const view = parts[0] || "dashboard";
@@ -6142,8 +6143,32 @@
     requestAnimationFrame(() => overlay.classList.add("show"));
   }
 
+  /* ---- mobile hamburger menu (header nav ≤1024px) ---- */
+  function closeMobileNav() {
+    const tb = $("#topbar"), nt = $("#nav-toggle");
+    if (tb) tb.classList.remove("nav-open");
+    if (nt) { nt.setAttribute("aria-expanded", "false"); nt.setAttribute("aria-label", "Open menu"); }
+  }
+  function mountMobileNav() {
+    const tb = $("#topbar"), nt = $("#nav-toggle");
+    if (!tb || !nt) return;
+    nt.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = tb.classList.toggle("nav-open");
+      nt.setAttribute("aria-expanded", open ? "true" : "false");
+      nt.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    });
+    /* tap outside the header dismisses the open menu */
+    document.addEventListener("click", (e) => {
+      if (tb.classList.contains("nav-open") && !tb.contains(e.target)) closeMobileNav();
+    });
+    /* Esc closes it too */
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMobileNav(); });
+  }
+
   function boot() {
     mountHelpFab();
+    mountMobileNav();
     B.boot(); /* Phase Alpha: bring the Bridge online, provision placeholders */
     P.boot(); /* Phase H0: register providers, route intelligence through the Manager */
     X.boot(); /* Phase Gamma: arm the Execution Layer (integrations, actions, vault) */
