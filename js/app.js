@@ -4982,7 +4982,7 @@
     body.appendChild(grid);
 
     const evPanel = el("div", { class: "panel" });
-    evPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `📡 Event monitor (${d2.busRing.length})` }), el("span", { class: "dim small-note", text: "the extension bus — core events + named platform events" })]));
+    evPanel.appendChild(el("div", { class: "panel-head head-stack" }, [el("h2", { class: "panel-title", text: `📡 Event monitor (${d2.busRing.length})` }), el("span", { class: "dim small-note", text: "the extension bus — core events + named platform events" })]));
     d2.busRing.slice(0, 15).forEach(e2 => evPanel.appendChild(el("div", { class: "log-row" }, [
       el("span", { class: "ev-time", text: new Date(e2.at).toLocaleTimeString() }),
       el("span", { class: "cap-chip on", text: e2.name }),
