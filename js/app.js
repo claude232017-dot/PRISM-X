@@ -4563,7 +4563,7 @@
     body.appendChild(form);
 
     const panel = el("div", { class: "panel" });
-    panel.appendChild(el("div", { class: "panel-head" }, [
+    panel.appendChild(el("div", { class: "panel-head head-stack" }, [
       el("h2", { class: "panel-title", text: `Pipeline (${EN.clients().length})` }),
       el("span", { class: "dim small-note", text: EN.STAGES.join(" → ") })
     ]));
