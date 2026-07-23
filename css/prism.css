@@ -931,8 +931,8 @@ select.input { appearance: auto; }
      a space-between header gets crushed into a ragged narrow column on phones.
      .head-stack stacks the legend full-width below the title. Applied per-phase
      only where such a header exists — Phase Gamma (Execution History),
-     Phase Delta (Knowledge graph), Phase Eta (CRM pipeline) and Phase Theta
-     (extension event monitor). */
+     Phase Delta (Knowledge graph), Phase Eta (CRM pipeline), Phase Theta
+     (extension event monitor) and Phase Iota (network scalability header). */
   .head-stack { flex-direction: column; align-items: flex-start; gap: 4px; }
 }
 

@@ -5308,7 +5308,7 @@
     body.appendChild(grid);
 
     const cap = el("div", { class: "panel" });
-    cap.appendChild(el("div", { class: "panel-head" }, [
+    cap.appendChild(el("div", { class: "panel-head head-stack" }, [
       el("h2", { class: "panel-title", text: "📈 Scalability framework — capacity headroom" }),
       el("span", { class: "dim small-note", text: "rings + caps keep the browser tier honest; horizontal scale = more nodes; the server adapter swap keeps every API identical" })
     ]));
