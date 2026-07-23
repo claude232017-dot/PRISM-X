@@ -1198,7 +1198,7 @@ html.compact .page-head { margin-bottom: 14px; }
 .ac-section:first-child { border-top: none; padding-top: 6px; }
 .ac-section-head { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; }
 .ac-section-ico { font-size: 17px; }
-.ac-section-title { font: 700 14px/1.2 var(--font); letter-spacing: .4px; text-transform: uppercase; color: var(--ink-2); }
+.ac-section-title { font: 700 13px/1.2 var(--mono); letter-spacing: 1.6px; text-transform: uppercase; color: var(--ink-2); }
 .ac-lead { font-size: 15px; line-height: 1.65; color: var(--ink); }
 .ac-section p { line-height: 1.7; }
 
@@ -1228,7 +1228,7 @@ html.compact .page-head { margin-bottom: 14px; }
 .ac-good .ac-mk { color: var(--good); font-weight: 800; flex: none; }
 
 .ac-advanced { border-top: 1px solid var(--line); padding: 14px 0; }
-.ac-advanced summary { cursor: pointer; font: 700 14px/1.2 var(--font); letter-spacing: .4px; text-transform: uppercase; color: var(--ink-2); list-style: none; }
+.ac-advanced summary { cursor: pointer; font: 700 13px/1.2 var(--mono); letter-spacing: 1.6px; text-transform: uppercase; color: var(--ink-2); list-style: none; }
 .ac-advanced summary::-webkit-details-marker { display: none; }
 .ac-advanced summary::before { content: "▸ "; color: var(--accent); }
 .ac-advanced[open] summary::before { content: "▾ "; }
