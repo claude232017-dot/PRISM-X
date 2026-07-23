@@ -1165,3 +1165,106 @@ html.compact .kpi { padding: 11px 13px; }
 html.compact .kpi-value { font-size: 22px; }
 html.compact .act-row, html.compact .hm-row, html.compact .exec-row, html.compact .ms-task { padding-top: 6px; padding-bottom: 6px; }
 html.compact .page-head { margin-bottom: 14px; }
+
+/* ============================================================ *
+ * PHASE Ω-1 — PRISM-X Academy (in-app learning)
+ * ============================================================ */
+.ac-search-panel { padding: 14px 16px; }
+.ac-search-row { display: flex; align-items: center; gap: 10px; }
+.ac-search-ico { font-size: 18px; flex: none; }
+.ac-search-input { flex: 1; font-size: 15px; }
+.ac-search-results { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.ac-result { display: flex; align-items: center; gap: 12px; padding: 10px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); transition: border-color .14s, transform .1s; }
+.ac-result:hover { border-color: rgba(245,197,66,.45); transform: translateX(2px); }
+.ac-result-ico { font-size: 20px; flex: none; width: 26px; text-align: center; }
+.ac-result-name { font-weight: 700; font-size: 14px; }
+.ac-result-go { margin-left: auto; color: var(--accent); font-weight: 800; }
+
+.ac-progress { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 2px 18px; }
+
+.ac-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 13px; }
+.ac-card { display: flex; flex-direction: column; gap: 7px; padding: 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); transition: border-color .16s, box-shadow .16s, transform .12s; }
+.ac-card:hover { border-color: rgba(245,197,66,.5); box-shadow: 0 0 20px rgba(245,197,66,.08); transform: translateY(-2px); }
+.ac-card-top { display: flex; align-items: center; justify-content: space-between; }
+.ac-card-ico { font-size: 26px; }
+.ac-card-prog { font: 700 10px/1.4 var(--mono); color: var(--ink-muted); border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 9px; }
+.ac-card-prog.done { color: var(--good); border-color: rgba(12,163,12,.45); }
+.ac-card-name { font: 700 15px/1.25 var(--font); letter-spacing: .3px; }
+.ac-card-tag { line-height: 1.45; }
+
+/* lesson body */
+.ac-body { display: flex; flex-direction: column; gap: 4px; }
+.ac-section { border-top: 1px solid var(--line); padding: 18px 0; }
+.ac-section:first-child { border-top: none; padding-top: 6px; }
+.ac-section-head { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; }
+.ac-section-ico { font-size: 17px; }
+.ac-section-title { font: 700 14px/1.2 var(--font); letter-spacing: .4px; text-transform: uppercase; color: var(--ink-2); }
+.ac-lead { font-size: 15px; line-height: 1.65; color: var(--ink); }
+.ac-section p { line-height: 1.7; }
+
+.ac-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ac-chip { font-size: 13px; font-weight: 600; color: var(--ink-2); border: 1px solid var(--line-strong); border-radius: 999px; padding: 7px 13px; background: var(--surface-2); }
+.ac-chip.ac-rel { color: var(--accent); border-color: rgba(245,197,66,.4); }
+.ac-chip.ac-rel:hover { background: var(--accent-soft); }
+
+.ac-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ac-flow-node { font: 600 12.5px/1.35 var(--mono); padding: 8px 14px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); }
+.ac-flow-node.start { color: var(--cyan); border-color: rgba(15,155,189,.5); }
+.ac-flow-node.end { color: var(--good); border-color: rgba(12,163,12,.5); }
+.ac-flow-arrow { color: var(--accent); font-weight: 800; }
+
+.ac-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; line-height: 1.55; }
+.ac-steps li { padding-left: 4px; }
+.ac-steps li::marker { color: var(--accent); font-weight: 800; }
+.ac-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; line-height: 1.55; }
+.ac-list li::marker { color: var(--accent); }
+
+.ac-mistakes { display: flex; flex-direction: column; gap: 10px; }
+.ac-mistake { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ac-bad, .ac-good { display: flex; gap: 9px; align-items: flex-start; padding: 10px 12px; border-radius: 9px; font-size: 13.5px; line-height: 1.45; }
+.ac-bad { background: rgba(230,103,103,.08); border: 1px solid rgba(230,103,103,.28); }
+.ac-good { background: rgba(12,163,12,.08); border: 1px solid rgba(12,163,12,.28); }
+.ac-bad .ac-mk { color: var(--red); font-weight: 800; flex: none; }
+.ac-good .ac-mk { color: var(--good); font-weight: 800; flex: none; }
+
+.ac-advanced { border-top: 1px solid var(--line); padding: 14px 0; }
+.ac-advanced summary { cursor: pointer; font: 700 14px/1.2 var(--font); letter-spacing: .4px; text-transform: uppercase; color: var(--ink-2); list-style: none; }
+.ac-advanced summary::-webkit-details-marker { display: none; }
+.ac-advanced summary::before { content: "▸ "; color: var(--accent); }
+.ac-advanced[open] summary::before { content: "▾ "; }
+.ac-advanced .ac-list { margin-top: 12px; }
+
+.ac-check-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; color: var(--ink-muted); font-size: 12.5px; }
+.ac-checkprog { font: 700 11px/1.4 var(--mono); color: var(--ink-muted); border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 9px; flex: none; }
+.ac-checkprog.done { color: var(--good); border-color: rgba(12,163,12,.45); }
+.ac-checklist { display: flex; flex-direction: column; gap: 2px; }
+.ac-check { display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px; border-bottom: 1px solid var(--line); font-size: 14px; cursor: pointer; }
+.ac-check:last-child { border-bottom: none; }
+.ac-check input { margin-top: 2px; accent-color: var(--accent); flex: none; }
+.ac-check.checked span { color: var(--ink-muted); text-decoration: line-through; }
+
+.ac-future { display: flex; align-items: center; gap: 12px; padding: 16px; border: 1px dashed var(--line-strong); border-radius: 10px; background: var(--surface-2); }
+.ac-future-ico { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line-strong); color: var(--accent); flex: none; }
+
+/* context help FAB */
+.ac-fab { position: fixed; right: 20px; bottom: 20px; z-index: 90; display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-radius: 999px; border: 1px solid rgba(245,197,66,.5); background: var(--accent-soft); color: var(--accent); font: 700 13px/1 var(--font); cursor: pointer; box-shadow: 0 8px 26px rgba(0,0,0,.45), 0 0 16px rgba(245,197,66,.14); backdrop-filter: blur(6px); transition: transform .14s, box-shadow .14s; }
+.ac-fab:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(0,0,0,.5), 0 0 22px rgba(245,197,66,.22); }
+.ac-fab[hidden] { display: none; }  /* .ac-fab display:flex otherwise defeats the [hidden] attribute */
+.ac-fab-ico { font-size: 16px; }
+
+/* context help drawer */
+.ac-drawer-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(5,5,8,.6); backdrop-filter: blur(3px); opacity: 0; transition: opacity .22s; }
+.ac-drawer-overlay.show { opacity: 1; }
+.ac-drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(560px, 100%); background: var(--surface); border-left: 1px solid var(--line-strong); box-shadow: -20px 0 60px rgba(0,0,0,.55); display: flex; flex-direction: column; transform: translateX(24px); transition: transform .22s ease; }
+.ac-drawer-overlay.show .ac-drawer { transform: none; }
+.ac-drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); flex: none; }
+.ac-drawer-title { font: 700 16px/1.2 var(--font); letter-spacing: .3px; }
+.ac-drawer-actions { display: flex; gap: 7px; flex: none; }
+.ac-drawer-body { overflow-y: auto; padding: 6px 20px 28px; }
+
+@media (max-width: 760px) {
+  .ac-mistake { grid-template-columns: 1fr; }
+  .ac-fab-label { display: none; }
+  .ac-fab { padding: 13px; right: 14px; bottom: 14px; }
+  .ac-drawer-body { padding: 6px 14px 24px; }
+}

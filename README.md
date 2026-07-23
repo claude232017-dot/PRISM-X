@@ -567,6 +567,28 @@ and validated as one platform. Nine tabs in the Production Center.
   health, producing a **Production Readiness Report** (and exposed at
   `GET /readiness`).
 
+## Phase Ω-1 — PRISM-X Academy (`#/academy`)
+
+An in-app learning + documentation system so users can learn every part of
+PRISM-X without leaving it. Content is authored data (`js/academy.js`), no
+network; the only persisted state is per-module checklist progress.
+
+- **A lesson per module** (17 of them) with a consistent structure: 📖 What
+  is this? · 💭 Why was this built? · 🎯 Why would I use it? (real-world
+  examples) · ⚙️ How does it work? (a workflow diagram) · 🚀 Quick Start (under
+  two minutes) · 🧪 Sandbox example (demo data + a "try it" link) · 💡 Best
+  practices · ⚠️ Common mistakes (do/don't) · 🔗 Related modules (cross-links)
+  · 🧠 Advanced tips (collapsed) · 📊 Testing checklist (persisted) · 🎥 a
+  reserved slot for videos / GIFs / interactive walkthroughs.
+- **Academy Center** (`#/academy`) — a searchable home with a card per module
+  and live hands-on progress across every checklist.
+- **Global "how do I…" search** — ask a natural question ("How do Missions
+  work?") and the matching lesson ranks first (offline, weighted lexical
+  retrieval).
+- **Context-aware help on every page** — a **📖 Learn** button opens the
+  current module's lesson in a slide-over drawer, so help is one tap away
+  without losing your place.
+
 ## Generation engines
 
 - **Local Cortex** (default) — an offline combinatorial template engine. Instant,

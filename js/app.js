@@ -3,12 +3,13 @@
  */
 (function () {
   "use strict";
-  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise, XT = PRISM.extensions, NW = PRISM.network, OM = PRISM.omega;
+  const D = PRISM.data, E = PRISM.engine, S = PRISM.store, U = PRISM.ui, G = PRISM.ghosts, SH = PRISM.shells, M = PRISM.matrix, B = PRISM.bridge, P = PRISM.providers, RT = PRISM.runtime, X = PRISM.execution, K = PRISM.knowledge, MS = PRISM.missions, EV = PRISM.evolution, EN = PRISM.enterprise, XT = PRISM.extensions, NW = PRISM.network, OM = PRISM.omega, AC = PRISM.academy;
   const { $, el, esc, fmtMoney, fmtNum, timeAgo, toast } = U;
 
   /* =============================== router =============================== */
   function route() {
     U.closeModal(); /* navigation always dismisses any open modal */
+    const acDrawer = $(".ac-drawer-overlay"); if (acDrawer) acDrawer.remove(); /* and any Academy help drawer */
     const hash = location.hash || "#/dashboard";
     const parts = hash.replace(/^#\//, "").split("/");
     const view = parts[0] || "dashboard";
@@ -40,9 +41,11 @@
     else if (view === "production") renderProduction(main, parts[1]);
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
+    else if (view === "academy") renderAcademy(main, parts[1]);
     else if (view === "settings") renderSettings(main);
     else renderDashboard(main);
     window.scrollTo(0, 0);
+    syncHelpFab(view);
   }
 
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
@@ -5943,7 +5946,204 @@
   }
 
   /* =============================== boot =============================== */
+  /* =============================== PRISM-X ACADEMY (Phase Ω-1) =============================== */
+  function renderAcademy(main, key) {
+    AC.ensure();
+    if (key && AC.module(key)) academyDocPage(main, key);
+    else academyHome(main);
+  }
+
+  function academyHome(main) {
+    const wrap = el("div", { class: "page" });
+    const ov = AC.overall();
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("h1", { class: "page-title", html: `📚 PRISM-X ACADEMY <span class="dim">// learn every module from inside the app</span>` }),
+        el("p", { class: "page-sub", text: "What each module is, why it exists, how it works, and a two-minute quick start — plus a hands-on checklist for every one. New here? Start with GOD CORE and follow the Related links." })
+      ])
+    ]));
+
+    /* global search */
+    const searchPanel = el("div", { class: "panel ac-search-panel" });
+    const input = el("input", { class: "input ac-search-input", placeholder: "Ask anything — e.g. \"How do Missions work?\" or \"add a human closer\"" });
+    const results = el("div", { class: "ac-search-results" });
+    function drawResults() {
+      results.innerHTML = "";
+      const q = input.value.trim();
+      if (!q) return;
+      const hits = AC.search(q);
+      if (!hits.length) { results.appendChild(el("p", { class: "empty-note", text: "No lesson matches — try a module name or a verb like 'launch', 'sync', 'close'." })); return; }
+      hits.forEach(h => results.appendChild(el("a", { class: "ac-result", href: "#/academy/" + h.module.key }, [
+        el("span", { class: "ac-result-ico", text: h.module.icon }),
+        el("div", {}, [
+          el("div", { class: "ac-result-name", text: h.module.name }),
+          el("div", { class: "dim tiny-note", text: h.module.tagline })
+        ]),
+        el("span", { class: "ac-result-go", text: "→" })
+      ])));
+    }
+    input.addEventListener("input", drawResults);
+    searchPanel.appendChild(el("div", { class: "ac-search-row" }, [el("span", { class: "ac-search-ico", text: "🔎" }), input]));
+    searchPanel.appendChild(results);
+    wrap.appendChild(searchPanel);
+
+    /* progress strip */
+    wrap.appendChild(el("div", { class: "ac-progress" }, [
+      el("span", { class: "dim small-note", text: `Hands-on progress: ${ov.done}/${ov.total} checklist steps across ${ov.modules} modules` }),
+      el("div", { class: "rt-bar ms-bar", style: "flex:1;min-width:120px;margin:0" }, [el("div", { class: "rt-bar-fill", style: `width:${ov.total ? Math.round(ov.done / ov.total * 100) : 0}%` })])
+    ]));
+
+    /* module cards */
+    const grid = el("div", { class: "ac-grid" });
+    AC.all().forEach(m => {
+      const p = AC.progress(m.key);
+      grid.appendChild(el("a", { class: "ac-card", href: "#/academy/" + m.key }, [
+        el("div", { class: "ac-card-top" }, [
+          el("span", { class: "ac-card-ico", text: m.icon }),
+          p.total ? el("span", { class: "ac-card-prog" + (p.done === p.total ? " done" : ""), text: p.done + "/" + p.total }) : null
+        ].filter(Boolean)),
+        el("div", { class: "ac-card-name", text: m.name }),
+        el("div", { class: "dim small-note ac-card-tag", text: m.tagline })
+      ]));
+    });
+    wrap.appendChild(grid);
+    main.appendChild(wrap);
+  }
+
+  function academyDocPage(main, key) {
+    const m = AC.module(key);
+    const wrap = el("div", { class: "page ac-doc" });
+    wrap.appendChild(el("div", { class: "page-head" }, [
+      el("div", {}, [
+        el("a", { class: "back-link", href: "#/academy", text: "← Academy" }),
+        el("h1", { class: "page-title", html: `${esc(m.icon)} ${esc(m.name)} <span class="dim">// academy</span>` }),
+        el("p", { class: "page-sub", text: m.tagline })
+      ]),
+      el("div", { class: "head-actions" }, [
+        el("a", { class: "btn small primary", href: m.route, text: "Try it →" })
+      ])
+    ]));
+    wrap.appendChild(academyDocContent(key));
+    main.appendChild(wrap);
+  }
+
+  /* the full lesson body — reused by the doc page AND the context drawer */
+  function academyDocContent(key) {
+    const m = AC.module(key);
+    const box = el("div", { class: "ac-body" });
+
+    box.appendChild(acSection("📖", "What is this?", el("p", { class: "ac-lead", text: m.whatIs })));
+    box.appendChild(acSection("💭", "Why was this built?", el("p", { text: m.whyBuilt })));
+    box.appendChild(acSection("🎯", "Why would I use it?", el("div", { class: "ac-chips" }, m.why.map(w => el("span", { class: "ac-chip", text: w })))));
+
+    const flow = el("div", { class: "ac-flow" });
+    m.flow.forEach((s, i) => {
+      flow.appendChild(el("span", { class: "ac-flow-node" + (i === 0 ? " start" : i === m.flow.length - 1 ? " end" : ""), text: s }));
+      if (i < m.flow.length - 1) flow.appendChild(el("span", { class: "ac-flow-arrow", text: "→" }));
+    });
+    box.appendChild(acSection("⚙️", "How does it work?", flow));
+
+    const qs = el("ol", { class: "ac-steps" });
+    m.quickStart.forEach(s => qs.appendChild(el("li", { text: s })));
+    box.appendChild(acSection("🚀", "Quick Start", el("div", {}, [el("p", { class: "dim small-note", text: "Under two minutes to your first result." }), qs])));
+
+    box.appendChild(acSection("🧪", "Sandbox example", el("div", {}, [
+      el("p", { text: m.sandbox.text }),
+      el("a", { class: "btn tiny", href: m.route, text: "Open the sandbox →" })
+    ])));
+
+    const best = el("ul", { class: "ac-list" });
+    m.best.forEach(s => best.appendChild(el("li", { text: s })));
+    box.appendChild(acSection("💡", "Best practices", best));
+
+    const mist = el("div", { class: "ac-mistakes" });
+    m.mistakes.forEach(x => mist.appendChild(el("div", { class: "ac-mistake" }, [
+      el("div", { class: "ac-bad" }, [el("span", { class: "ac-mk", text: "✕" }), el("span", { text: x.bad })]),
+      el("div", { class: "ac-good" }, [el("span", { class: "ac-mk", text: "✓" }), el("span", { text: x.good })])
+    ])));
+    box.appendChild(acSection("⚠️", "Common mistakes", mist));
+
+    const rel = el("div", { class: "ac-chips" });
+    m.related.forEach(rk => { const rm = AC.module(rk); if (rm) rel.appendChild(el("a", { class: "ac-chip ac-rel", href: "#/academy/" + rk, text: rm.icon + " " + rm.name })); });
+    box.appendChild(acSection("🔗", "Related modules", rel));
+
+    const adv = el("details", { class: "ac-advanced" });
+    adv.appendChild(el("summary", { text: "🧠 Advanced tips" }));
+    const advList = el("ul", { class: "ac-list" });
+    m.advanced.forEach(s => advList.appendChild(el("li", { text: s })));
+    adv.appendChild(advList);
+    box.appendChild(adv);
+
+    /* testing checklist — persisted */
+    const cs = AC.checkState(key);
+    const progPill = el("span", { class: "ac-checkprog" });
+    const setProg = () => { const p = AC.progress(key); progPill.textContent = `${p.done}/${p.total}`; progPill.classList.toggle("done", p.done === p.total && p.total > 0); };
+    const checkWrap = el("div", { class: "ac-checklist" });
+    m.checklist.forEach((c, i) => {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = !!cs[i];
+      cb.addEventListener("change", () => { AC.toggleCheck(key, i, cb.checked); row.classList.toggle("checked", cb.checked); setProg(); });
+      const row = el("label", { class: "ac-check" + (cs[i] ? " checked" : "") }, [cb, el("span", { text: c })]);
+      checkWrap.appendChild(row);
+    });
+    const checkHead = el("div", { class: "ac-check-head" }, [el("span", { text: "Work through these to confirm the module end-to-end." }), progPill]);
+    setProg();
+    box.appendChild(acSection("📊", "Testing checklist", el("div", {}, [checkHead, checkWrap])));
+
+    box.appendChild(acSection("🎥", "Walkthroughs — coming soon", el("div", { class: "ac-future" }, [
+      el("span", { class: "ac-future-ico", text: "▶" }),
+      el("span", { class: "dim small-note", text: "Reserved for videos, GIFs and interactive walkthroughs. The lesson structure is ready for them." })
+    ])));
+
+    return box;
+  }
+
+  function acSection(icon, title, node) {
+    return el("div", { class: "ac-section" }, [
+      el("div", { class: "ac-section-head" }, [el("span", { class: "ac-section-ico", text: icon }), el("h2", { class: "ac-section-title", text: title })]),
+      node
+    ]);
+  }
+
+  /* ---- context-aware help: a FAB on every page opens a slide-over lesson ---- */
+  let helpFab = null;
+  function mountHelpFab() {
+    if (helpFab) return;
+    helpFab = el("button", { class: "ac-fab", title: "Learn about this page", "aria-label": "Learn about this page", hidden: true, onclick: () => { const k = helpFab.dataset.key; if (k) academyDrawer(k); } }, [
+      el("span", { class: "ac-fab-ico", text: "📖" }), el("span", { class: "ac-fab-label", text: "Learn" })
+    ]);
+    document.body.appendChild(helpFab);
+  }
+  function syncHelpFab(view) {
+    if (!helpFab) return;
+    const locked = S.state.onboarded && S.state.security && S.state.security.enabled && !OM.sessionValid();
+    const k = AC.keyForView(view);
+    if (!S.state.onboarded || locked || view === "academy" || !k) { helpFab.hidden = true; helpFab.dataset.key = ""; }
+    else { helpFab.dataset.key = k; helpFab.hidden = false; }
+  }
+  function academyDrawer(key) {
+    const m = AC.module(key);
+    if (!m) return;
+    const root = $("#modal-root");
+    root.innerHTML = "";
+    const close = () => { overlay.classList.remove("show"); setTimeout(() => (root.innerHTML = ""), 220); };
+    const panel = el("div", { class: "ac-drawer" }, [
+      el("div", { class: "ac-drawer-head" }, [
+        el("div", {}, [el("div", { class: "ac-drawer-title", text: m.icon + " " + m.name }), el("div", { class: "dim tiny-note", text: "PRISM-X Academy" })]),
+        el("div", { class: "ac-drawer-actions" }, [
+          el("a", { class: "btn tiny", href: "#/academy/" + key, text: "Full lesson →", onclick: close }),
+          el("button", { class: "btn tiny ghost", text: "✕", onclick: close })
+        ])
+      ]),
+      el("div", { class: "ac-drawer-body" }, [academyDocContent(key)])
+    ]);
+    const overlay = el("div", { class: "ac-drawer-overlay", onclick: (e) => { if (e.target === overlay) close(); } }, [panel]);
+    root.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add("show"));
+  }
+
   function boot() {
+    mountHelpFab();
     B.boot(); /* Phase Alpha: bring the Bridge online, provision placeholders */
     P.boot(); /* Phase H0: register providers, route intelligence through the Manager */
     X.boot(); /* Phase Gamma: arm the Execution Layer (integrations, actions, vault) */

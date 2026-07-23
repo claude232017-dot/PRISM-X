@@ -74,7 +74,9 @@ PRISM.store = (function () {
     /* Phase Omega — Production Readiness */
     security: { enabled: false, passHash: null, passSalt: null, session: null, authLog: [] },
     readinessReports: [],
-    omegaReady: false
+    omegaReady: false,
+    /* Phase Ω-1 — PRISM-X Academy (in-app learning) */
+    academy: { checklist: {} }
   });
 
   let state = load();
