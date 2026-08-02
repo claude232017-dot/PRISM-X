@@ -1,0 +1,298 @@
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { AUTH_PROVIDER, IAuthProvider } from './providers/auth-provider.interface';
+import {
+  MembershipRepository,
+  OrganizationRepository,
+  RoleRepository,
+  UserRepository,
+} from '../database/repositories/identity.repositories';
+import { PrismaService } from '../database/prisma.service';
+import { CacheService } from '../shared/cache/cache.service';
+import { EventBusService } from '../events/event-bus.service';
+import { DomainEvent } from '../events/domain-events';
+import { SystemRole } from './permissions';
+import { RegisterDto, LoginDto } from './dto/auth.dto';
+import { RequestContextStore } from '../shared/context/request-context';
+
+export interface AuthenticatedPrincipal {
+  userId: string;
+  email: string;
+  organizationId: string;
+  organizationName: string;
+  roleKey: string;
+  permissions: string[];
+}
+
+@Injectable()
+export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private static readonly ACCESS_CACHE_TTL = 300; // seconds
+
+  constructor(
+    @Inject(AUTH_PROVIDER) private readonly provider: IAuthProvider,
+    private readonly users: UserRepository,
+    private readonly organizations: OrganizationRepository,
+    private readonly memberships: MembershipRepository,
+    private readonly roles: RoleRepository,
+    private readonly prisma: PrismaService,
+    private readonly cache: CacheService,
+    private readonly events: EventBusService,
+  ) {}
+
+  /**
+   * Registers an identity and provisions its first organization.
+   *
+   * The local rows (user + org + owner membership) are written in one
+   * transaction: a half-created account with no organization would leave the
+   * user permanently unable to do anything.
+   */
+  async register(dto: RegisterDto) {
+    const identity = await this.provider.register({
+      email: dto.email,
+      password: dto.password,
+      displayName: dto.displayName,
+    });
+
+    const ownerRole = await this.roles.findByKey(SystemRole.Owner, null);
+    if (!ownerRole) {
+      throw new Error('System roles are not seeded — run `npm run db:seed`.');
+    }
+
+    const { user, organization } = await this.prisma.transaction(async (tx) => {
+      const existing = await this.users.findByEmail(identity.email, tx);
+      const user =
+        existing ??
+        (await this.users.create(
+          {
+            email: identity.email,
+            displayName: identity.displayName ?? dto.displayName ?? null,
+            supabaseUserId: identity.externalId,
+            emailVerified: identity.emailVerified,
+          },
+          tx,
+        ));
+
+      const organization = await this.organizations.create(
+        {
+          name: dto.organizationName ?? `${identity.email.split('@')[0]}'s workspace`,
+          slug: await this.uniqueSlug(dto.organizationName ?? identity.email.split('@')[0], tx),
+        },
+        tx,
+      );
+
+      await this.memberships.create(
+        {
+          userId: user.id,
+          organizationId: organization.id,
+          roleId: ownerRole.id,
+          status: 'ACTIVE',
+          joinedAt: new Date(),
+        },
+        tx,
+      );
+
+      return { user, organization };
+    });
+
+    // Publishing needs a tenant in context; registration runs unauthenticated,
+    // so the org is supplied explicitly.
+    await this.events.publish(
+      DomainEvent.OrganizationCreated,
+      { organizationId: organization.id, name: organization.name },
+      { organizationId: organization.id, actorId: user.id },
+    );
+    await this.events.publish(
+      DomainEvent.UserRegistered,
+      { userId: user.id, email: user.email },
+      { organizationId: organization.id, actorId: user.id },
+    );
+
+    const { tokens } = await this.provider.login({
+      email: dto.email,
+      password: dto.password,
+    });
+
+    return {
+      ...tokens,
+      user: { id: user.id, email: user.email, displayName: user.displayName },
+      organization: { id: organization.id, name: organization.name, slug: organization.slug },
+    };
+  }
+
+  async login(dto: LoginDto) {
+    const { identity, tokens } = await this.provider.login({
+      email: dto.email,
+      password: dto.password,
+    });
+
+    const user = await this.resolveLocalUser(identity.email, identity.externalId);
+    const access = await this.resolveAccess(user.id, dto.organizationId);
+
+    await this.users.markLogin(user.id);
+    await this.events.publish(
+      DomainEvent.UserLoggedIn,
+      { userId: user.id },
+      { organizationId: access.organizationId, actorId: user.id },
+    );
+
+    return {
+      ...tokens,
+      user: { id: user.id, email: user.email, displayName: user.displayName },
+      organization: { id: access.organizationId, name: access.organizationName },
+      role: access.roleKey,
+      permissions: access.permissions,
+    };
+  }
+
+  async logout(accessToken: string, userId?: string): Promise<{ success: true }> {
+    await this.provider.logout(accessToken);
+    if (userId) await this.cache.deleteByPrefix(`access:${userId}`);
+    return { success: true };
+  }
+
+  async refresh(refreshToken: string) {
+    return this.provider.refresh(refreshToken);
+  }
+
+  async requestPasswordReset(email: string): Promise<{ success: true }> {
+    await this.provider.requestPasswordReset(email);
+    // Deliberately identical response whether or not the account exists.
+    return { success: true };
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<{ success: true }> {
+    await this.provider.resetPassword(token, newPassword);
+    return { success: true };
+  }
+
+  async sendVerificationEmail(email: string): Promise<{ success: true }> {
+    await this.provider.sendVerificationEmail(email);
+    return { success: true };
+  }
+
+  /**
+   * Called by the JWT strategy on every request: verifies the token with the
+   * active provider, then resolves the caller's org membership and permissions.
+   */
+  async authenticate(accessToken: string, organizationId?: string): Promise<AuthenticatedPrincipal> {
+    const verified = await this.provider.verify(accessToken);
+    const user = await this.resolveLocalUser(verified.email, verified.externalId);
+    const access = await this.resolveAccess(user.id, organizationId);
+
+    return {
+      userId: user.id,
+      email: user.email,
+      organizationId: access.organizationId,
+      organizationName: access.organizationName,
+      roleKey: access.roleKey,
+      permissions: access.permissions,
+    };
+  }
+
+  /**
+   * Membership + permission lookup, cached briefly in Redis.
+   *
+   * The TTL is short on purpose: a revoked role should stop working within
+   * minutes without requiring a cache bust on every membership write.
+   */
+  private async resolveAccess(userId: string, organizationId?: string) {
+    const cacheKey = `access:${userId}:${organizationId ?? 'default'}`;
+    const cached = await this.cache.get<{
+      organizationId: string;
+      organizationName: string;
+      roleKey: string;
+      permissions: string[];
+    }>(cacheKey);
+    if (cached) return cached;
+
+    const membership = organizationId
+      ? await this.memberships.findAccess(userId, organizationId)
+      : await this.memberships.findFirstForUser(userId);
+
+    if (!membership) {
+      throw new ForbiddenException(
+        organizationId
+          ? 'You are not a member of that organization'
+          : 'This account has no active organization membership',
+      );
+    }
+
+    const resolved = {
+      organizationId: membership.organizationId,
+      organizationName: membership.organization.name,
+      roleKey: membership.role.key,
+      permissions: membership.role.permissions.map((rp) => rp.permission.key),
+    };
+
+    await this.cache.set(cacheKey, resolved, AuthService.ACCESS_CACHE_TTL);
+    return resolved;
+  }
+
+  /** Invalidates cached authorization for a user — call after role changes. */
+  async invalidateAccess(userId: string): Promise<void> {
+    await this.cache.deleteByPrefix(`access:${userId}`);
+  }
+
+  /**
+   * Maps a provider identity onto our local user row, creating it on first
+   * sight. With Supabase, an account may exist upstream before we have ever
+   * seen it (invited via the dashboard, OAuth, etc.).
+   */
+  private async resolveLocalUser(email: string, externalId: string | null) {
+    let user = externalId ? await this.users.findBySupabaseId(externalId) : null;
+    user ??= await this.users.findByEmail(email);
+
+    if (!user) {
+      user = await this.users.create({
+        email,
+        supabaseUserId: externalId,
+        emailVerified: true,
+      });
+      this.logger.log(`Provisioned local user record for ${email}`);
+    } else if (externalId && !user.supabaseUserId) {
+      user = await this.users.update(user.id, { supabaseUserId: externalId });
+    }
+
+    if (!user) throw new UnauthorizedException('Unable to resolve user');
+    return user;
+  }
+
+  private async uniqueSlug(base: string, tx?: Parameters<typeof this.organizations.findBySlug>[1]) {
+    const root =
+      base
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'workspace';
+
+    let candidate = root;
+    let suffix = 1;
+    while (await this.organizations.findBySlug(candidate, tx)) {
+      candidate = `${root}-${++suffix}`;
+    }
+    return candidate;
+  }
+
+  /** Runs `fn` with an explicit context — used by background jobs and seeds. */
+  static async asSystem<T>(
+    ctx: { userId: string; organizationId: string },
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    return RequestContextStore.run(
+      {
+        userId: ctx.userId,
+        organizationId: ctx.organizationId,
+        roleKey: SystemRole.Owner,
+        permissions: ['*'],
+        requestId: `system-${Date.now()}`,
+      },
+      fn,
+    );
+  }
+}

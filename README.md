@@ -633,3 +633,25 @@ Network), `js/missions.js` (Phase Epsilon Mission Control), `js/evolution.js`
 `js/extensions.js` (Phase Theta Extension Ecosystem), `js/network.js` (Phase Iota
 Distributed Network), `js/omega.js` (Phase Omega Production Readiness),
 `js/app.js` (views).
+
+## Backend (`backend/`)
+
+Backend Phase 1 — Core Foundation — is a standalone NestJS + TypeScript service
+that will become the permanent foundation for every PRISM-X client (web,
+desktop, mobile, public API). It is independent of the browser app above: the
+frontend in this repo remains a self-contained localStorage build, and the
+backend is a peer API rather than a dependency of it.
+
+- **Stack** — NestJS · Prisma · PostgreSQL · Supabase (auth + storage, behind
+  interfaces) · Redis · BullMQ · Swagger.
+- **Isolation** — every organization is separated twice over: the repository
+  layer scopes every query to the authenticated tenant and fails closed without
+  one, and Postgres row-level security enforces the same boundary independently
+  for any client that reaches the database directly.
+- **Providers** — the intelligence-provider abstraction ships without any vendor
+  SDK wired, so business logic never depends on OpenAI, Anthropic, Gemini or
+  Hermes. Adapters register against the interface in Phase 2.
+
+See `backend/README.md` for architecture, the decisions behind it, and how to
+run it. Verified with 39 unit tests and a 57-check Phase 1 validation suite
+against live PostgreSQL and Redis.
