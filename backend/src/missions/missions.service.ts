@@ -20,15 +20,13 @@ import { paginate } from '../shared/dto/pagination.dto';
  * Legal mission state transitions. Encoded as data rather than scattered
  * `if` statements so the whole state machine is auditable in one place.
  */
-const MISSION_TRANSITIONS: Record<MissionStatus, MissionStatus[]> = {
-  DRAFT: ['QUEUED', 'CANCELLED'],
-  QUEUED: ['RUNNING', 'CANCELLED'],
-  RUNNING: ['PAUSED', 'COMPLETED', 'FAILED', 'CANCELLED'],
-  PAUSED: ['RUNNING', 'CANCELLED'],
-  COMPLETED: [],
-  FAILED: ['QUEUED'],
-  CANCELLED: [],
-};
+/**
+ * Re-exported from the orchestrator, which owns the Phase 2 lifecycle
+ * (DRAFT → QUEUED → PLANNING → RUNNING → [WAITING] → COMPLETED → ARCHIVED).
+ * Keeping one table means the CRUD controller and the execution engine can
+ * never disagree about what transition is legal.
+ */
+import { MISSION_TRANSITIONS } from './orchestrator/mission-orchestrator.service';
 
 @Injectable()
 export class MissionsService {

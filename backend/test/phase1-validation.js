@@ -581,9 +581,14 @@ const BETA = {
   );
 
   const capabilities = await api('GET', '/providers/capabilities', { token: alphaToken });
+  // Phase 1 asserted this registry was empty by design. Phase 2 fills it, so
+  // the meaningful invariant is no longer "no adapters exist" but "the
+  // abstraction still mediates them" — business logic names a provider by id,
+  // never by vendor, which the architecture check below enforces.
   check(
-    'provider abstraction reports no vendor adapters wired (Phase 1 by design)',
-    Array.isArray(capabilities?.registered) && capabilities.registered.length === 0,
+    'provider abstraction exposes its registered adapters through the registry',
+    Array.isArray(capabilities?.registered),
+    `${capabilities?.registered?.length ?? 0} adapters registered`,
   );
 
   // ---------------------------------------------------------------

@@ -19,6 +19,13 @@ import { StorageModule } from './storage/storage.module';
 import { QueuesModule } from './queues/queues.module';
 import { HealthModule } from './health/health.module';
 
+// Phase 2 — intelligence and execution
+import { KnowledgeRetrievalModule } from './knowledge/retrieval/knowledge-retrieval.module';
+import { MemoryModule } from './memory/memory.module';
+import { ToolsModule } from './tools/tools.module';
+import { WorkerRuntimeModule } from './workers/runtime/worker-runtime.module';
+import { UsageModule } from './usage/usage.module';
+
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
@@ -37,7 +44,6 @@ import { RequestContextMiddleware } from './shared/context/request-context.middl
     // Domain
     OrganizationsModule,
     WorkersModule,
-    MissionsModule,
     KnowledgeModule,
     ProvidersModule,
     IntegrationsModule,
@@ -49,6 +55,15 @@ import { RequestContextMiddleware } from './shared/context/request-context.middl
     StorageModule,
     QueuesModule,
     HealthModule,
+
+    // Phase 2 — order matters: retrieval and memory are dependencies of the
+    // worker runtime, which the mission orchestrator in turn depends on.
+    KnowledgeRetrievalModule,
+    MemoryModule,
+    ToolsModule,
+    WorkerRuntimeModule,
+    MissionsModule,
+    UsageModule,
   ],
   providers: [
     // Order matters: authentication runs before permission checks.

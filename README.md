@@ -652,6 +652,13 @@ backend is a peer API rather than a dependency of it.
   SDK wired, so business logic never depends on OpenAI, Anthropic, Gemini or
   Hermes. Adapters register against the interface in Phase 2.
 
+**Phase 2 — Intelligence & Execution** turns that foundation into a running
+system: a central Provider Manager with seven adapters (OpenAI, Anthropic,
+Gemini, Hermes, Ollama, any OpenAI-compatible endpoint, plus a deterministic
+in-process adapter), executable workers with memory and tool access, a mission
+orchestrator that schedules tasks by dependency, ranked knowledge retrieval, and
+full execution logging with cost attribution.
+
 See `backend/README.md` for architecture, the decisions behind it, and how to
-run it. Verified with 39 unit tests and a 57-check Phase 1 validation suite
-against live PostgreSQL and Redis.
+run it. Verified against live PostgreSQL and Redis with 76 unit tests, a
+57-check Phase 1 suite and a 58-check Phase 2 suite.

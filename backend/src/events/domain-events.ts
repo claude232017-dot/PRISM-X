@@ -54,6 +54,35 @@ export const DomainEvent = {
   ExtensionInstalled: 'extension.installed',
   ExtensionEnabled: 'extension.enabled',
   ExtensionDisabled: 'extension.disabled',
+
+  // --- Phase 2: execution, memory, retrieval, cost -----------------
+  MissionPlanned: 'mission.planned',
+  MissionResumed: 'mission.resumed',
+  MissionWaiting: 'mission.waiting',
+  MissionArchived: 'mission.archived',
+  MissionRetried: 'mission.retried',
+
+  TaskScheduled: 'task.scheduled',
+  TaskRetried: 'task.retried',
+  TaskSkipped: 'task.skipped',
+
+  /// A worker finished one execution, successfully or not.
+  WorkerFinished: 'worker.finished',
+  WorkerExecutionStarted: 'worker.execution_started',
+  WorkerBudgetExceeded: 'worker.budget_exceeded',
+
+  MemoryUpdated: 'memory.updated',
+  MemoryConsolidated: 'memory.consolidated',
+  KnowledgeRetrieved: 'knowledge.retrieved',
+
+  ToolInvoked: 'tool.invoked',
+  ToolDenied: 'tool.denied',
+
+  ProviderRecovered: 'provider.recovered',
+  ProviderRateLimited: 'provider.rate_limited',
+
+  UsageRecorded: 'usage.recorded',
+  CostThresholdReached: 'cost.threshold_reached',
 } as const;
 
 export type DomainEventName = (typeof DomainEvent)[keyof typeof DomainEvent];

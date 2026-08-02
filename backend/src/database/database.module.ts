@@ -2,8 +2,13 @@ import { Global, Module } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { TENANT_REPOSITORIES } from './repositories/tenant.repositories';
 import { IDENTITY_REPOSITORIES } from './repositories/identity.repositories';
+import { EXECUTION_REPOSITORIES } from './repositories/execution.repositories';
 
-const REPOSITORIES = [...TENANT_REPOSITORIES, ...IDENTITY_REPOSITORIES];
+const REPOSITORIES = [
+  ...TENANT_REPOSITORIES,
+  ...IDENTITY_REPOSITORIES,
+  ...EXECUTION_REPOSITORIES,
+];
 
 /**
  * Global so feature modules can inject repositories without re-importing.

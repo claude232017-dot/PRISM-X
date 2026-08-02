@@ -2,15 +2,19 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { WorkerStatus } from '@prisma/client';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { PaginationQueryDto } from '../../shared/dto/pagination.dto';
 
 export class CreateWorkerDto {
@@ -53,6 +57,103 @@ export class CreateWorkerDto {
   @IsOptional()
   @IsString()
   providerId?: string;
+
+  // --- Phase 2: executable identity --------------------------------
+
+  @ApiPropertyOptional({
+    example: 'You are a precise pricing analyst. Cite your sources.',
+    description: 'Standing instructions prepended to every execution.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(8000)
+  systemPrompt?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['pricing', 'competitive analysis'],
+    description: 'Competencies used when matching workers to tasks during planning.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  skills?: string[];
+
+  @ApiPropertyOptional({
+    example: 'claude-sonnet-4-5',
+    description: 'Overrides the provider’s default model.',
+  })
+  @IsOptional()
+  @IsString()
+  defaultModel?: string;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 2, default: 0.7 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(2)
+  temperature?: number;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['knowledge.search', 'analytics.summary'],
+    description:
+      'Tool keys this worker may invoke. Empty means no tool access — capability ' +
+      'is granted explicitly, never by default.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  toolPermissions?: string[];
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 20,
+    default: 5,
+    description: 'Maximum tool-loop iterations before the run is cut off.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  maxIterations?: number;
+
+  @ApiPropertyOptional({ minimum: 256, maximum: 128000, default: 4096 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(256)
+  @Max(128_000)
+  maxTokens?: number;
+
+  @ApiPropertyOptional({ minimum: 1000, default: 120000, description: 'Wall-clock limit (ms).' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1000)
+  timeoutMs?: number;
+
+  @ApiPropertyOptional({
+    description: 'Hard spend ceiling per execution, in USD. Null means unlimited.',
+    example: 0.5,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  costLimitUsd?: number;
+
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'Whether the Provider Manager may fall back to another healthy provider when ' +
+      'this worker’s provider fails. Set false to pin a worker to one provider.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowFailover?: boolean;
 }
 
 export class UpdateWorkerDto extends PartialType(CreateWorkerDto) {

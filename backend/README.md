@@ -1,4 +1,4 @@
-# PRISM-X Backend — Phase 1 (Core Foundation)
+# PRISM-X Backend — Phases 1–2 (Core Foundation · Intelligence & Execution)
 
 The production backend for the PRISM-X Intelligence Operating System. It is a
 standalone service: it holds all business logic, owns the data model, and is
@@ -102,11 +102,12 @@ into the inherited constructor and `prisma` is `undefined` at runtime.
 vendor-neutral terms. `ProviderRegistry` resolves a stored provider record into
 an adapter, decrypting its credential — the only place decryption happens.
 
-Phase 1 registers **no** vendor adapters. Providers can be configured, stored
-and inspected; asking for an adapter raises `ProviderNotImplementedError`, and
-`POST /providers/:id/health-check` reports `healthy: false` with an explanation
-rather than a false success. Adding OpenAI or Anthropic later is one adapter and
-one `registry.register()` call.
+Phase 1 shipped this registry deliberately empty — the seam before the vendors.
+Phase 2 fills it with seven adapters (see below). Because registration is the
+only coupling point, that was one factory per vendor and one line in
+`ProviderManager.onModuleInit()`; no business logic changed. A `ProviderKind`
+with no registered adapter still raises `ProviderNotImplementedError` and
+reports `healthy: false` with an explanation rather than a false success.
 
 ### Credentials
 
@@ -200,12 +201,168 @@ Latest run: **57/57 checks, 39/39 unit tests.**
 
 ---
 
-## What Phase 1 deliberately does not do
+---
 
-- **No vendor AI adapters.** The interface is here; the implementations are
-  Phase 2.
-- **No mission execution.** Queues, retry policy and observability are live, and
-  the processor acknowledges and logs jobs. Driving tasks through a provider is
-  Phase 2.
+# Phase 2 — Intelligence & Execution Engine
+
+Phase 1 made the system storable. Phase 2 makes it *run*: workers execute,
+missions orchestrate themselves, and every call is priced and traced.
+
+## Provider Manager
+
+Every AI call passes through `ProviderManager`. Nothing above it knows which
+vendor served a request — the runtime and orchestrator call `complete()` and the
+manager decides.
+
+Seven adapters are registered at boot: **OpenAI**, **Anthropic**, **Gemini**,
+**Hermes**, **Ollama**, **Custom** (any OpenAI-compatible endpoint), and
+**Local** (see below). Adapters are thin by design: each maps our
+vendor-neutral shapes onto one wire format and nothing else. Retries, rate
+limiting, failover, cost accounting and health tracking all live in the manager,
+so they behave identically whichever vendor is serving.
+
+- **Retries** — up to 3 attempts with exponential backoff, but only for
+  failures the adapter classified as retryable. A 401 or malformed request
+  fails immediately rather than being retried into the same error.
+- **Failover** — a failed provider falls back to another healthy one, unless
+  the worker sets `allowFailover: false` to pin itself.
+- **Circuit breaker** — three consecutive failures bench a provider for 60s.
+- **Rate limiting** — fixed-window per provider in Redis; yields rather than
+  blocks when Redis is down.
+- **Health** — latency tracked as an exponential moving average, so a
+  degradation shows up in minutes rather than being buried in an all-time mean.
+
+### The `LOCAL` adapter is not a mock
+
+`ProviderKind.LOCAL` is a real registered adapter that runs in-process with no
+network and no key. It exists because the substance of this phase — scheduling,
+memory, tools, logging, cost — must be verifiable without a funded third-party
+endpoint. It is deterministic (output derives from a hash of the request), it
+reports **real** token counts computed from actual text, and it supports fault
+injection (`config.simulate`) so retry, circuit-breaking and failover are
+testable without waiting for an outage.
+
+**This means the orchestration layer is proven end-to-end; the vendor adapters
+themselves are written against each vendor's documented API but have not been
+executed against live vendor endpoints in this environment, since no API keys
+are present.** Supply a key and the same code path runs unchanged.
+
+## Worker Runtime
+
+A worker is now an executable identity: system prompt, skills, provider,
+default model, temperature, granted tools, and hard execution limits
+(iterations, tokens, wall-clock, cost ceiling, failover).
+
+`WorkerRuntimeService` assembles four things into every prompt — standing
+instructions, recalled memory, retrieved knowledge, and the tool catalogue —
+then runs the tool loop within those limits and records what happened. The
+budget is checked *after each call*, so a runaway worker is stopped mid-flight
+rather than after it has spent.
+
+Tool calling uses one text protocol (`TOOL_CALL: {...}`) across every provider
+rather than each vendor's native format, so a worker behaves identically on
+Anthropic and Gemini. Native tool calling can be adopted per-adapter later
+without changing that contract.
+
+## Mission Orchestrator
+
+Full lifecycle: `DRAFT → QUEUED → PLANNING → RUNNING → [WAITING] → COMPLETED →
+ARCHIVED`, plus `PAUSED`, `FAILED` and `CANCELLED`. Transitions are encoded as
+one table shared by the CRUD controller and the engine, so they cannot disagree.
+
+- **Planning** assigns a worker to each task by role and skill match
+  (deterministic, so the same graph plans the same way twice) and records the
+  dependency waves.
+- **Execution** is a topological walk: each pass asks which tasks have all
+  dependencies satisfied, runs that wave with bounded concurrency, then asks
+  again. Upstream outputs become downstream context.
+- **Mission status is derived** from task state after every wave rather than
+  tracked separately — two sources of truth would eventually disagree.
+- **Recovery** — per-task retries with backoff, mission-level retry that resets
+  failed tasks, resume from `PAUSED`/`WAITING`, and cancel that skips
+  never-started tasks so a cancelled mission cannot look resumable.
+
+## Memory Engine
+
+Two tiers with different jobs. **Short-term** carries current execution context
+and expires on a TTL. **Long-term** holds learned strategies, preferences and
+outcomes, and never expires.
+
+Retrieval is *ranked*, not chronological, because the binding constraint is the
+context window: a worker gets a handful of memories, so they must be the right
+handful. Score blends keyword relevance, assigned importance, and exponential
+recency decay — softened for long-term entries, since outlasting decay is the
+reason they were promoted.
+
+Consolidation promotes a memory only when it is both important **and**
+repeatedly accessed. Importance alone would fill long-term memory with things
+written confidently and never used again.
+
+## Knowledge Retrieval
+
+Workers state what they need and receive ranked, excerpted documents ready for a
+prompt. Ranking rewards term *coverage* over raw match counts (raw counts favour
+long documents that mention a term incidentally), weights title and tag matches
+above body matches, and damps by document length. Excerpts are taken from the
+densest cluster of query terms, so they show *why* a document matched.
+
+`IRetrievalStrategy` makes keyword → vector → hybrid a swap behind the
+interface. The vector strategy is present and inert until embeddings are
+backfilled.
+
+## Tools
+
+Nine built-in tools spanning knowledge, missions, tasks, workers, organization,
+storage, notifications and analytics. Every invocation passes two independent
+checks before any tool code runs:
+
+1. **The worker's grant** — `worker.toolPermissions`. Empty means no tools;
+   capability is granted explicitly, never by default.
+2. **The caller's permission** — the tool's `requiredPermission`. A worker can
+   never exceed the authority of whoever started the mission.
+
+Denials are recorded, not dropped: a worker repeatedly reaching for a tool it
+lacks is a signal worth seeing.
+
+## Execution logs, cost & usage
+
+Every AI call writes an `ExecutionLog` — worker, mission, task, provider, model,
+prompt, tokens, cost, latency, attempts, error, timing. `usage_daily` is a
+rollup written from the same code path so a dashboard spanning months does not
+scan every call.
+
+**On cost precision:** token counts are recorded exactly and are authoritative.
+Cost is a *derived reporting figure* — tokens × a rate table that is
+operator-overridable per provider (`config.pricing`). Vendor pricing drifts, so
+verify the rates in `model-catalogue.ts` before treating the cost dashboard as
+financial. Cost is always recomputable from the stored token counts.
+
+## Testing
+
+```bash
+npm test                        # 76 unit tests
+node test/phase1-validation.js  # 57 checks
+node test/phase2-validation.js  # 58 checks
+```
+
+Phase 2's suite covers all ten required checks against live Postgres and Redis:
+provider switching and failover, worker execution through the manager, complete
+mission runs, dependency ordering, memory recall feeding the prompt, knowledge
+retrieval, tool execution *and denial*, log generation, cost attribution across
+five dimensions, and the full event catalogue. It also re-verifies that
+organization isolation still holds over all the new surfaces.
+
+Latest run: **58/58 Phase 2, 57/57 Phase 1, 76/76 unit tests.**
+
+## What Phase 2 deliberately does not do
+
+- **No live vendor calls in this environment.** Adapters are written against
+  each vendor's documented API; without keys they are unexercised against real
+  endpoints. The orchestration around them is fully proven via the `LOCAL`
+  adapter.
+- **No semantic retrieval yet.** The vector strategy exists behind the
+  interface but embeddings are not backfilled, so keyword ranking is active.
+- **No sandboxed extension execution.** Event fan-out to extensions is wired
+  and logged; running third-party code safely is a later phase.
 - **No mail transport.** Notifications resolve to a logging channel that states
-  exactly what it would have sent, rather than silently dropping messages.
+  what it would have sent, rather than silently dropping messages.

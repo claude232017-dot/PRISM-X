@@ -107,14 +107,39 @@ export class KnowledgeRepository extends BaseRepository<Knowledge> {
   }
 
 
-  /** Case-insensitive contains across title and content, plus tag matching. */
+  /**
+   * Case-insensitive search across title, content and tags.
+   *
+   * The query is tokenized and matched term-by-term rather than as one literal
+   * string: searching "competitor pricing tiers" should find a document about
+   * competitor pricing even though that exact phrase appears nowhere in it.
+   * Matching the whole string finds only documents containing the user's exact
+   * word order, which is almost never what they meant.
+   */
   search(term: string, options: { skip?: number; take?: number } = {}) {
+    const tokens = [
+      ...new Set(
+        term
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((t) => t.length > 2),
+      ),
+    ].slice(0, 10);
+
+    // Fall back to the raw string when the query is all short tokens, so a
+    // search for something like "Q2" still works.
+    const needles = tokens.length ? tokens : [term];
+
     return this.paginate(
       {
         OR: [
-          { title: { contains: term, mode: 'insensitive' } },
-          { content: { contains: term, mode: 'insensitive' } },
-          { tags: { has: term } },
+          ...needles.map((t) => ({
+            title: { contains: t, mode: 'insensitive' as const },
+          })),
+          ...needles.map((t) => ({
+            content: { contains: t, mode: 'insensitive' as const },
+          })),
+          { tags: { hasSome: needles } },
         ],
       },
       { ...options, orderBy: { createdAt: 'desc' } },

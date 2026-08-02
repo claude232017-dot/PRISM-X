@@ -25,6 +25,9 @@ export class WorkersService {
     // another tenant's id.
     if (dto.providerId) await this.providers.findByIdOrFail(dto.providerId);
 
+    // Phase 2 identity fields are passed through explicitly rather than by
+    // spreading the DTO, so an added field is a deliberate decision and a
+    // caller cannot smuggle in a column that is not meant to be settable.
     const worker = await this.workers.create({
       name: dto.name,
       role: dto.role,
@@ -32,6 +35,17 @@ export class WorkersService {
       dna: (dto.dna ?? {}) as never,
       capabilities: dto.capabilities ?? [],
       providerId: dto.providerId ?? null,
+
+      systemPrompt: dto.systemPrompt ?? null,
+      skills: dto.skills ?? [],
+      defaultModel: dto.defaultModel ?? null,
+      ...(dto.temperature !== undefined ? { temperature: dto.temperature } : {}),
+      toolPermissions: dto.toolPermissions ?? [],
+      ...(dto.maxIterations !== undefined ? { maxIterations: dto.maxIterations } : {}),
+      ...(dto.maxTokens !== undefined ? { maxTokens: dto.maxTokens } : {}),
+      ...(dto.timeoutMs !== undefined ? { timeoutMs: dto.timeoutMs } : {}),
+      costLimitUsd: dto.costLimitUsd ?? null,
+      ...(dto.allowFailover !== undefined ? { allowFailover: dto.allowFailover } : {}),
     });
 
     await this.events.publish(DomainEvent.WorkerCreated, {

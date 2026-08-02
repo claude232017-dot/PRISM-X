@@ -45,6 +45,10 @@ model Organization {
   auditLogs    AuditLog[]
   credentials  Credential[]
   roles        Role[]
+  memories      Memory[]
+  executionLogs ExecutionLog[]
+  toolCalls     ToolCall[]
+  usageDaily    UsageDaily[]
 
   @@index([deletedAt])
   @@map("organizations")
@@ -162,14 +166,38 @@ model Worker {
   providerId     String?
   generation     Int          @default(1)
   fitness        Float        @default(0)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  deletedAt      DateTime?
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  provider     Provider?    @relation(fields: [providerId], references: [id], onDelete: SetNull)
-  tasks        Task[]
-  knowledge    Knowledge[]
+  // --- Phase 2: executable worker identity -------------------------
+  /// Prepended to every execution. The worker's standing instructions.
+  systemPrompt String?
+  /// Human-readable competencies, surfaced to the planner.
+  skills       String[] @default([])
+  /// Overrides the provider's default model when set.
+  defaultModel String?
+  temperature  Float    @default(0.7)
+  /// Tool keys this worker may invoke. Empty means no tool access.
+  toolPermissions String[] @default([])
+
+  // Execution limits — the guardrails that stop a runaway worker from
+  // looping forever or spending without bound.
+  maxIterations Int    @default(5)
+  maxTokens     Int    @default(4096)
+  timeoutMs     Int    @default(120000)
+  costLimitUsd  Float?
+  /// When false, a failure on this worker's provider is not silently retried
+  /// on a different one — used to pin a worker to a specific provider.
+  allowFailover Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider      Provider?      @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  tasks         Task[]
+  knowledge     Knowledge[]
+  memories      Memory[]
+  executionLogs ExecutionLog[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -191,8 +219,21 @@ model Mission {
   updatedAt      DateTime      @updatedAt
   deletedAt      DateTime?
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  tasks        Task[]
+  // --- Phase 2: execution bookkeeping ------------------------------
+  /// Plan produced by the planning phase: ordered steps and rationale.
+  plan          Json?
+  /// Why the mission is WAITING, when it is.
+  waitReason    String?
+  retryCount    Int      @default(0)
+  maxRetries    Int      @default(2)
+  /// Rolled up from this mission's execution logs.
+  totalCostUsd  Float    @default(0)
+  totalTokens   Int      @default(0)
+  archivedAt    DateTime?
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tasks         Task[]
+  executionLogs ExecutionLog[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -219,9 +260,22 @@ model Task {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  mission      Mission      @relation(fields: [missionId], references: [id], onDelete: Cascade)
-  worker       Worker?      @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  // --- Phase 2: orchestration + accounting -------------------------
+  /// Set by the planner before execution; compared against actuals.
+  estimatedCostUsd Float?
+  estimatedSeconds Int?
+  /// The worker's final answer, kept separate from structured `result`.
+  output           String?
+  costUsd          Float  @default(0)
+  tokensUsed       Int    @default(0)
+  maxRetries       Int    @default(2)
+  /// When a retry becomes eligible, for exponential backoff.
+  nextAttemptAt    DateTime?
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mission       Mission        @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  worker        Worker?        @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  executionLogs ExecutionLog[]
 
   @@index([organizationId])
   @@index([missionId])
@@ -269,13 +323,36 @@ model Provider {
   credentialId   String?        @unique
   isDefault      Boolean        @default(false)
   lastCheckedAt  DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  deletedAt      DateTime?
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  credential   Credential?  @relation(fields: [credentialId], references: [id], onDelete: SetNull)
-  workers      Worker[]
+  // --- Phase 2: model catalogue + limits ---------------------------
+  /// Models this provider is permitted to serve. Empty means "adapter default".
+  models       String[] @default([])
+  defaultModel String?
+
+  /// Requests and tokens per minute. Null means unlimited (the adapter or the
+  /// vendor still enforces its own ceiling).
+  rateLimitRpm Int?
+  rateLimitTpm Int?
+
+  // Rolling health + usage, updated by the Provider Manager.
+  avgLatencyMs  Int?
+  totalRequests Int      @default(0)
+  failedRequests Int     @default(0)
+  totalTokens   Int      @default(0)
+  totalCostUsd  Float    @default(0)
+  lastErrorAt   DateTime?
+  lastError     String?
+  /// Set when the circuit breaker opens; requests are refused until it passes.
+  cooldownUntil DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  credential    Credential?    @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+  workers       Worker[]
+  executionLogs ExecutionLog[]
 
   @@index([organizationId])
   @@map("providers")
@@ -387,8 +464,177 @@ model Credential {
 }
 
 // ------------------------------------------------------------
+// Phase 2: memory, execution telemetry, usage
+// ------------------------------------------------------------
+
+/// Persistent worker memory.
+///
+/// SHORT_TERM entries carry an `expiresAt` and describe the current
+/// conversation or execution; LONG_TERM entries persist and describe learned
+/// strategies, preferences and outcomes. Retrieval ranks by importance,
+/// recency and keyword overlap — `embedding` is reserved for the semantic
+/// upgrade and is unused while retrieval is keyword-based.
+model Memory {
+  id             String     @id @default(cuid())
+  organizationId String
+  workerId       String
+  type           MemoryType @default(SHORT_TERM)
+  content        String
+  /// Free-form label, e.g. "mission:clx…" or "preference".
+  category       String?
+  tags           String[]   @default([])
+  /// 0..1. Drives retrieval ranking and what survives consolidation.
+  importance     Float      @default(0.5)
+  /// Provenance: mission/task that produced this memory.
+  missionId      String?
+  taskId         String?
+  metadata       Json       @default("{}")
+  embedding      Float[]    @default([])
+  accessCount    Int        @default(0)
+  lastAccessedAt DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  worker       Worker       @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([workerId, type])
+  @@index([organizationId, expiresAt])
+  @@map("memories")
+}
+
+/// One row per AI call. The audit trail for what was asked, what came back,
+/// what it cost and how long it took.
+model ExecutionLog {
+  id             String          @id @default(cuid())
+  organizationId String
+  workerId       String?
+  missionId      String?
+  taskId         String?
+  providerId     String?
+  providerKind   ProviderKind?
+  model          String?
+  status         ExecutionStatus @default(RUNNING)
+
+  /// Truncated at the edge — full prompts can be enormous and are not needed
+  /// for audit, only for diagnosis.
+  prompt         String?
+  outputSummary  String?
+  promptTokens     Int   @default(0)
+  completionTokens Int   @default(0)
+  totalTokens      Int   @default(0)
+  costUsd          Float @default(0)
+  latencyMs        Int   @default(0)
+  /// How many provider attempts this execution consumed (retries included).
+  attempts         Int   @default(1)
+  error            String?
+  metadata         Json  @default("{}")
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  worker       Worker?      @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  mission      Mission?     @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  task         Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  provider     Provider?    @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  toolCalls    ToolCall[]
+
+  @@index([organizationId])
+  @@index([organizationId, startedAt])
+  @@index([missionId])
+  @@index([workerId])
+  @@map("execution_logs")
+}
+
+/// A single tool invocation made during an execution.
+model ToolCall {
+  id             String     @id @default(cuid())
+  organizationId String
+  executionLogId String?
+  workerId       String?
+  tool           String
+  input          Json       @default("{}")
+  output         Json?
+  status         ToolStatus @default(SUCCESS)
+  error          String?
+  /// Set when a worker asked for a tool its permissions do not cover.
+  denied         Boolean    @default(false)
+  durationMs     Int        @default(0)
+  createdAt      DateTime   @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  executionLog ExecutionLog? @relation(fields: [executionLogId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, tool])
+  @@map("tool_calls")
+}
+
+/// Daily usage rollup.
+///
+/// Execution logs are the source of truth; this table exists so a dashboard
+/// covering months of history does not have to scan every call. Rows are
+/// upserted as executions complete.
+model UsageDaily {
+  id             String   @id @default(cuid())
+  organizationId String
+  /// Midnight UTC of the day being summarised.
+  day            DateTime @db.Date
+
+  /// Slice keys. Empty string — not NULL — for "not applicable", because
+  /// Postgres treats NULLs as distinct in a unique index: a nullable slice key
+  /// would make the constraint below stop deduplicating and the rollup would
+  /// grow a new row per execution instead of accumulating.
+  providerId   String @default("")
+  model        String @default("")
+  workerId     String @default("")
+  providerKind ProviderKind?
+
+  requests         Int   @default(0)
+  failedRequests   Int   @default(0)
+  promptTokens     Int   @default(0)
+  completionTokens Int   @default(0)
+  totalTokens      Int   @default(0)
+  costUsd          Float @default(0)
+  /// Sum of latencies; divide by `requests` for the mean.
+  latencyMsTotal   Int   @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, day, providerId, model, workerId], name: "usage_daily_slice")
+  @@index([organizationId, day])
+  @@map("usage_daily")
+}
+
+// ------------------------------------------------------------
 // Enums
 // ------------------------------------------------------------
+
+enum MemoryType {
+  SHORT_TERM
+  LONG_TERM
+}
+
+enum ExecutionStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+  CANCELLED
+  BUDGET_EXCEEDED
+}
+
+enum ToolStatus {
+  SUCCESS
+  FAILED
+  DENIED
+}
 
 enum OrgPlan {
   FREE
@@ -413,11 +659,16 @@ enum WorkerStatus {
 enum MissionStatus {
   DRAFT
   QUEUED
+  /// Decomposing the objective into a task graph.
+  PLANNING
   RUNNING
   PAUSED
+  /// Blocked on something outside the engine (input, rate limit, dependency).
+  WAITING
   COMPLETED
   FAILED
   CANCELLED
+  ARCHIVED
 }
 
 enum TaskStatus {
@@ -449,7 +700,11 @@ enum ProviderKind {
   ANTHROPIC
   GEMINI
   HERMES
+  OLLAMA
+  /// Deterministic in-process adapter. No network, no key — used for
+  /// development, CI and end-to-end verification of the execution pipeline.
   LOCAL
+  /// Any OpenAI-compatible endpoint (vLLM, LM Studio, OpenRouter, …).
   CUSTOM
 }
 
