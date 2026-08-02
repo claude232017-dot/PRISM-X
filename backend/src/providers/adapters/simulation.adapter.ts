@@ -124,6 +124,29 @@ export class SimulationAdapter implements IIntelligenceProvider {
     const task = request.messages.filter((m) => m.role === 'user').pop()?.content ?? '';
     const headline = task.split('\n')[0].slice(0, 120) || 'the assigned objective';
 
+    // Decision participation.
+    //
+    // The AI decision layer demands a machine-readable answer. A deterministic
+    // adapter that cannot produce one would leave the entire decision path —
+    // option validation, confidence thresholds, escalation to a human —
+    // unexercised outside production. So when the prompt asks for a DECISION,
+    // the first permitted option is chosen with a fixed, deliberately middling
+    // confidence: high enough to auto-approve under a permissive threshold,
+    // low enough to escalate under a strict one, which makes both branches
+    // testable.
+    if (/^DECISION:\s*\{/m.test(task) || /Reply with exactly this JSON/.test(task)) {
+      const options = [...task.matchAll(/^\s*\d+\.\s+(.+)$/gm)].map((m) => m[1].trim());
+      if (options.length) {
+        return [
+          `DECISION: ${JSON.stringify({
+            choice: options[0],
+            confidence: 0.62,
+            reasoning: 'Selected deterministically by the simulation adapter.',
+          })}`,
+        ].join('\n');
+      }
+    }
+
     // Tool-loop participation.
     //
     // A deterministic adapter that can never *request* a tool would leave the

@@ -50,6 +50,19 @@ model Organization {
   toolCalls     ToolCall[]
   usageDaily    UsageDaily[]
 
+  // Phase 3
+  workflows        Workflow[]
+  workflowVersions WorkflowVersion[]
+  workflowRuns     WorkflowRun[]
+  workflowStepRuns WorkflowStepRun[]
+  triggers         Trigger[]
+  approvals        ApprovalRequest[]
+  notifications    Notification[]
+  apiKeys          ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+  webhookDeliveries WebhookDelivery[]
+  deadLetters      DeadLetter[]
+
   @@index([deletedAt])
   @@map("organizations")
 }
@@ -367,6 +380,26 @@ model Integration {
   config         Json              @default("{}")
   credentialId   String?
   lastSyncAt     DateTime?
+
+  // --- Phase 3: connector metadata ---------------------------------
+  /// Broad service category, for grouping and for policy.
+  category   IntegrationCategory @default(CUSTOM_API)
+  /// How this integration authenticates: api_key | bearer | basic | oauth2 | none.
+  authMethod String              @default("api_key")
+  /// Operations this integration is permitted to perform, e.g. ["send","read"].
+  /// Empty means the connector's own default set.
+  permissions String[]           @default([])
+
+  // Health and usage, updated by the Integration Manager.
+  healthy        Boolean   @default(false)
+  lastHealthAt   DateTime?
+  lastError      String?
+  callCount      Int       @default(0)
+  failureCount   Int       @default(0)
+  avgLatencyMs   Int?
+  /// Set when the circuit breaker trips; calls are refused until it passes.
+  cooldownUntil  DateTime?
+
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
   deletedAt      DateTime?
@@ -724,4 +757,422 @@ enum ExtensionStatus {
   INSTALLED
   ENABLED
   DISABLED
+}
+
+// ============================================================
+// Phase 3 — Automation & Integration Platform
+// ============================================================
+
+/// A workflow definition. The mutable head; executable content lives in
+/// versions so a running instance is never changed underneath itself.
+model Workflow {
+  id             String         @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  status         WorkflowStatus @default(DRAFT)
+  /// Points at the version new runs will use.
+  activeVersionId String?       @unique
+  /// Marks this as a reusable template rather than an operational workflow.
+  isTemplate     Boolean        @default(false)
+  category       String?
+  tags           String[]       @default([])
+
+  // Reliability envelope applied to every run.
+  maxConcurrentRuns Int  @default(5)
+  timeoutMs         Int  @default(300000)
+  maxRetries        Int  @default(2)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization  Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  versions      WorkflowVersion[] @relation("workflow_versions")
+  activeVersion WorkflowVersion?  @relation("active_version", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  runs          WorkflowRun[]
+  triggers      Trigger[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@map("workflows")
+}
+
+/// An immutable snapshot of a workflow's steps.
+///
+/// Editing a published workflow creates a new version rather than mutating the
+/// old one: a run in flight must keep executing the definition it started with,
+/// and an audit needs to show what actually ran.
+model WorkflowVersion {
+  id             String   @id @default(cuid())
+  organizationId String
+  workflowId     String
+  version        Int
+  /// Ordered step graph. Shape validated by the engine, not the database.
+  steps          Json     @default("[]")
+  /// Declared inputs with defaults, used to validate a run's payload.
+  inputSchema    Json     @default("{}")
+  notes          String?
+  publishedAt    DateTime?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow     Workflow     @relation("workflow_versions", fields: [workflowId], references: [id], onDelete: Cascade)
+  activeFor    Workflow?    @relation("active_version")
+  runs         WorkflowRun[]
+
+  @@unique([workflowId, version])
+  @@index([organizationId])
+  @@map("workflow_versions")
+}
+
+/// One execution of one workflow version.
+model WorkflowRun {
+  id             String            @id @default(cuid())
+  organizationId String
+  workflowId     String
+  versionId      String
+  status         WorkflowRunStatus @default(PENDING)
+  /// How this run was started.
+  triggerType    TriggerType       @default(MANUAL)
+  triggerId      String?
+  input          Json              @default("{}")
+  /// Accumulated step outputs, keyed by step id — the run's working memory.
+  context        Json              @default("{}")
+  output         Json?
+  error          String?
+
+  /// Set while suspended awaiting a human decision.
+  awaitingApprovalId String?
+  currentStepId      String?
+
+  attempts   Int @default(1)
+  /// Caller-supplied key; a repeat within the dedupe window returns this run
+  /// instead of starting another.
+  idempotencyKey String?
+
+  costUsd      Float @default(0)
+  totalTokens  Int   @default(0)
+  durationMs   Int   @default(0)
+  stepsTotal   Int   @default(0)
+  stepsRun     Int   @default(0)
+
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  resumedAt   DateTime?
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow     Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version      WorkflowVersion   @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  stepRuns     WorkflowStepRun[]
+  approvals    ApprovalRequest[]
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([workflowId])
+  @@map("workflow_runs")
+}
+
+/// One step within one run. The unit of retry and the unit of audit.
+model WorkflowStepRun {
+  id             String            @id @default(cuid())
+  organizationId String
+  runId          String
+  stepId         String
+  stepType       String
+  name           String?
+  status         WorkflowRunStatus @default(PENDING)
+  /// Which execution adapter ran it (internal, n8n, make, rest).
+  adapter        String?
+  input          Json              @default("{}")
+  output         Json?
+  error          String?
+  attempts       Int               @default(0)
+  costUsd        Float             @default(0)
+  durationMs     Int               @default(0)
+  startedAt      DateTime          @default(now())
+  finishedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  run          WorkflowRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([runId])
+  @@map("workflow_step_runs")
+}
+
+/// Something that starts a workflow: a domain event, an inbound webhook, or a
+/// schedule.
+model Trigger {
+  id             String      @id @default(cuid())
+  organizationId String
+  workflowId     String
+  name           String
+  type           TriggerType
+  enabled        Boolean     @default(true)
+
+  /// Domain event name for EVENT triggers.
+  eventName String?
+  /// Cron expression for SCHEDULE triggers.
+  cron      String?
+  /// Fixed interval alternative to cron, in seconds.
+  intervalSeconds Int?
+  /// Random path segment for WEBHOOK triggers — unguessable by design.
+  webhookPath   String? @unique
+  /// HMAC secret for verifying inbound webhook signatures.
+  webhookSecret String?
+
+  /// Optional predicate over the event/webhook payload.
+  conditions Json @default("{}")
+  /// Maps the incoming payload onto workflow inputs.
+  inputMapping Json @default("{}")
+
+  lastFiredAt DateTime?
+  nextRunAt   DateTime?
+  fireCount   Int       @default(0)
+  failCount   Int       @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow     Workflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, type, enabled])
+  @@index([nextRunAt])
+  @@map("triggers")
+}
+
+/// A decision a human must make before a suspended run continues.
+model ApprovalRequest {
+  id             String         @id @default(cuid())
+  organizationId String
+  runId          String?
+  stepId         String?
+  title          String
+  reason         String
+  /// What the system would do if approved.
+  suggestedAction String?
+  context        Json           @default("{}")
+  riskLevel      RiskLevel      @default(MEDIUM)
+  status         ApprovalStatus @default(PENDING)
+
+  requestedById String?
+  decidedById   String?
+  /// Set when delegated to someone else.
+  delegatedToId String?
+  decision      String?
+  comment       String?
+
+  expiresAt  DateTime?
+  decidedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  run          WorkflowRun? @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@map("approval_requests")
+}
+
+/// A notification, recorded whether or not a channel delivered it.
+model Notification {
+  id             String             @id @default(cuid())
+  organizationId String
+  userId         String?
+  category       String
+  severity       NotificationSeverity @default(INFO)
+  subject        String
+  body           String
+  /// Channels attempted, with per-channel outcome.
+  deliveries     Json               @default("[]")
+  metadata       Json               @default("{}")
+  readAt         DateTime?
+  createdAt      DateTime           @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, readAt])
+  @@map("notifications")
+}
+
+/// An API key for programmatic access.
+///
+/// Only a hash is stored; the plaintext is shown once at creation and is
+/// unrecoverable afterwards.
+model ApiKey {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  /// SHA-256 of the full key. Lookup is by `prefix`, verification by hash.
+  keyHash        String    @unique
+  /// First characters, stored plainly so a key can be identified in a list.
+  prefix         String
+  scopes         String[]  @default([])
+  rateLimitPerMinute Int   @default(120)
+  lastUsedAt     DateTime?
+  requestCount   Int       @default(0)
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([prefix])
+  @@map("api_keys")
+}
+
+/// An outbound webhook subscription.
+model WebhookEndpoint {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  url            String
+  /// Domain events that trigger a delivery.
+  events         String[] @default([])
+  /// Signing secret; deliveries carry an HMAC of the body.
+  secret         String
+  enabled        Boolean  @default(true)
+  maxRetries     Int      @default(5)
+
+  /// Consecutive failures. Past a threshold the endpoint is disabled so a dead
+  /// URL stops consuming delivery capacity.
+  failureStreak Int      @default(0)
+  lastSuccessAt DateTime?
+  lastFailureAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id             String          @id @default(cuid())
+  organizationId String
+  endpointId     String
+  eventName      String
+  payload        Json            @default("{}")
+  status         DeliveryStatus  @default(PENDING)
+  attempts       Int             @default(0)
+  responseStatus Int?
+  responseBody   String?
+  error          String?
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime        @default(now())
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  endpoint     WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([endpointId, status])
+  @@map("webhook_deliveries")
+}
+
+/// Work that exhausted its retries. Nothing fails silently — it lands here.
+model DeadLetter {
+  id             String   @id @default(cuid())
+  organizationId String
+  source         String
+  reference      String?
+  reason         String
+  payload        Json     @default("{}")
+  attempts       Int      @default(0)
+  resolvedAt     DateTime?
+  resolvedById   String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, resolvedAt])
+  @@map("dead_letters")
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum WorkflowRunStatus {
+  PENDING
+  RUNNING
+  /// Suspended awaiting a human decision.
+  AWAITING_APPROVAL
+  /// Suspended until a delay elapses.
+  SLEEPING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  /// Retries exhausted; moved to the dead-letter queue.
+  DEAD_LETTERED
+  SKIPPED
+}
+
+enum TriggerType {
+  MANUAL
+  EVENT
+  WEBHOOK
+  SCHEDULE
+  API
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  DELEGATED
+  EXPIRED
+  CANCELLED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum DeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  EXHAUSTED
+}
+
+enum IntegrationCategory {
+  CRM
+  EMAIL
+  MESSAGING
+  CALENDAR
+  DATABASE
+  CLOUD_STORAGE
+  SOCIAL_MEDIA
+  PAYMENT
+  AUTOMATION
+  CUSTOM_API
 }

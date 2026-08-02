@@ -26,6 +26,9 @@ import { ToolsModule } from './tools/tools.module';
 import { WorkerRuntimeModule } from './workers/runtime/worker-runtime.module';
 import { UsageModule } from './usage/usage.module';
 
+// Phase 3 — automation and integration platform
+import { AutomationModule } from './automation/automation.module';
+
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
@@ -64,6 +67,9 @@ import { RequestContextMiddleware } from './shared/context/request-context.middl
     WorkerRuntimeModule,
     MissionsModule,
     UsageModule,
+
+    // Phase 3 depends on missions, workers and integrations being present.
+    AutomationModule,
   ],
   providers: [
     // Order matters: authentication runs before permission checks.

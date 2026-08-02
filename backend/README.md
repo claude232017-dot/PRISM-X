@@ -1,4 +1,5 @@
-# PRISM-X Backend — Phases 1–2 (Core Foundation · Intelligence & Execution)
+# PRISM-X Backend — Phases 1–3
+### Core Foundation · Intelligence & Execution · Automation & Integration
 
 The production backend for the PRISM-X Intelligence Operating System. It is a
 standalone service: it holds all business logic, owns the data model, and is
@@ -366,3 +367,176 @@ Latest run: **58/58 Phase 2, 57/57 Phase 1, 76/76 unit tests.**
   and logged; running third-party code safely is a later phase.
 - **No mail transport.** Notifications resolve to a logging channel that states
   what it would have sent, rather than silently dropping messages.
+
+
+---
+
+# Phase 3 — Automation & Integration Platform
+
+Phase 2 made the system think. Phase 3 connects it to the world: external
+services, event-driven workflows, human approvals, and a public API.
+
+## The orchestration decision
+
+**PRISM-X does not try to be a better n8n.** The workflow engine owns *control
+flow* — order, branching, parallelism, loops, retries, suspension — and hands
+each unit of actual work to an **execution adapter**:
+
+```
+Workflow Engine
+     │
+     ▼
+Execution Adapter
+     ├── internal   — workers, integrations, missions, HTTP
+     ├── n8n        — trigger an n8n workflow, collect its result
+     ├── make       — trigger a Make.com scenario
+     └── future runtimes
+```
+
+PRISM-X decides *what* should happen and why; the adapter decides *how*.
+Adopting n8n or Make later is a step type, not a rewrite — and a single
+workflow can mix runtimes step by step. PRISM-X stays the source of truth for
+intelligence, missions, workers and business rules.
+
+Delegated steps carry `x-prismx-run-id` / `x-prismx-step-id` headers so a run
+is traceable across both systems.
+
+## Integrations & connectors
+
+Every external call goes through the **Integration Manager** — retries with
+backoff, a five-strike circuit breaker, per-integration rate limiting,
+credential decryption, and usage accounting, applied identically to Slack,
+Stripe and a bespoke endpoint alike.
+
+Connectors are **declarative**. A service is a ~20-line spec (base URL, how the
+credential attaches, one line per action), not a subsystem:
+
+| Category | Connectors |
+|---|---|
+| Messaging | Slack, Telegram, Discord |
+| Email | Gmail |
+| CRM | HubSpot |
+| Payment | Stripe |
+| Database | Notion, Airtable |
+| Custom | GitHub, generic REST, simulated |
+
+Actions declare the permission they need, checked against the integration's
+granted scope *before* the call leaves the process — an integration configured
+read-only cannot be talked into writing by a workflow step.
+
+## Workflow engine
+
+Steps: `worker` · `integration` · `mission` · `http` · `condition` · `parallel`
+· `loop` · `delay` · `approval` · `ai_decision` · `transform` · `n8n` · `make`.
+
+- **Versioning is immutable.** Editing publishes a new version; a run in flight
+  keeps executing the definition it started with, and an audit can always
+  answer "what did this run actually do".
+- **Templates** clone into new drafts, so a good approval-and-notify flow is
+  built once.
+- **Structural validation at authoring time** — duplicate ids, dangling
+  dependencies, a `fallback` policy with no fallback — caught before a version
+  is stored rather than halfway through a production run.
+- **Suspension is first-class.** An approval or a long delay parks the run;
+  resuming settles the suspending step from the recorded decision rather than
+  re-executing it (which would ask the same question forever).
+
+## Triggers
+
+Three sources, one path — resolve the organization, evaluate the condition, map
+the payload, start a run:
+
+- **Internal** — any domain event on the bus.
+- **External** — inbound webhooks at an unguessable 32-character path, with
+  constant-time HMAC-SHA256 verification. Unsigned or mis-signed requests are
+  rejected before anything runs.
+- **Scheduled** — cron (wildcards, numbers, lists, ranges, steps) or fixed
+  interval. An unparseable expression falls back to hourly rather than silently
+  never firing.
+
+Triggers run outside any HTTP request, so each establishes its own
+RequestContext — the repository layer's fail-closed scoping is never bypassed.
+
+## AI decisions & human approval
+
+A worker in a workflow never gets an open question. It receives a **closed set
+of options** and must pick one; an answer outside the set is rejected rather
+than accepted as novel. On top of that:
+
+- **Confidence threshold** — a hesitant answer escalates to a human.
+- **Cost limit** — a decision over budget fails rather than silently spending.
+- **Always-require-approval** — for inherently consequential calls.
+
+Approvals support **approve / reject / request changes / delegate**, each
+carrying reason, context, suggested action and risk level. Approving resumes
+the run; rejecting and requesting changes deliberately do not. Stale requests
+expire, because an approval that sits forever silently blocks a run.
+
+## Reliability
+
+Nothing fails silently.
+
+| Mechanism | Where |
+|---|---|
+| Retries with exponential backoff | Provider Manager, Integration Manager, workflow steps, webhook delivery |
+| Timeouts | Per step, per connector call |
+| Circuit breakers | Providers (3 strikes), integrations (5 strikes) |
+| Rate limiting | Providers, integrations, API keys |
+| Fallback actions | `onError: fail | continue | fallback` per step |
+| Dead-letter queue | Exhausted runs and deliveries, with payload for replay |
+| Duplicate detection | `idempotencyKey` returns the original run |
+| Recovery | Resume suspended, retry failed, replay dead letters |
+
+## Public API
+
+- **API keys** — only a SHA-256 hash is stored; the plaintext is returned once
+  and is unrecoverable. Scopes draw from the same permission catalogue as
+  users, so a key can never exceed what the model already describes. Per-key
+  rate limits, usage analytics, immediate revocation.
+- **Outbound webhooks** — signed `t=<ts>,v1=<hmac>` over `<timestamp>.<body>`.
+  The timestamp is signed too, so a captured delivery cannot be replayed.
+  Exponential backoff, dead-lettering on exhaustion, and auto-disable after ten
+  consecutive failures.
+
+## Automation analytics
+
+Measured and estimated figures are labelled differently on purpose:
+
+- **Measured** — executions, success/failure rates, durations, tokens, AI cost,
+  most-used integrations and workers.
+- **Estimated** — hours saved, savings, ROI. These rest on an operator-supplied
+  minutes-per-run assumption, which is returned alongside every estimate so a
+  modelled number is never mistaken for a measured one. Only *successful* runs
+  are credited with saving anything.
+
+## Testing
+
+```bash
+npm test                        # 123 unit tests
+node test/phase1-validation.js  # 57 checks
+node test/phase2-validation.js  # 58 checks
+node test/phase3-validation.js  # 74 checks
+```
+
+Phase 3's suite covers all ten required checks against live Postgres and Redis,
+including the negative cases: permission-denied connector actions, unsigned and
+mis-signed webhooks, unpublished workflows, malformed graphs, re-deciding a
+settled approval, requesting changes without a comment, and cross-organization
+access to every new surface.
+
+Latest run: **74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 123/123 unit tests.**
+
+## What Phase 3 deliberately does not do
+
+- **No live third-party calls in this environment.** Connectors are written
+  against each vendor's documented REST API; without credentials they are
+  unexercised against real endpoints. The machinery around them — permissions,
+  retries, circuit breaking, accounting — is fully proven via the `simulated`
+  connector.
+- **No OAuth2 flow.** The auth method is modelled and stored; the redirect
+  dance is a later phase. Bearer and API-key auth work today.
+- **No SMS transport.** Channels resolve to in-app plus whatever integrations
+  are configured; an unconfigured channel is recorded as undelivered rather
+  than reported as sent.
+- **No visual workflow builder.** The engine is API-first; the canvas is a
+  frontend concern.

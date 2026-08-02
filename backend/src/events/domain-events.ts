@@ -83,6 +83,42 @@ export const DomainEvent = {
 
   UsageRecorded: 'usage.recorded',
   CostThresholdReached: 'cost.threshold_reached',
+
+  // --- Phase 3: automation platform --------------------------------
+  IntegrationCallSucceeded: 'integration.call_succeeded',
+  IntegrationCallFailed: 'integration.call_failed',
+  IntegrationConnected: 'integration.connected',
+
+  WorkflowCreated: 'workflow.created',
+  WorkflowPublished: 'workflow.published',
+  WorkflowRunStarted: 'workflow.run_started',
+  WorkflowRunCompleted: 'workflow.run_completed',
+  WorkflowRunFailed: 'workflow.run_failed',
+  WorkflowRunSuspended: 'workflow.run_suspended',
+  WorkflowRunResumed: 'workflow.run_resumed',
+  WorkflowStepCompleted: 'workflow.step_completed',
+  WorkflowStepFailed: 'workflow.step_failed',
+
+  TriggerFired: 'trigger.fired',
+  TriggerFailed: 'trigger.failed',
+  WebhookReceived: 'webhook.received',
+  WebhookDelivered: 'webhook.delivered',
+  WebhookDeliveryFailed: 'webhook.delivery_failed',
+
+  ApprovalRequested: 'approval.requested',
+  ApprovalGranted: 'approval.granted',
+  ApprovalRejected: 'approval.rejected',
+  ApprovalChangesRequested: 'approval.changes_requested',
+  ApprovalDelegated: 'approval.delegated',
+  ApprovalExpired: 'approval.expired',
+
+  AiDecisionMade: 'ai.decision_made',
+  AiDecisionEscalated: 'ai.decision_escalated',
+
+  NotificationSent: 'notification.sent',
+  DeadLetterRecorded: 'deadletter.recorded',
+  ApiKeyCreated: 'apikey.created',
+  ApiKeyRevoked: 'apikey.revoked',
 } as const;
 
 export type DomainEventName = (typeof DomainEvent)[keyof typeof DomainEvent];

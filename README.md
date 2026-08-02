@@ -659,6 +659,21 @@ in-process adapter), executable workers with memory and tool access, a mission
 orchestrator that schedules tasks by dependency, ranked knowledge retrieval, and
 full execution logging with cost attribution.
 
+**Phase 3 — Automation & Integration** connects it to the world: a universal
+Integration Manager with declarative connectors (Slack, Telegram, Discord,
+Gmail, GitHub, Notion, Stripe, Airtable, HubSpot, generic REST), an
+event-driven Workflow Engine, a Trigger Engine covering internal events, signed
+inbound webhooks and cron schedules, constrained AI decisions with human
+approval flows, centralized notifications, automation analytics, a full
+reliability layer, and a public API with scoped keys and signed outbound
+webhooks.
+
+The Workflow Engine is deliberately an **orchestration layer, not a replacement
+for n8n or Make.com**. Control flow lives in PRISM-X; execution is delegated to
+pluggable adapters (internal, n8n, Make.com, REST), so PRISM-X decides *what*
+should happen and external platforms decide *how* — and adopting one later is a
+step type, not a rewrite.
+
 See `backend/README.md` for architecture, the decisions behind it, and how to
-run it. Verified against live PostgreSQL and Redis with 76 unit tests, a
-57-check Phase 1 suite and a 58-check Phase 2 suite.
+run it. Verified against live PostgreSQL and Redis with 123 unit tests and
+three end-to-end suites: 57 (Phase 1), 58 (Phase 2) and 74 (Phase 3) checks.

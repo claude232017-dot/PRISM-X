@@ -11,7 +11,7 @@ import { OrganizationRepository } from '../database/repositories/identity.reposi
 import { ExecutionLogRepository } from '../database/repositories/execution.repositories';
 import { KnowledgeRetrievalService } from '../knowledge/retrieval/knowledge-retrieval.service';
 import { StorageService } from '../storage/storage.module';
-import { NotificationsService } from '../notifications/notifications.module';
+import { NotificationService } from '../notifications/notification.service';
 
 /**
  * The built-in tool set.
@@ -32,7 +32,7 @@ export class BuiltinTools {
     private readonly organizations: OrganizationRepository,
     private readonly executionLogs: ExecutionLogRepository,
     private readonly storage: StorageService,
-    private readonly notifications: NotificationsService,
+    private readonly notifications: NotificationService,
   ) {}
 
   all(): ToolDefinition[] {
@@ -314,8 +314,9 @@ export class BuiltinTools {
           throw new ToolExecutionError('`subject` and `body` are both required');
         }
 
-        await this.notifications.dispatch({
+        await this.notifications.send({
           organizationId: context.organizationId,
+          category: 'worker',
           subject,
           body,
           metadata: { workerId: context.workerId, missionId: context.missionId },

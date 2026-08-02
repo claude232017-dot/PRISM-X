@@ -3,11 +3,13 @@ import { PrismaService } from './prisma.service';
 import { TENANT_REPOSITORIES } from './repositories/tenant.repositories';
 import { IDENTITY_REPOSITORIES } from './repositories/identity.repositories';
 import { EXECUTION_REPOSITORIES } from './repositories/execution.repositories';
+import { AUTOMATION_REPOSITORIES } from './repositories/automation.repositories';
 
 const REPOSITORIES = [
   ...TENANT_REPOSITORIES,
   ...IDENTITY_REPOSITORIES,
   ...EXECUTION_REPOSITORIES,
+  ...AUTOMATION_REPOSITORIES,
 ];
 
 /**

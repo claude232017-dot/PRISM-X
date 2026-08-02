@@ -25,8 +25,9 @@ import {
   ApiTags,
   PartialType,
 } from '@nestjs/swagger';
-import { Integration, IntegrationStatus } from '@prisma/client';
+import { Integration, IntegrationCategory, IntegrationStatus } from '@prisma/client';
 import {
+  IsArray,
   IsEnum,
   IsObject,
   IsOptional,
@@ -74,6 +75,36 @@ export class CreateIntegrationDto {
   @IsOptional()
   @IsString()
   secret?: string;
+
+  // --- Phase 3: connector metadata ---------------------------------
+
+  @ApiPropertyOptional({
+    enum: IntegrationCategory,
+    description: 'Service category. Inferred from the connector when omitted.',
+  })
+  @IsOptional()
+  @IsEnum(IntegrationCategory)
+  category?: IntegrationCategory;
+
+  @ApiPropertyOptional({
+    example: 'api_key',
+    description: 'api_key | bearer | basic | oauth2 | none. Inferred from the connector when omitted.',
+  })
+  @IsOptional()
+  @IsString()
+  authMethod?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['send', 'read'],
+    description:
+      'Operations this integration may perform. Empty means the connector default. ' +
+      'An action outside this set is refused before the call leaves the process.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  permissions?: string[];
 }
 
 export class UpdateIntegrationDto extends PartialType(CreateIntegrationDto) {}
@@ -122,6 +153,9 @@ export class IntegrationsService {
       config: (dto.config ?? {}) as never,
       credentialId,
       status: IntegrationStatus.INACTIVE,
+      ...(dto.category ? { category: dto.category } : {}),
+      ...(dto.authMethod ? { authMethod: dto.authMethod } : {}),
+      permissions: dto.permissions ?? [],
     });
 
     await this.events.publish(DomainEvent.IntegrationCreated, {
