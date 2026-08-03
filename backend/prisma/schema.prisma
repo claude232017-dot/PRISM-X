@@ -87,6 +87,16 @@ model Organization {
   knowledgeAudits      KnowledgeAudit[]
   experiments          Experiment[]
 
+  // Phase 6
+  evolutionCandidates    EvolutionCandidate[]
+  evolutionExperiments   EvolutionExperiment[]
+  benchmarks             Benchmark[]
+  entityVersions         EntityVersion[]
+  deployments            Deployment[]
+  evolutionPolicy        EvolutionPolicy?
+  constitutionViolations ConstitutionViolation[]
+  planningStrategies     PlanningStrategy[]
+
   @@index([deletedAt])
   @@map("organizations")
 }
@@ -2195,4 +2205,488 @@ enum ExperimentStatus {
   RUNNING
   CONCLUDED
   ABANDONED
+}
+
+// ------------------------------------------------------------
+// Phase 6: the Evolution Engine
+//
+// Where Phase 5 observes and proposes, Phase 6 tests and deploys. The
+// governing idea is that no change reaches production without having been
+// measured against what it replaces, and no deployment exists without the
+// state needed to undo it.
+//
+// The PRISM-X Constitution (src/evolution/constitution.ts) is deliberately
+// NOT modelled here. Laws that live in a table are laws the system could
+// evolve; these live in code, and amending one requires a review and a
+// deploy. `ConstitutionViolation` below records refusals — it does not
+// define the rules.
+// ------------------------------------------------------------
+
+/// A proposed change, before anything has been tested.
+///
+/// Distinct from a Phase 5 Recommendation: a recommendation is advice for a
+/// human ("this worker would do better on Sonnet"), while a candidate is a
+/// concrete change queued for measurement. Recommendations that recur are
+/// promoted into candidates; candidates that lose their experiment are
+/// rejected without a human ever having to read them.
+model EvolutionCandidate {
+  id             String           @id @default(cuid())
+  organizationId String
+  kind           EvolutionKind
+  subject        EvolutionSubject
+  subjectId      String
+  subjectLabel   String           @default("")
+
+  description     String
+  reason          String
+  expectedBenefit String
+  /// 0..1, carried over from the evidence that produced it.
+  confidence      Float           @default(0)
+  sampleSize      Int             @default(0)
+  risk            RiskLevel       @default(LOW)
+  status          CandidateStatus @default(DRAFT)
+
+  /// The change itself and the state to restore. A candidate without a
+  /// rollback can never be deployed — see the REVERSIBILITY law.
+  proposedChange Json @default("{}")
+  rollback       Json @default("{}")
+
+  /// Phase 5 recommendation this was promoted from, when there was one.
+  sourceRecommendationId String?
+  /// Times this same change has been proposed. Repeated proposals are
+  /// evidence that the opportunity is real and persistent.
+  proposalCount          Int     @default(1)
+
+  rejectedReason String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  experiments  EvolutionExperiment[]
+  deployments  Deployment[]
+
+  @@unique([organizationId, kind, subjectId, status])
+  @@index([organizationId])
+  @@index([organizationId, status, confidence])
+  @@map("evolution_candidates")
+}
+
+/// A controlled test of one candidate against what it would replace.
+///
+/// Four modes, and the difference between them is what the candidate is
+/// allowed to touch: SANDBOX touches nothing real, SHADOW runs alongside
+/// production without its results being used, CANARY takes a small share of
+/// real traffic, and AB splits traffic evenly. They are ordered by risk, and
+/// the policy layer decides which an organization permits.
+model EvolutionExperiment {
+  id             String                    @id @default(cuid())
+  organizationId String
+  candidateId    String
+  mode           ExperimentMode            @default(SANDBOX)
+  status         EvolutionExperimentStatus @default(RUNNING)
+
+  name       String
+  hypothesis String
+
+  /// Version records for the two arms. Control is what production runs now.
+  controlVersionId String?
+  variantVersionId String?
+  /// 0..1 share of trials given to the candidate. Ignored for SHADOW, where
+  /// the candidate sees everything and affects nothing.
+  allocation       Float   @default(0.5)
+
+  controlTrials   Int @default(0)
+  variantTrials   Int @default(0)
+  /// Trials each arm needs before a winner may be declared at all.
+  minTrialsPerArm Int @default(10)
+
+  /// "control", "variant", or null while undecided.
+  winner     String?
+  confidence Float             @default(0)
+  verdict    BenchmarkVerdict?
+  conclusion String?
+
+  startedAt   DateTime  @default(now())
+  concludedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidate    EvolutionCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  benchmarks   Benchmark[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([candidateId])
+  @@map("evolution_experiments")
+}
+
+/// Measured performance of one arm of one experiment.
+///
+/// Nine metrics, recorded per arm rather than as a single "score", because
+/// collapsing them early hides the trade-offs that make a decision
+/// interesting — a variant that is faster and worse is a different situation
+/// from one that is faster and cheaper.
+model Benchmark {
+  id             String @id @default(cuid())
+  organizationId String
+  experimentId   String
+  /// "control" or "variant".
+  arm            String
+
+  trials       Int   @default(0)
+  successes    Int   @default(0)
+  /// Wilson lower bound, as everywhere else in the platform.
+  successRate  Float @default(0)
+  observedRate Float @default(0)
+
+  avgCompletionMs Float  @default(0)
+  p95CompletionMs Float  @default(0)
+  qualityScore    Float  @default(0)
+  avgCostUsd      Float  @default(0)
+  totalCostUsd    Float  @default(0)
+  avgTokens       Float  @default(0)
+  avgLatencyMs    Float  @default(0)
+  /// Share of trials that neither failed nor needed a retry.
+  reliability     Float  @default(0)
+  /// Mean human rating, when any were given. Null means nobody rated it —
+  /// which is not the same as a rating of zero.
+  userRating      Float?
+  ratingCount     Int    @default(0)
+  /// Successes per dollar. Zero spend leaves this at zero rather than
+  /// infinite, so a free arm does not win every efficiency comparison.
+  roi             Float  @default(0)
+
+  detail    Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  experiment   EvolutionExperiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+
+  @@unique([experimentId, arm])
+  @@index([organizationId])
+  @@map("benchmarks")
+}
+
+/// One immutable version of an evolvable thing.
+///
+/// Versions are never edited and never deleted — a new one supersedes its
+/// predecessor. That is what makes rollback a matter of re-activating an
+/// existing row rather than reconstructing a past state from a diff, and it
+/// is why the NO_AUTOMATIC_DELETION law can be absolute.
+model EntityVersion {
+  id             String           @id @default(cuid())
+  organizationId String
+  subject        EvolutionSubject
+  subjectId      String
+  /// What aspect this version captures: PROMPT, MODEL, TOOLS, MEMORY,
+  /// GRAPH or STRATEGY. One subject has independent lineages per aspect.
+  aspect         VersionAspect
+  version        Int
+
+  /// The values this version sets, and what it replaced.
+  payload  Json @default("{}")
+  previous Json @default("{}")
+
+  label       String?
+  notes       String?
+  /// Exactly one version per (subject, subjectId, aspect) is active.
+  isActive    Boolean       @default(false)
+  /// Where this version came from: a human edit, a candidate, a rollback.
+  origin      VersionOrigin @default(MANUAL)
+  candidateId String?
+  /// Benchmark that justified promoting it, when it came through one.
+  benchmarkId String?
+
+  activatedAt  DateTime?
+  supersededAt DateTime?
+  createdById  String?
+  createdAt    DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deployments  Deployment[]
+
+  @@unique([organizationId, subject, subjectId, aspect, version])
+  @@index([organizationId])
+  @@index([organizationId, subject, subjectId, aspect])
+  @@map("entity_versions")
+}
+
+/// A change that actually reached production, and everything about it.
+///
+/// The deployment row is the audit record the AUDITABILITY law requires. It
+/// is written before the change is applied, not after, so a deployment that
+/// crashes mid-write is still visible rather than invisible.
+model Deployment {
+  id             String           @id @default(cuid())
+  organizationId String
+  candidateId    String?
+  versionId      String?
+  subject        EvolutionSubject
+  subjectId      String
+  subjectLabel   String           @default("")
+  kind           EvolutionKind
+
+  status   DeploymentStatus @default(PENDING)
+  /// Exact field-level change written, and the state captured immediately
+  /// before writing it.
+  applied  Json             @default("{}")
+  rollback Json             @default("{}")
+
+  /// Constitution decision recorded at deploy time, including the hash of
+  /// the constitution in force. A refusal is kept as a deployment row with
+  /// status REFUSED, because attempts matter as much as successes.
+  constitutionVersion String  @default("")
+  constitutionPassed  Boolean @default(false)
+  lawVerdicts         Json    @default("[]")
+
+  policySatisfied Boolean   @default(false)
+  policyReason    String?
+  approvedById    String?
+  approvedAt      DateTime?
+  deployedById    String?
+
+  /// Post-deployment watch. A deployment is not finished when it is applied,
+  /// it is finished when it has survived a window of real use.
+  monitorUntil      DateTime?
+  monitoredTrials   Int       @default(0)
+  monitoredFailures Int       @default(0)
+  healthy           Boolean?
+
+  rolledBackAt   DateTime?
+  rolledBackById String?
+  rollbackReason String?
+  /// True when the system rolled itself back rather than a person doing it.
+  automatic      Boolean   @default(false)
+
+  benchmarkSummary Json      @default("{}")
+  notes            String?
+  deployedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  candidate    EvolutionCandidate? @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  version      EntityVersion?      @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, subject, subjectId])
+  @@map("deployments")
+}
+
+/// An organization's own limits on how it is allowed to change.
+///
+/// The Constitution is the floor and cannot be lowered; the policy is each
+/// organization's ceiling and can be as restrictive as it likes. One row per
+/// organization, created with conservative defaults on first access rather
+/// than requiring setup — an organization that has never configured
+/// evolution should not thereby be evolving freely.
+model EvolutionPolicy {
+  id             String @id @default(cuid())
+  organizationId String @unique
+
+  /// Master switch. Off means candidates and experiments still run; only
+  /// deployment is blocked.
+  enabled Boolean @default(true)
+
+  /// Change kinds this organization permits at all. Empty means none.
+  allowedKinds    EvolutionKind[]  @default([])
+  /// Kinds that always need a person, whatever the confidence.
+  requireApproval EvolutionKind[]  @default([])
+  /// Experiment modes permitted. SANDBOX is always allowed.
+  allowedModes    ExperimentMode[] @default([])
+
+  /// Confidence below which nothing deploys unattended.
+  autoApproveThreshold Float     @default(0.95)
+  /// Risk above which a person is always required.
+  maxUnattendedRisk    RiskLevel @default(LOW)
+  /// Trials each arm needs before a candidate may be promoted.
+  minTrialsPerArm      Int       @default(10)
+
+  /// Restrict deployment to a daily window, in UTC hours. Null disables the
+  /// restriction rather than meaning midnight.
+  businessHoursStart Int?
+  businessHoursEnd   Int?
+  /// Days of week deployment is permitted, 0 = Sunday. Empty means any day.
+  businessDays       Int[] @default([])
+
+  maxConcurrentExperiments Int @default(3)
+  /// Deployments permitted per rolling day. Zero disables the cap.
+  maxDeploymentsPerDay     Int @default(5)
+
+  /// Minutes a deployment is watched before being considered settled.
+  monitorWindowMinutes  Int     @default(60)
+  /// Failure rate during monitoring that triggers an automatic rollback.
+  autoRollbackThreshold Float   @default(0.3)
+  autoRollbackEnabled   Boolean @default(true)
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("evolution_policies")
+}
+
+/// A refused deployment, kept permanently.
+///
+/// An engine that repeatedly proposes illegal changes is telling you
+/// something about itself, and that signal only exists if refusals are
+/// recorded rather than merely returned.
+model ConstitutionViolation {
+  id             String @id @default(cuid())
+  organizationId String
+  lawId          String
+  reason         String
+
+  subject             EvolutionSubject
+  subjectId           String
+  kind                EvolutionKind
+  candidateId         String?
+  deploymentId        String?
+  /// The intent as submitted, so a refusal can be understood later.
+  intent              Json             @default("{}")
+  constitutionVersion String           @default("")
+  actorId             String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, lawId, createdAt])
+  @@map("constitution_violations")
+}
+
+/// A versioned approach to planning missions.
+///
+/// Planning is the one part of the system that decides how *other* parts
+/// will be used, so improving it compounds. Strategies are compared on the
+/// missions they produced rather than on their own description.
+model PlanningStrategy {
+  id             String @id @default(cuid())
+  organizationId String
+  name           String
+  version        Int    @default(1)
+  description    String
+
+  /// Ordered heuristics: how tasks are sequenced, how workers are chosen,
+  /// how providers are picked, how much parallelism is attempted.
+  rules    Json    @default("{}")
+  isActive Boolean @default(false)
+
+  missionsPlanned    Int   @default(0)
+  successes          Int   @default(0)
+  successRate        Float @default(0)
+  avgCompletionMs    Float @default(0)
+  avgCostUsd         Float @default(0)
+  avgTasksPerMission Float @default(0)
+  confidence         Float @default(0)
+
+  derivedFromId String?
+  createdById   String?
+  activatedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name, version])
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+  @@map("planning_strategies")
+}
+
+enum EvolutionKind {
+  PROMPT_OPTIMIZATION
+  MODEL_CHANGE
+  PROVIDER_CHANGE
+  TOOL_PERMISSION
+  MEMORY_STRATEGY
+  EXECUTION_LIMITS
+  WORKFLOW_STRUCTURE
+  WORKFLOW_PARALLELISM
+  WORKFLOW_SIMPLIFICATION
+  MISSION_TEMPLATE
+  PLANNING_STRATEGY
+}
+
+enum EvolutionSubject {
+  WORKER
+  WORKFLOW
+  PROVIDER
+  PLANNING
+  ORGANIZATION
+}
+
+enum CandidateStatus {
+  DRAFT
+  /// Queued for an experiment.
+  QUEUED
+  TESTING
+  /// The experiment found it better; awaiting approval or deployment.
+  VALIDATED
+  DEPLOYED
+  /// The experiment found it no better, or worse.
+  REJECTED
+  /// Superseded by a newer candidate for the same change.
+  SUPERSEDED
+}
+
+enum ExperimentMode {
+  /// Runs entirely off production data. Touches nothing real.
+  SANDBOX
+  /// Runs alongside production; results recorded, never used.
+  SHADOW
+  /// A small share of real traffic.
+  CANARY
+  /// An even split of real traffic.
+  AB
+}
+
+enum EvolutionExperimentStatus {
+  RUNNING
+  CONCLUDED
+  ABANDONED
+}
+
+enum BenchmarkVerdict {
+  BETTER
+  WORSE
+  /// Measured, but the arms cannot be told apart.
+  INCONCLUSIVE
+  /// Not enough trials yet to say anything.
+  INSUFFICIENT_DATA
+}
+
+enum DeploymentStatus {
+  PENDING
+  /// Refused by the Constitution or the policy; never applied.
+  REFUSED
+  DEPLOYED
+  MONITORING
+  /// Survived its monitoring window.
+  SETTLED
+  ROLLED_BACK
+  FAILED
+}
+
+enum VersionAspect {
+  PROMPT
+  MODEL
+  TOOLS
+  MEMORY
+  LIMITS
+  GRAPH
+  STRATEGY
+}
+
+enum VersionOrigin {
+  MANUAL
+  CANDIDATE
+  ROLLBACK
+  IMPORT
 }

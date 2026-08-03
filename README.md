@@ -711,7 +711,30 @@ autopilot that can bypass that is off by default, limited to four low-risk
 change types, and gated at 85% confidence. Prompt wording, tool grants and
 workflow structure never qualify at any confidence.
 
+**Phase 6 — Evolution** lets the system act on what it learned, safely. Recurring
+findings become concrete **candidates**; each is tested against what it would
+replace in one of four modes (sandbox, shadow, canary, A/B), benchmarked across
+nine metrics per arm, and deployed only if it measurably wins. Deployments are
+monitored, roll back automatically when they underperform, and every version is
+kept so rollback re-activates a row that already exists rather than
+reconstructing the past from diffs.
+
+The boundary is a **PRISM-X Constitution**: nine laws the engine may never
+break — never exceed the actor's permissions, never widen its own authority,
+never touch another organization's data, never delete history, never bypass the
+organization's policy or a required human approval, never deploy something
+irreversible or unrecorded, and never deploy a change the benchmark found worse.
+
+It lives in code rather than the database, because a constitution stored in a
+row is one the system could evolve. Every law is an executable predicate, not a
+slogan, and all of them are checked at the single method that is the only route
+to production. Refusals are recorded permanently — an engine that keeps
+proposing illegal changes is a fact about the engine. Above that floor, each
+organization sets its own ceiling through an Evolution Policy: which change
+kinds are allowed at all, which always need a person, confidence thresholds,
+deployment windows and auto-rollback behaviour.
+
 See `backend/README.md` for architecture, the decisions behind it, and how to
-run it. Verified against live PostgreSQL and Redis with 314 unit tests and five
-end-to-end suites: 57 (Phase 1), 58 (Phase 2), 74 (Phase 3), 112 (Phase 4) and
-86 (Phase 5) checks.
+run it. Verified against live PostgreSQL and Redis with 422 unit tests and six
+end-to-end suites: 57 (Phase 1), 58 (Phase 2), 74 (Phase 3), 112 (Phase 4),
+86 (Phase 5) and 86 (Phase 6) checks.

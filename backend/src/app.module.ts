@@ -36,6 +36,9 @@ import { DistributedModule } from './distributed/distributed.module';
 // Phase 5 — learning and optimization
 import { LearningModule } from './learning/learning.module';
 
+// Phase 6 — evolution
+import { EvolutionModule } from './evolution/evolution.module';
+
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
@@ -85,6 +88,9 @@ import { RequestContextMiddleware } from './shared/context/request-context.middl
 
     // Phase 5 observes everything below it and depends on nothing above.
     LearningModule,
+
+    // Phase 6 acts on what Phase 5 concluded, behind the Constitution.
+    EvolutionModule,
   ],
   providers: [
     // Order matters: authentication runs before permission checks.

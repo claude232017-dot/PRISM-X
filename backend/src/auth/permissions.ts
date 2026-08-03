@@ -79,7 +79,7 @@ export const Permissions = {
   FederationGrant: 'federation:grant',
   FederationRevoke: 'federation:revoke',
 
-  // Learning — split three ways because reading what the system concluded,
+  // Learning — split four ways because reading what the system concluded,
   // deciding whether it is right, and letting it touch production are
   // genuinely different levels of trust.
   LearningRead: 'learning:read',
@@ -89,6 +89,19 @@ export const Permissions = {
   LearningApprove: 'learning:approve',
   /** Write an approved change to production, or roll one back. */
   LearningApply: 'learning:apply',
+
+  // Evolution — the system changing itself. Separated from learning because
+  // concluding something and acting on it are different acts, and the second
+  // one is the one that can break production.
+  EvolutionRead: 'evolution:read',
+  /** Create candidates, start experiments, run benchmarks. */
+  EvolutionRun: 'evolution:run',
+  /** Approve a validated candidate for deployment. */
+  EvolutionApprove: 'evolution:approve',
+  /** Deploy to production, and roll back. */
+  EvolutionDeploy: 'evolution:deploy',
+  /** Amend the organization's evolution policy. */
+  EvolutionPolicyManage: 'evolution:policy',
 } as const;
 
 export type PermissionKey = (typeof Permissions)[keyof typeof Permissions];
@@ -156,6 +169,10 @@ export const ROLE_PERMISSIONS: Record<SystemRoleKey, PermissionKey[]> = {
     // reach production — stays with an administrator.
     Permissions.LearningRead,
     Permissions.LearningRun,
+    // An operator may watch the system evolve and run experiments, which
+    // touch nothing. Approving and deploying stay with administrators.
+    Permissions.EvolutionRead,
+    Permissions.EvolutionRun,
   ],
 
   [SystemRole.Viewer]: readOnly,

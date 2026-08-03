@@ -37,6 +37,16 @@ export interface WorkerExecutionRequest {
    * onward forever.
    */
   forceLocal?: boolean;
+  /**
+   * Worker fields to apply for this execution only, never persisted.
+   *
+   * This is what lets the Evolution Engine benchmark a candidate change
+   * without deploying it: the runtime executes as if the worker had the
+   * proposed prompt, model or limits, while the stored worker is untouched.
+   * A change that had to be written in order to be measured would have
+   * skipped the entire deployment pipeline.
+   */
+  overrides?: Record<string, unknown>;
 }
 
 export interface WorkerExecutionResult {
@@ -124,7 +134,13 @@ export class WorkerRuntimeService {
       if (routed) return routed;
     }
 
-    const worker = await this.workers.findByIdOrFail(request.workerId);
+    const stored = await this.workers.findByIdOrFail(request.workerId);
+    // Overrides are merged into a copy. Nothing here writes them back, and
+    // the execution log records the worker id, so a benchmarked run is
+    // attributable without being mistaken for the worker's real behaviour.
+    const worker = request.overrides
+      ? ({ ...stored, ...request.overrides } as typeof stored)
+      : stored;
 
     if (worker.status === 'ARCHIVED') {
       throw new BadRequestException(`Worker "${worker.name}" is archived and cannot run`);

@@ -172,6 +172,25 @@ export const DomainEvent = {
   ExperimentStarted: 'learning.experiment_started',
   ExperimentConcluded: 'learning.experiment_concluded',
   LessonRecorded: 'learning.lesson_recorded',
+
+  // --- Phase 6: evolution ------------------------------------------
+  EvolutionCandidateCreated: 'evolution.candidate_created',
+  EvolutionCandidateQueued: 'evolution.candidate_queued',
+  EvolutionCandidateValidated: 'evolution.candidate_validated',
+  EvolutionCandidateRejected: 'evolution.candidate_rejected',
+  EvolutionExperimentStarted: 'evolution.experiment_started',
+  EvolutionExperimentConcluded: 'evolution.experiment_concluded',
+  EvolutionBenchmarkRecorded: 'evolution.benchmark_recorded',
+  EvolutionVersionCreated: 'evolution.version_created',
+  EvolutionVersionActivated: 'evolution.version_activated',
+  EvolutionDeployed: 'evolution.deployed',
+  EvolutionDeploymentRefused: 'evolution.deployment_refused',
+  EvolutionDeploymentSettled: 'evolution.deployment_settled',
+  EvolutionRolledBack: 'evolution.rolled_back',
+  EvolutionPolicyUpdated: 'evolution.policy_updated',
+  ConstitutionViolated: 'evolution.constitution_violated',
+  PlanningStrategyCreated: 'evolution.planning_strategy_created',
+  PlanningStrategyActivated: 'evolution.planning_strategy_activated',
 } as const;
 
 export type DomainEventName = (typeof DomainEvent)[keyof typeof DomainEvent];

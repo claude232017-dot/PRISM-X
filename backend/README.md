@@ -1,5 +1,5 @@
-# PRISM-X Backend — Phases 1–5
-### Core Foundation · Intelligence & Execution · Automation & Integration · Distributed Intelligence · Learning & Optimization
+# PRISM-X Backend — Phases 1–6
+### Core Foundation · Intelligence & Execution · Automation & Integration · Distributed Intelligence · Learning & Optimization · Evolution
 
 The production backend for the PRISM-X Intelligence Operating System. It is a
 standalone service: it holds all business logic, owns the data model, and is
@@ -143,6 +143,7 @@ src/
 ├── nodes/           the fleet register, node security, transports
 ├── distributed/     scheduling · queues · replication · federation · monitoring
 ├── learning/        confidence · reviews · analytics · recommendations · patterns
+├── evolution/       the Constitution · candidates · experiments · deployment
 └── health/          liveness + dependency checks
 ```
 
@@ -153,7 +154,7 @@ logic never leaves its module, and never talks to Prisma directly.
 
 ## Authorization
 
-Four seeded system roles over 50 `resource:action` permissions:
+Four seeded system roles over 55 `resource:action` permissions:
 
 | Role | Scope |
 |---|---|
@@ -172,6 +173,9 @@ Learning is split four ways for the same reason: reading what the system
 concluded (`learning:read`), triggering analysis (`learning:run`), deciding
 whether a conclusion is right (`learning:approve`), and letting it touch
 production (`learning:apply`) are genuinely different levels of trust.
+Evolution splits the same way again (`evolution:read`, `:run`, `:approve`,
+`:deploy`, `:policy`) — and no permission anywhere grants the ability to
+amend the Constitution, because that is not something a permission can do.
 
 `JwtAuthGuard` and `PermissionsGuard` are registered globally, so a new route is
 protected unless it opts out with `@Public()`. A caller missing a permission
@@ -1153,3 +1157,305 @@ paths; 48/48 tenant tables RLS-protected.
 - **No scheduled analysis loop.** Rollups, audits, profiling and detection are
   endpoints. Wiring them to a timer is a one-line change per job, deliberately
   left to whoever decides how often is often enough.
+
+---
+---
+
+# Phase 6 — Evolution Engine
+
+Phase 5 concluded things. Phase 6 acts on them: it generates concrete
+candidate changes, tests each one against what it would replace, benchmarks
+both, and deploys only what measurably wins — behind a boundary it cannot
+move.
+
+```
+                    Learning Engine
+                          │
+                          ▼
+              Evolution Candidate Generator
+                          │
+                          ▼
+                   Experiment Engine
+          ┌───────────────┼───────────────┬──────────────┐
+          ▼               ▼               ▼              ▼
+       Sandbox         Shadow          Canary           A/B
+    (nothing real)  (observed only)  (small share)   (even split)
+          └───────────────┼───────────────┴──────────────┘
+                          ▼
+                   Benchmark Engine  ── nine metrics, per arm
+                          │
+                          ▼
+              ═══ THE PRISM-X CONSTITUTION ═══   ← cannot be moved
+                          │
+                   Evolution Policy   ← each org's own ceiling
+                          │
+                          ▼
+                     Deployment ──► Monitoring ──► Rollback
+                          │
+                          ▼
+                  Production Intelligence
+```
+
+## The Constitution
+
+A self-modifying system needs a boundary it cannot move, or "adaptive"
+eventually means "unpredictable". `src/evolution/constitution.ts` holds nine
+laws the Evolution Engine may never break — whatever the evidence says,
+whatever the confidence, whatever an organization has configured.
+
+| law | it refuses |
+|---|---|
+| `ORG_PERMISSIONS` | acting beyond the requesting actor's authority |
+| `NO_PRIVILEGE_ESCALATION` | touching permissions, roles or scopes; granting tools unapproved |
+| `TENANT_ISOLATION` | a subject owned elsewhere, or any foreign org id nested in the change |
+| `NO_AUTOMATIC_DELETION` | anything that would destroy history |
+| `POLICY_COMPLIANCE` | a change the organization's own policy rejected |
+| `HUMAN_CONSENT` | a required approval that is missing, or one recorded by the system |
+| `REVERSIBILITY` | no rollback, or a rollback that covers only part of the change |
+| `AUDITABILITY` | a deployment that would not be recorded |
+| `EVIDENCE_REQUIRED` | a change the benchmark found worse; an unmeasured change nobody approved |
+
+Three properties make this a constraint rather than a comment:
+
+**It lives in code, not the database.** There is no table, no endpoint and no
+setting that amends it — the validation suite asserts that `POST
+/evolution/constitution` returns 404, and the unit tests assert the array is
+deep-frozen and throws on mutation. Changing a law requires a code change, a
+review and a deploy, which is exactly the human process the laws protect. A
+constitution stored in a row is one the system could evolve, and a
+constitution the system can evolve is not one.
+
+**Every law is an executable predicate.** "Never expose another
+organization's data" is checked by walking the proposed change recursively for
+foreign identifiers — a foreign org id three levels inside a workflow step
+config is as dangerous as one at the top, and considerably more likely to be
+missed by a reviewer.
+
+**It is checked at a chokepoint evolution cannot route around.**
+`DeploymentService.deploy()` is the only path to production, and its first act
+is to submit the intent. All nine laws are evaluated rather than stopping at
+the first refusal, so an operator sees every reason at once.
+
+Every verdict carries a hash of the law text (`CONSTITUTION_VERSION`), stamped
+on every deployment row — so an archive entry from six months ago can be
+checked against the constitution that was in force when it was written.
+
+The laws are deliberately about **process integrity** and never about
+outcomes. A law saying "only deploy improvements" would be unenforceable and
+would give false comfort; these are all decidable from the intent in hand.
+
+### Refusals are recorded
+
+A refused deployment is written as a `Deployment` with status `REFUSED` plus
+one `ConstitutionViolation` row per objecting law. An engine repeatedly
+proposing illegal changes is a fact about the engine, and that signal only
+exists if refusals are kept rather than merely returned.
+
+## Candidates
+
+A candidate is a concrete, testable change — distinct from a Phase 5
+recommendation, which is advice for a person. The distinction is what lets them
+behave differently: a recommendation waits to be read, a candidate goes into an
+experiment and can be **rejected by measurement without anyone looking at it**.
+Most candidates should die that way.
+
+Candidates are promoted automatically from recommendations that recur, and the
+same change proposed twice reinforces one candidate rather than creating a
+second. `proposalCount` makes recurrence visible, which is a real signal: an
+opportunity the learning engine keeps rediscovering after new data arrives is
+more real than one it found once.
+
+A candidate without a rollback is refused **at creation** — the Constitution
+would refuse it at deployment anyway, so accepting it would only defer the
+disappointment.
+
+## Experiments
+
+Four modes, ordered by how much of the real system they touch:
+
+| mode | exposure |
+|---|---|
+| `SANDBOX` | nothing real — the candidate is applied in memory and probed |
+| `SHADOW` | runs alongside production; results recorded, never used |
+| `CANARY` | a small share of real work |
+| `AB` | an even split |
+
+Sandbox is always permitted, because an organization that cannot measure
+anything will deploy on a hunch. The rest are gated by policy.
+
+**Both paired modes run every trial against both arms.** Allocation only means
+something when real work is being routed; splitting sandbox trials halves the
+statistical power for no safety benefit and makes an experiment need twice the
+trials to say anything.
+
+The variant runs with the candidate applied **in memory only** —
+`WorkerExecutionRequest.overrides` merges the change into a copy of the worker
+that is never persisted. A change that had to be written in order to be
+measured would have skipped the entire pipeline.
+
+## Benchmarks
+
+Nine metrics per arm — success rate, completion time, quality, cost, tokens,
+latency, reliability, user rating, ROI — recorded separately rather than
+collapsed into one score. Collapsing early hides the trade-offs that make a
+decision worth making: a variant that is faster and worse is a completely
+different situation from one that is faster and cheaper, and a single number
+reports them identically.
+
+The verdict is decided by **reliability first**, cost and speed second. That
+ordering is a claim: a change that makes the system cheaper and quicker while
+succeeding less often has not improved it.
+
+Two gates before any comparison: enough trials on both arms, and success rates
+that actually separate (Wilson intervals, as everywhere in the platform). If
+they overlap, the verdict is `INCONCLUSIVE` — and **inconclusive is not
+refutation**. The candidate returns to the queue rather than being rejected,
+because a change proposed for a reason the benchmark does not measure is still
+perfectly reasonable, and a person may approve it on that basis. A candidate
+measured *worse* cannot be approved past, at any confidence.
+
+Reliability is stricter than success rate: succeeding on the second attempt is
+a success but not a reliable one. An arm nobody rated reports `userRating:
+null` rather than zero — rating is not something a variant should be punished
+for lacking.
+
+## Versions
+
+Versions are immutable and never deleted; a new one supersedes its predecessor.
+That is what makes rollback a matter of re-activating a row that already exists
+rather than reconstructing a past state from diffs — and it is why
+`NO_AUTOMATIC_DELETION` can be absolute: nothing in the evolution path ever
+needs to remove a row, so a change that would is always a mistake.
+
+A subject has independent lineages per **aspect** — prompt, model, tools,
+limits, graph, strategy. They change for different reasons and at different
+rates; versioning them together would mean a prompt tweak invalidating a
+carefully benchmarked model choice. A change spanning two aspects is refused
+rather than assigned to one, because rolling it back would restore half of
+what it changed.
+
+A baseline is captured automatically before the first evolution of anything.
+Without it, the first change would have nothing to roll back to — the original
+configuration would exist only as the live row the deployment is about to
+overwrite.
+
+## Deployment
+
+The order of operations is not negotiable:
+
+1. **Read the current state** — immediately before writing, so the rollback
+   restores what was actually in production rather than what the candidate
+   assumed when it was created.
+2. **Ask the policy.**
+3. **Submit to the Constitution.**
+4. **Write the deployment row** — *before* touching production, so a crash
+   mid-write leaves evidence rather than a silent divergence.
+5. **Apply**, through the ordinary repositories. There is no privileged path;
+   the Evolution Engine is a caller like any other, and tenant scoping applies
+   to it exactly as to a person making the same edit.
+6. **Watch it.**
+
+Approval and deployment are separate acts, because they answer different
+questions: approval says the change is acceptable, deployment says now is the
+moment. An organization with a deployment window needs to approve at 3pm and
+deploy at 2am.
+
+**Monitoring** decides whether a deployment settles. Once the observed failure
+rate crosses the policy's threshold the system rolls back early rather than
+waiting out the window — every further minute is damage it could have
+prevented. A deployment with no observations settles with `healthy: null`
+rather than claiming a verdict nobody measured.
+
+**Rollback** records the restored state as a version of its own rather than
+reactivating the old row, so the lineage reads as what actually happened —
+deployed, then reverted — instead of pretending the deployment never occurred.
+
+## Policies
+
+The Constitution is the floor nobody can lower; the policy is each
+organization's own ceiling. The split matters: "never bypass approval where it
+is required" is a law, because a system that could ignore it would make every
+other control advisory. *Which* changes require approval is a business
+decision a media agency and a hospital should answer differently.
+
+Defaults are conservative and are created on first access rather than
+requiring setup, because an organization that has never configured evolution
+should not thereby be evolving freely. Prompt and limit tuning are permitted;
+provider and model changes are permitted but always need a person; workflow
+structure and tool permissions are absent from `allowedKinds` entirely and
+have to be opted into.
+
+Policies also cover deployment windows (including ones that wrap midnight — a
+real thing operations teams ask for, and reading it as an empty window would
+silently block everything), concurrent experiment caps, daily deployment caps,
+monitoring duration and the auto-rollback threshold.
+
+A deployment window is not a safety feature in itself — it is a staffing one.
+Its purpose is that when something goes wrong, somebody is awake to notice.
+
+## Planning evolution
+
+Planning is the one part of the system that decides how every *other* part gets
+used, so improving it compounds — which is also why getting it wrong compounds.
+Strategies version like anything else and are compared on the missions they
+actually produced, never on how sensible their rules look. Every observation
+names the signal it came from, so a suggestion can be checked rather than taken
+on faith.
+
+Promoting an unproven strategy over a proven one is refused without `force`:
+switching planning on a hunch undoes whatever the previous strategy had earned.
+
+## The dashboard
+
+Refusals and rollbacks get the same prominence as successes. An evolution
+dashboard that only shows wins is a marketing page — a candidate killed by
+measurement is a change that did not make production worse, and a refusal is
+the Constitution doing its job. When nothing improved, the digest says so.
+
+## Testing
+
+```bash
+npm test                        # 422 unit tests, 14 suites
+node test/phase1-validation.js  # 57 checks
+node test/phase2-validation.js  # 58 checks
+node test/phase3-validation.js  # 74 checks
+node test/phase4-validation.js  # 112 checks
+node test/phase5-validation.js  # 86 checks
+node test/phase6-validation.js  # 86 checks
+```
+
+Phase 6's suite covers all ten required checks plus the Constitution, including
+the negative cases: a candidate with no rollback, a second concurrent
+experiment, a sandbox that never writes to production, an experiment mode the
+policy forbids, deployment outside the window, deployment with evolution
+switched off, a high-confidence change of an always-escalated kind, an
+unapproved change, a rolled-back deployment, and cross-organization access to
+every new surface.
+
+The unit suite asserts each law individually — including that the frozen array
+throws on `push`, that a foreign organization id nested three levels deep is
+caught, that a partial rollback is refused by name, and that 99% confidence
+does not satisfy `HUMAN_CONSENT`.
+
+Latest run: **86/86 Phase 6, 86/86 Phase 5, 112/112 Phase 4, 74/74 Phase 3,
+58/58 Phase 2, 57/57 Phase 1, 422/422 unit tests.** 268 documented API
+operations across 226 paths; 56/56 tenant tables RLS-protected.
+
+## What Phase 6 deliberately does not do
+
+- **No unattended structural change.** Workflow graphs, tool grants and prompt
+  wording never deploy without a person, at any confidence. Those are
+  judgements, not numbers.
+- **No self-amendment.** The Constitution is the one part of PRISM-X the
+  Evolution Engine cannot reach. That is the point, and it is why it is a file
+  rather than a table.
+- **No genetic search.** Candidates come from measured findings, not from
+  mutating configurations and seeing what survives. Random variation would
+  produce improvement eventually and would make every intermediate state
+  unexplainable.
+- **No cross-organization learning transfer.** A strategy proven in one tenant
+  is not proposed to another. That is a product and privacy decision, not an
+  engineering one.
+- **No automatic experiment scheduling.** Candidates queue themselves;
+  starting experiments and running trials are explicit calls, because trials
+  cost money and how many is worth spending is not the system's decision.
