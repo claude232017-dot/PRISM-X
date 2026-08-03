@@ -29,6 +29,14 @@ export interface WorkerExecutionRequest {
   providerId?: string;
   /** Skip retrieval — used when the caller has already assembled context. */
   skipRetrieval?: boolean;
+  /**
+   * Run here, on this process, without consulting the fleet.
+   *
+   * Set by the node agent when work arrives from the control plane: that
+   * work has already been placed, and re-entering the router would bounce it
+   * onward forever.
+   */
+  forceLocal?: boolean;
 }
 
 export interface WorkerExecutionResult {
@@ -89,7 +97,33 @@ export class WorkerRuntimeService {
     private readonly events: EventBusService,
   ) {}
 
+  /**
+   * Optional fleet router, installed by the distributed layer at startup.
+   *
+   * A callback rather than an injected dependency because the distributed
+   * layer already depends on this service to *do* the executing — injecting
+   * it back would be a cycle. Returning `null` means "the fleet chose this
+   * machine", which drops straight through to the local path below, so a
+   * single-machine install behaves exactly as it did before nodes existed.
+   */
+  private router?: (
+    request: WorkerExecutionRequest,
+  ) => Promise<WorkerExecutionResult | null>;
+
+  onRemoteRoute(
+    router: (request: WorkerExecutionRequest) => Promise<WorkerExecutionResult | null>,
+  ): void {
+    this.router = router;
+  }
+
   async execute(request: WorkerExecutionRequest): Promise<WorkerExecutionResult> {
+    if (this.router && !request.forceLocal) {
+      const routed = await this.router(request);
+      // A result means the work ran somewhere else and is already recorded
+      // there; there is nothing left for this process to do.
+      if (routed) return routed;
+    }
+
     const worker = await this.workers.findByIdOrFail(request.workerId);
 
     if (worker.status === 'ARCHIVED') {

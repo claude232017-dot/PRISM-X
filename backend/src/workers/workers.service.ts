@@ -46,6 +46,10 @@ export class WorkersService {
       ...(dto.timeoutMs !== undefined ? { timeoutMs: dto.timeoutMs } : {}),
       costLimitUsd: dto.costLimitUsd ?? null,
       ...(dto.allowFailover !== undefined ? { allowFailover: dto.allowFailover } : {}),
+      preferredNodeId: dto.preferredNodeId ?? null,
+      ...(dto.nodeRequirements !== undefined
+        ? { nodeRequirements: dto.nodeRequirements }
+        : {}),
     });
 
     await this.events.publish(DomainEvent.WorkerCreated, {

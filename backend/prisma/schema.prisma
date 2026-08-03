@@ -63,6 +63,20 @@ model Organization {
   webhookDeliveries WebhookDelivery[]
   deadLetters      DeadLetter[]
 
+  // Phase 4
+  nodes            Node[]
+  nodeCapabilities NodeCapability[]
+  nodeHeartbeats   NodeHeartbeat[]
+  nodeKeys         NodeKey[]
+  distributedTasks DistributedTask[]
+  memoryShards     MemoryShard[]
+  memorySyncOps    MemorySyncOp[]
+  nodeSyncStates   NodeSyncState[]
+  /// Grants this organization issued to peers.
+  federationGrants FederationGrant[] @relation("FederationOwner")
+  /// Grants other organizations issued to this one.
+  federationAccess FederationGrant[] @relation("FederationPeer")
+
   @@index([deletedAt])
   @@map("organizations")
 }
@@ -200,6 +214,15 @@ model Worker {
   /// When false, a failure on this worker's provider is not silently retried
   /// on a different one — used to pin a worker to a specific provider.
   allowFailover Boolean @default(true)
+
+  // --- Phase 4: placement -------------------------------------------
+  /// Pins execution to one node. Null lets the scheduler choose, which is
+  /// the normal case — placement is an infrastructure concern, not part of
+  /// a worker's identity.
+  preferredNodeId  String?
+  /// Constraints the scheduler must satisfy, e.g.
+  /// `{ "requiresGpu": true, "minMemoryMb": 8192, "labels": ["eu"] }`.
+  nodeRequirements Json    @default("{}")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1175,4 +1198,498 @@ enum IntegrationCategory {
   PAYMENT
   AUTOMATION
   CUSTOM_API
+}
+
+// ------------------------------------------------------------
+// Phase 4: distributed intelligence
+//
+// A "node" is any machine PRISM-X may execute on: the control plane's own
+// process, a home server, a rented VPS, a GPU box, a Raspberry Pi. The
+// control plane stays the single source of truth — nodes hold no authority
+// of their own, they are capacity. Everything below is tenant-scoped like
+// the rest of the schema; a node belongs to exactly one organization and is
+// only reachable by another organization through an explicit FederationGrant.
+// ------------------------------------------------------------
+
+/// One machine in the fleet.
+///
+/// Hardware and capability columns are *reported* by the node during
+/// registration and refreshed on every heartbeat — they are inputs to
+/// scheduling, not configuration a human maintains by hand. Registering a
+/// node is the whole of "adding capacity": discovery, measurement and
+/// rescheduling follow from the heartbeat stream.
+model Node {
+  id             String     @id @default(cuid())
+  organizationId String
+  name           String
+  /// Stable handle used in APIs and logs. Unique per organization.
+  slug           String
+  type           NodeType   @default(CUSTOM)
+  status         NodeStatus @default(PENDING)
+
+  /// Where the control plane reaches this node's agent API. Null for the
+  /// control plane's own in-process node, which needs no network hop.
+  endpointUrl String?
+  /// True for the node this process is running as. Exactly one per org.
+  isLocal     Boolean @default(false)
+  region      String  @default("default")
+  /// Agent build reported at registration; used to gate protocol features.
+  version     String?
+  /// Free-form scheduling hints, e.g. "gpu", "eu-west", "cheap".
+  labels      String[] @default([])
+
+  // --- Reported hardware -------------------------------------------
+  cpuCores    Int     @default(0)
+  cpuModel    String?
+  memoryMb    Int     @default(0)
+  diskMb      Int     @default(0)
+  gpuCount    Int     @default(0)
+  gpuModel    String?
+  gpuMemoryMb Int     @default(0)
+
+  // --- Live load and health ----------------------------------------
+  /// Ceiling on concurrently leased tasks. The scheduler will not exceed it.
+  maxConcurrency Int   @default(4)
+  activeTasks    Int   @default(0)
+  queueDepth     Int   @default(0)
+  cpuUsage       Float @default(0)
+  memoryUsage    Float @default(0)
+  diskUsage      Float @default(0)
+  gpuUsage       Float @default(0)
+  uptimeSeconds  Int   @default(0)
+  /// Exponential moving average of round-trip latency in milliseconds.
+  latencyMs      Float @default(0)
+  /// 0..1, derived on every heartbeat. The scheduler's primary signal.
+  healthScore    Float @default(0)
+  /// Operator-supplied running cost, used to break ties toward cheap capacity.
+  costPerHourUsd Float @default(0)
+
+  lastHeartbeatAt DateTime?
+  lastSeenIp      String?
+  registeredAt    DateTime  @default(now())
+
+  // --- Security and lifecycle --------------------------------------
+  trust                NodeTrust @default(UNVERIFIED)
+  /// Current signing key version. Older versions stay valid while retiring
+  /// so a rotation does not knock a running node offline mid-task.
+  keyVersion           Int       @default(1)
+  allowRemoteExecution Boolean   @default(true)
+  /// Set when an operator drains a node; scheduling stops, running work finishes.
+  drainReason          String?
+  consecutiveFailures  Int       @default(0)
+  quarantinedUntil     DateTime?
+  metadata             Json      @default("{}")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  heartbeats   NodeHeartbeat[]
+  capabilities NodeCapability[]
+  keys         NodeKey[]
+  tasks        DistributedTask[]
+  shards       MemoryShard[]
+  syncStates   NodeSyncState[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, lastHeartbeatAt])
+  @@map("nodes")
+}
+
+/// What a node can actually run, discovered rather than declared.
+///
+/// The scheduler will not place work on a node that has not advertised the
+/// provider, tool or extension the work needs, which is what makes
+/// "register a node and it joins the fleet" safe: capability comes from the
+/// node, so an under-equipped machine simply never wins a placement.
+model NodeCapability {
+  id             String         @id @default(cuid())
+  organizationId String
+  nodeId         String
+  kind           CapabilityKind
+  /// Provider kind, tool key, extension slug or runtime identifier.
+  key            String
+  name           String?
+  version        String?
+  available      Boolean        @default(true)
+  detail         Json           @default("{}")
+  discoveredAt   DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  node         Node         @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, kind, key])
+  @@index([organizationId])
+  @@index([organizationId, kind, key])
+  @@map("node_capabilities")
+}
+
+/// Append-only telemetry. One row per heartbeat, kept for the monitoring
+/// dashboard's time series and for post-mortem on a node that failed.
+model NodeHeartbeat {
+  id             String     @id @default(cuid())
+  organizationId String
+  nodeId         String
+  status         NodeStatus
+  cpuUsage       Float      @default(0)
+  memoryUsage    Float      @default(0)
+  diskUsage      Float      @default(0)
+  gpuUsage       Float      @default(0)
+  activeTasks    Int        @default(0)
+  queueDepth     Int        @default(0)
+  latencyMs      Float      @default(0)
+  uptimeSeconds  Int        @default(0)
+  healthScore    Float      @default(0)
+  details        Json       @default("{}")
+  reportedAt     DateTime   @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  node         Node         @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([nodeId, reportedAt])
+  @@map("node_heartbeats")
+}
+
+/// A node's shared secret, versioned so rotation can overlap.
+///
+/// Unlike ApiKey, which stores only a hash, this keeps the secret itself —
+/// sealed with AES-256-GCM under CREDENTIAL_ENCRYPTION_KEY. Authentication
+/// here is mutual and signature-based: the control plane must be able to
+/// *produce* an HMAC for outbound calls, not merely compare an inbound
+/// bearer token, and that requires the key material. `secretHash` is kept
+/// alongside for constant-time equality checks that do not need decryption.
+model NodeKey {
+  id             String        @id @default(cuid())
+  organizationId String
+  nodeId         String
+  version        Int
+  secretHash     String
+  secretCipher   String        @default("")
+  secretIv       String        @default("")
+  secretTag      String        @default("")
+  status         NodeKeyStatus @default(ACTIVE)
+  createdAt      DateTime      @default(now())
+  /// While a key is RETIRING it still verifies, until this moment passes.
+  retiresAt      DateTime?
+  revokedAt      DateTime?
+  lastUsedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  node         Node         @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, version])
+  @@index([organizationId])
+  @@map("node_keys")
+}
+
+/// A unit of work the fleet owns, independent of which node runs it.
+///
+/// The queue a task sits in (`queue`) and its lifecycle state (`status`) are
+/// separate on purpose: the four queues are the operator's mental model,
+/// while status drives the coordinator. A task can move between nodes any
+/// number of times without changing identity, which is what makes failover
+/// and rebalancing observable rather than magical.
+model DistributedTask {
+  id             String                @id @default(cuid())
+  organizationId String
+  /// Dispatch key, e.g. "worker.execute", "tool.invoke", "workflow.step".
+  kind           String
+  queue          DistributedQueue      @default(INCOMING)
+  status         DistributedTaskStatus @default(QUEUED)
+  priority       Priority              @default(MEDIUM)
+
+  payload      Json    @default("{}")
+  /// Hardware/provider/label constraints the scheduler must satisfy.
+  requirements Json    @default("{}")
+  result       Json?
+  error        String?
+
+  /// Assigned node. Null while the task is waiting for a placement.
+  nodeId         String?
+  /// Where the task entered the fleet, for provenance across migrations.
+  originNodeId   String?
+  /// Node it ran on before the most recent migration, if any.
+  previousNodeId String?
+  migrations     Int     @default(0)
+
+  attempts    Int     @default(0)
+  maxAttempts Int     @default(3)
+  /// Caller-supplied dedupe key. Re-submitting the same key returns the
+  /// original task instead of running the work twice.
+  idempotencyKey String?
+
+  /// A lease is a promise a node made to finish this task. When it expires
+  /// without a result the coordinator assumes the node is gone and reassigns.
+  leaseExpiresAt DateTime?
+  /// Retry backoff gate: the task is invisible to the scheduler until then.
+  availableAt    DateTime  @default(now())
+
+  workerId      String?
+  missionId     String?
+  taskId        String?
+  workflowRunId String?
+
+  queuedAt    DateTime  @default(now())
+  assignedAt  DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  durationMs  Int?
+  costUsd     Float     @default(0)
+  totalTokens Int       @default(0)
+  metadata    Json      @default("{}")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  node         Node?        @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, queue])
+  @@index([organizationId, status, availableAt])
+  @@index([nodeId, status])
+  @@map("distributed_tasks")
+}
+
+/// A versioned key/value record replicated across the fleet.
+///
+/// Four scopes, from narrowest to widest: LOCAL belongs to one node, SHARED
+/// is replicated to every node in the organization, CACHED is a node-local
+/// copy of a shared record that may be stale, and GLOBAL is org-wide state
+/// the control plane owns. Conflicts are resolved by version then by
+/// last-writer timestamp, with the losing write kept in the op log so a
+/// human can see what was discarded.
+model MemoryShard {
+  id             String      @id @default(cuid())
+  organizationId String
+  scope          MemoryScope @default(LOCAL)
+  namespace      String      @default("default")
+  key            String
+  /// Empty string — not NULL — for scopes that are not node-specific. A
+  /// nullable column here would break the unique index below, because
+  /// Postgres treats NULLs as distinct and every write would insert a new
+  /// row instead of updating the existing one (same reasoning as
+  /// `usage_daily`'s slice keys).
+  nodeId         String      @default("")
+
+  value    Json   @default("{}")
+  version  Int    @default(1)
+  /// SHA-256 of the canonical value, so a sync can detect drift without
+  /// shipping the whole payload.
+  checksum String @default("")
+  /// Per-node counters. Detects concurrent divergent writes that a single
+  /// version number would silently collapse.
+  vectorClock Json @default("{}")
+
+  ownerNodeId      String?
+  lastWriterNodeId String?
+  tags             String[]  @default([])
+  expiresAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  /// Tombstone. Deletes must replicate, so the row survives the delete.
+  deletedAt        DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner        Node?        @relation(fields: [ownerNodeId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, scope, namespace, nodeId, key])
+  @@index([organizationId])
+  @@index([organizationId, scope, updatedAt])
+  @@map("memory_shards")
+}
+
+/// The replication log. Every write to a shard appends one op.
+///
+/// This is simultaneously the incremental-sync feed (a node pulls ops after
+/// its cursor), the offline queue (ops a disconnected node has not applied
+/// stay PENDING) and the conflict record.
+model MemorySyncOp {
+  id             String       @id @default(cuid())
+  organizationId String
+  /// Monotonic within the database. Sync cursors are expressed in terms of it.
+  sequence       Int          @default(autoincrement())
+  shardId        String?
+  scope          MemoryScope
+  namespace      String       @default("default")
+  key            String
+  op             SyncOpKind
+  payload        Json         @default("{}")
+  version        Int          @default(1)
+  /// Node that produced the write.
+  nodeId         String       @default("")
+  status         SyncOpStatus @default(PENDING)
+  /// Set on a losing write: the op that won, and why.
+  conflictWithId String?
+  resolution     String?
+  appliedAt      DateTime?
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([sequence])
+  @@index([organizationId])
+  @@index([organizationId, sequence])
+  @@index([organizationId, status])
+  @@map("memory_sync_ops")
+}
+
+/// How far through the replication log a node has read, per scope.
+model NodeSyncState {
+  id             String      @id @default(cuid())
+  organizationId String
+  nodeId         String
+  scope          MemoryScope
+  lastSequence   Int         @default(0)
+  lastSyncAt     DateTime?
+  pendingOps     Int         @default(0)
+  /// Set while a node is catching up after being offline.
+  recovering     Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  node         Node         @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, scope])
+  @@index([organizationId])
+  @@map("node_sync_states")
+}
+
+/// Explicit, revocable permission for one organization to use another's
+/// resources.
+///
+/// There is no implicit federation anywhere in the system: absent an ACTIVE
+/// grant naming a resource, a cross-organization request is refused. A grant
+/// is one-directional — mutual sharing is two grants.
+model FederationGrant {
+  id                  String           @id @default(cuid())
+  /// The organization that owns the resources and issues the grant.
+  organizationId      String
+  /// The organization being granted access.
+  peerOrganizationId  String
+  name                String?
+  status              FederationStatus @default(PENDING)
+  /// Enumerated capabilities, e.g. "nodes:execute", "memory:read".
+  /// Empty means nothing is shared, which is also the default.
+  resources           String[]         @default([])
+  /// Narrows the grant to specific nodes. Empty means every eligible node.
+  allowedNodeIds      String[]         @default([])
+  /// Ceiling on simultaneous borrowed tasks, so a peer cannot starve the owner.
+  maxConcurrentTasks  Int              @default(1)
+  activeTasks         Int              @default(0)
+  expiresAt           DateTime?
+  acceptedAt          DateTime?
+  revokedAt           DateTime?
+  createdById         String?
+  revokedById         String?
+  terms               Json             @default("{}")
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  organization Organization @relation("FederationOwner", fields: [organizationId], references: [id], onDelete: Cascade)
+  peer         Organization @relation("FederationPeer", fields: [peerOrganizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, peerOrganizationId])
+  @@index([organizationId])
+  @@index([peerOrganizationId, status])
+  @@map("federation_grants")
+}
+
+enum NodeType {
+  LOCAL_MACHINE
+  HOME_SERVER
+  CLOUD_VPS
+  DEDICATED_AI_SERVER
+  EDGE_DEVICE
+  DEVELOPMENT_MACHINE
+  /// Escape hatch for machine classes that do not exist yet. New types are
+  /// added here rather than encoded in labels.
+  CUSTOM
+}
+
+enum NodeStatus {
+  /// Registered but has not completed its first heartbeat.
+  PENDING
+  ONLINE
+  /// Reachable but unhealthy — deprioritised, not excluded.
+  DEGRADED
+  OFFLINE
+  /// Operator-initiated: finish current work, accept nothing new.
+  DRAINING
+  /// Repeated failures; excluded from scheduling until the hold expires.
+  QUARANTINED
+  DECOMMISSIONED
+}
+
+enum NodeTrust {
+  UNVERIFIED
+  TRUSTED
+  REVOKED
+}
+
+enum NodeKeyStatus {
+  ACTIVE
+  RETIRING
+  REVOKED
+}
+
+enum CapabilityKind {
+  PROVIDER
+  MODEL
+  TOOL
+  EXTENSION
+  RUNTIME
+  HARDWARE
+}
+
+enum DistributedQueue {
+  INCOMING
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum DistributedTaskStatus {
+  QUEUED
+  ASSIGNED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  /// Retries exhausted or no node could ever satisfy the requirements.
+  DEAD_LETTERED
+  CANCELLED
+  /// Being moved to another node; briefly neither running nor queued.
+  MIGRATING
+}
+
+enum MemoryScope {
+  LOCAL
+  SHARED
+  CACHED
+  GLOBAL
+}
+
+enum SyncOpKind {
+  PUT
+  DELETE
+}
+
+enum SyncOpStatus {
+  PENDING
+  APPLIED
+  CONFLICT
+  SUPERSEDED
+  FAILED
+}
+
+enum FederationStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REVOKED
+  EXPIRED
 }

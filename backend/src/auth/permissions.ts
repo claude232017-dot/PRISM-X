@@ -63,6 +63,21 @@ export const Permissions = {
   StorageRead: 'storage:read',
   StorageWrite: 'storage:write',
   StorageDelete: 'storage:delete',
+
+  // Infrastructure — the fleet of machines PRISM-X executes on
+  NodeRead: 'node:read',
+  NodeRegister: 'node:register',
+  NodeUpdate: 'node:update',
+  NodeDelete: 'node:delete',
+  /** Placing, migrating and cancelling work across nodes. */
+  NodeExecute: 'node:execute',
+
+  // Federation — lending resources to another organization is its own
+  // permission, never implied by node administration, because the blast
+  // radius is a different organization's data rather than this one's uptime.
+  FederationRead: 'federation:read',
+  FederationGrant: 'federation:grant',
+  FederationRevoke: 'federation:revoke',
 } as const;
 
 export type PermissionKey = (typeof Permissions)[keyof typeof Permissions];
@@ -119,6 +134,12 @@ export const ROLE_PERMISSIONS: Record<SystemRoleKey, PermissionKey[]> = {
     Permissions.AnalyticsRead,
     Permissions.StorageRead,
     Permissions.StorageWrite,
+    // An operator may see the fleet and run work on it, but registering or
+    // decommissioning machines — and lending them to another organization —
+    // stays with administrators.
+    Permissions.NodeRead,
+    Permissions.NodeExecute,
+    Permissions.FederationRead,
   ],
 
   [SystemRole.Viewer]: readOnly,

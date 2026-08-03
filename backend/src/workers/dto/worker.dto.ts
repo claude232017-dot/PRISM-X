@@ -154,6 +154,26 @@ export class CreateWorkerDto {
   @IsOptional()
   @IsBoolean()
   allowFailover?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'clx0node0001',
+    description:
+      'Pin this worker to one node. Left unset — the normal case — the scheduler places ' +
+      'each execution on whichever node currently fits best.',
+  })
+  @IsOptional()
+  @IsString()
+  preferredNodeId?: string;
+
+  @ApiPropertyOptional({
+    example: { requiresGpu: true, minMemoryMb: 8192, labels: ['inference'] },
+    description:
+      'Constraints a node must satisfy to run this worker. Unsatisfiable constraints ' +
+      'mean the worker waits rather than running somewhere unsuitable.',
+  })
+  @IsOptional()
+  @IsObject()
+  nodeRequirements?: Record<string, unknown>;
 }
 
 export class UpdateWorkerDto extends PartialType(CreateWorkerDto) {

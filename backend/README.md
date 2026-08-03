@@ -1,5 +1,5 @@
-# PRISM-X Backend — Phases 1–3
-### Core Foundation · Intelligence & Execution · Automation & Integration
+# PRISM-X Backend — Phases 1–4
+### Core Foundation · Intelligence & Execution · Automation & Integration · Distributed Intelligence
 
 The production backend for the PRISM-X Intelligence Operating System. It is a
 standalone service: it holds all business logic, owns the data model, and is
@@ -10,14 +10,16 @@ third-party client, are peers talking to the same API.
 Clients (web · desktop · mobile · public API)
         │  REST + JWT
         ▼
-  NestJS application
+  NestJS application  ── the control plane, and the single source of truth
         ├── Guards (JWT → RBAC)          ── every route locked by default
         ├── Feature modules              ── controller · service · DTOs
         ├── Repository layer             ── the ONLY place that queries the DB
         ├── Event bus                    ── durable domain events
-        └── Provider registry            ── vendor-neutral intelligence seam
+        ├── Provider registry            ── vendor-neutral intelligence seam
+        └── Node scheduler               ── which machine runs what
         │
-        ▼
+        ├──────────────► Nodes (local · another PRISM-X over HTTP)
+        ▼                      capacity only; they decide nothing
   Prisma ──► PostgreSQL (+ row-level security)
   Redis  ──► cache · BullMQ queues
 ```
@@ -138,6 +140,8 @@ src/
 ├── notifications/   event → notification channels
 ├── storage/         object storage abstraction
 ├── queues/          BullMQ queues
+├── nodes/           the fleet register, node security, transports
+├── distributed/     scheduling · queues · replication · federation · monitoring
 └── health/          liveness + dependency checks
 ```
 
@@ -148,14 +152,20 @@ logic never leaves its module, and never talks to Prisma directly.
 
 ## Authorization
 
-Four seeded system roles over 38 `resource:action` permissions:
+Four seeded system roles over 46 `resource:action` permissions:
 
 | Role | Scope |
 |---|---|
 | `OWNER` | Everything, including deleting the organization |
 | `ADMIN` | Everything except deleting the organization |
-| `OPERATOR` | Full CRUD on workers, missions and knowledge; read-only elsewhere |
+| `OPERATOR` | Full CRUD on workers, missions and knowledge; may see the fleet and run work on it; read-only elsewhere |
 | `VIEWER` | Read-only |
+
+Registering or decommissioning machines (`node:register`, `node:delete`) and
+lending them to another organization (`federation:grant`, `federation:revoke`)
+stay with administrators. Federation is its own permission rather than an
+implication of node administration, because its blast radius is a *different*
+organization's data rather than this one's uptime.
 
 `JwtAuthGuard` and `PermissionsGuard` are registered globally, so a new route is
 protected unless it opts out with `@Public()`. A caller missing a permission
@@ -540,3 +550,316 @@ Latest run: **74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 123/123 unit tests.**
   than reported as sent.
 - **No visual workflow builder.** The engine is API-first; the canvas is a
   frontend concern.
+
+---
+---
+
+# Phase 4 — Distributed Intelligence
+
+Phase 4 turns one server into a fleet. PRISM-X still has exactly one brain —
+the control plane owns missions, workers, memory and every business rule — but
+execution can now happen on any machine that has registered itself as a node:
+a laptop, a home server, a rented VPS, a GPU box, a Raspberry Pi.
+
+Nothing above the transport layer knows the difference. The mission
+orchestrator calls `WorkerRuntimeService.execute` exactly as it did in Phase 2;
+whether that runs on this event loop or on a machine in another country is a
+placement decision made underneath it.
+
+```
+        Control plane (single source of truth)
+                    │
+        ┌───────────┴───────────┐
+        │   Node Scheduler      │  eligibility → preference
+        │   Queue Coordinator   │  four queues · priorities · migration
+        │   Failover            │  heartbeats · leases · quarantine
+        │   Memory replication  │  op log · vector clocks · conflicts
+        │   Federation          │  explicit, revocable, one-directional
+        └───────────┬───────────┘
+                    │  INodeTransport
+      ┌─────────────┼─────────────┐
+      ▼             ▼             ▼
+   local         http          simulated
+ (this process) (another      (a machine that
+                 PRISM-X)      isn't there)
+```
+
+## Nodes are capacity, not authority
+
+A node holds no state of its own that matters. It advertises what it can do,
+reports what it is doing, and executes what it is handed. Every decision —
+what runs, where, with what permissions, under whose tenancy — is made by the
+control plane. That is what makes a node safe to add: an under-equipped or
+compromised machine can refuse work or return rubbish, but it cannot decide
+anything.
+
+Registering a node is the whole of adding capacity. The node measures its own
+hardware and discovers its own capabilities; scheduling begins the moment it
+is trusted and heartbeating. There is no second place to go and describe the
+machine, and nothing else in the system needs to be told the fleet got bigger.
+
+Node types: `LOCAL_MACHINE`, `HOME_SERVER`, `CLOUD_VPS`, `DEDICATED_AI_SERVER`,
+`EDGE_DEVICE`, `DEVELOPMENT_MACHINE`, `CUSTOM`. The last is the extension point
+— new classes of machine are added there rather than smuggled into labels.
+
+### The local node
+
+Every organization gets a node for the control plane itself, created when the
+organization is created. Without it, a single-machine install would have an
+empty fleet and the scheduler nothing to choose from — the distributed path
+would be strictly worse than the non-distributed one. The local node makes the
+degenerate one-machine case an ordinary member of the general case.
+
+Because it has no agent to heartbeat it, its capabilities are refreshed on
+provider and extension changes, and whenever `POST /nodes/local` is called.
+
+## Health is one number, composed from several
+
+The scheduler needs a single comparable quantity, so health is 0..1. It is
+built from four signals, and how they combine is the interesting part:
+
+```
+health = (0.5·resourceHeadroom + 0.3·spareConcurrency + 0.2·reliability) × freshness
+```
+
+Three are weighted and summed because each can be poor without making a node
+useless. Freshness **multiplies** because a node that has gone quiet is not
+partially healthy — it is *unknown*, and unknown has to decay toward zero.
+Summing it in would put a floor under every score, and a machine pinned at 98%
+CPU with a full queue would still read as healthy purely because it was
+answering the phone.
+
+## Placement: eligibility, then preference
+
+Two stages, in that order, never merged.
+
+**Eligibility** is a set of hard predicates: trust, status, quarantine, drain,
+concurrency ceiling, required capabilities, hardware minimums, labels, region,
+cost ceiling, pinning. A node either satisfies them or it does not.
+
+**Preference** is a weighted score among the survivors:
+
+| factor | weight | what it measures |
+|---|---|---|
+| health | 0.30 | the composite above |
+| capacity | 0.25 | how much of its concurrency is free |
+| latency | 0.15 | smoothed round-trip time |
+| hardware | 0.12 | CPU/memory headroom, GPU presence |
+| capability | 0.10 | breadth beyond the minimum |
+| cost | 0.08 | hourly running cost |
+
+Keeping the stages apart is what makes a placement explainable. A node that
+was never eligible is reported as *rejected, with a reason* — not quietly
+scored zero so it merely looks like it lost. `POST /distributed/plan` returns
+the ranked candidates, the per-factor breakdown and every rejection reason,
+without running anything:
+
+```
+Chose home-gpu at 0.8123 on health 0.94, capacity 1 (ahead of control-plane by 0.041)
+rejected: edge-pi — missing capability PROVIDER:OPENAI
+          vps-2   — trust is UNVERIFIED
+```
+
+The scheduler's candidate pool deliberately includes nodes it will refuse.
+Filtering them out in SQL would remove them from that report, and an operator
+asking why their machine is idle would be told nothing at all.
+
+## Transparent worker routing
+
+`DistributedWorkerRouter` installs itself as a callback on the worker runtime
+at startup and answers one question per execution: here, or somewhere else?
+
+Returning `null` means "here" and the original in-process path runs untouched.
+That covers three cases that genuinely mean the same thing — there is no
+fleet, the fleet chose this machine, or the fleet could not choose at all. The
+last is a deliberate choice: a scheduling problem degrades to exactly the
+behaviour the system had before Phase 4, rather than stalling work that could
+have run. A worker *pinned* to an unavailable node is the exception, and
+errors rather than silently running elsewhere.
+
+The callback is also what avoids a dependency cycle: the distributed layer
+needs the worker runtime to do the executing, and worker execution needs to be
+routable, so neither imports the other.
+
+## Tasks outlive attempts
+
+A `DistributedTask` belongs to the organization and survives any particular
+machine. An *attempt* on a node is disposable. That distinction is what lets a
+node disappear mid-execution without the caller ever learning about it.
+
+The four queues — incoming, active, completed, failed — are the operator's
+model; a separate `status` drives the coordinator. Priority is applied at
+selection time rather than by keeping four ordered structures, because a
+task's priority can change and its position should change with it. Ordering is
+priority band first, then age, so nothing starves within a band.
+
+- **Leases.** Assignment takes out a deadline by which the node must report
+  back. Nothing asks a node whether it is alive; silence past the deadline is
+  answer enough, and the work is placed elsewhere.
+- **Retries.** Backoff doubles per attempt, and the failed node is excluded
+  from the next placement. The transport's judgement about whether a failure
+  was *about the node* or *about the work* is honoured — retrying malformed
+  work on a fresh machine just wastes another machine.
+- **Migration.** A task keeps its identity, increments a visible counter and
+  records where it came from. A task that has bounced four times is a signal
+  about the work, not the fleet.
+- **Rebalancing.** Only *queued* work moves. Interrupting running work to even
+  out a graph costs more than the imbalance does, and the numbers that would
+  justify it are the least reliable ones — a node reports its own load.
+- **Idempotency keys.** Resubmission is safe. This matters more here than in a
+  single process, because a caller that times out genuinely cannot tell
+  whether its request arrived.
+
+## Failure is detected by silence
+
+Two silences are watched, and both are treated as loss rather than delay: a
+node that stops heartbeating, and a task whose lease runs out. Occasionally
+that is wrong and the node was merely slow — `holdsValidLease` is what makes
+being wrong harmless, refusing a result from a node whose work has already
+been given to someone else.
+
+Three consecutive dispatch failures quarantine a node. One failure is noise;
+three in a row is a property of the machine, and continuing to send it work
+converts one sick node into a fleet-wide failure rate. Quarantine is a
+cooling-off period, not a verdict: it lifts automatically, and the node returns
+`DEGRADED` — eligible again, but having to earn its score back.
+
+## Distributed memory
+
+Four scopes, distinguished by *authority* rather than by where bytes live:
+
+| scope | who may write | replicated |
+|---|---|---|
+| `LOCAL` | one node, about itself | no |
+| `SHARED` | any node in the organization | yes |
+| `CACHED` | a node's copy of a shared record | no — and always suspect |
+| `GLOBAL` | the control plane | read-only to nodes |
+
+Replication is an append-only op log, not a state broadcast. That one choice
+gives incremental sync (read past your cursor), offline tolerance (your cursor
+stops moving), conflict evidence (the losing write is still there) and
+recovery (replay from where you stopped) — without four separate mechanisms.
+Recovery is an ordinary pull that happens to return a lot, which keeps the
+rarely-exercised path identical to the constantly-exercised one.
+
+Conflicts are resolved by vector clock, in order:
+
+1. Nothing here yet → take it.
+2. Incoming descends from ours → fast-forward.
+3. Ours descends from incoming → the sender is behind. Marked `SUPERSEDED`,
+   not `CONFLICT`: no information was lost.
+4. Neither descends from the other → genuine concurrent write. Resolved
+   deterministically (version, then timestamp, then node id) with **both**
+   versions kept in the log.
+
+Determinism matters more than the specific rule. Node id is the last resort
+precisely because it is arbitrary — at that point what matters is not which
+write is better but that every node picks the same one.
+
+Reads of a shared record prefer a fresh node-local cache and *skip* a stale
+one rather than returning it with a caveat, because a caller that must not act
+on old data cannot act on a caveat either.
+
+## Federation: nothing is shared by default
+
+Two organizations that have not exchanged a grant are strangers with no more
+access to each other than the public internet has. A grant names its resources
+explicitly (`nodes:execute`, `nodes:read`, `memory:read`, `memory:write`,
+`knowledge:read`, `workers:invoke`), may be narrowed to specific nodes, carries
+a concurrency ceiling so a peer cannot starve the owner, and is revocable at
+any moment by either side — effective immediately, not after borrowed work
+finishes.
+
+A grant starts `PENDING` and confers nothing until the peer **accepts**, so an
+organization cannot be enrolled into a federation it did not agree to. Grants
+are one-directional; mutual sharing is two grants, which costs one call and
+buys the guarantee that accepting help never obliges you to give any.
+
+`federation_grants` is the one table visible to two tenants, and its RLS policy
+says so precisely: readable by both parties, writable only by the issuer.
+Access is something you are given, never something you can award yourself.
+
+## Node security
+
+Every message in either direction carries an HMAC-SHA256 signature over
+`<timestamp>.<body>`. Against a bearer token that buys three things: the body
+cannot be altered in flight, a captured request expires, and the node can
+verify the control plane just as the control plane verifies the node.
+
+The timestamp is *inside* the signed material, so a valid signature cannot be
+paired with a fresh timestamp to extend its life.
+
+Unlike API keys, node secrets are stored — sealed with AES-256-GCM under
+`CREDENTIAL_ENCRYPTION_KEY` — because authentication here is mutual: the
+control plane must be able to *produce* a signature, not merely compare one.
+
+Keys are versioned. Rotation issues a new version and leaves the old one
+verifying for fifteen minutes, so a node holding in-flight work finishes it and
+picks up the new secret on its next heartbeat. Revoking trust is the separate,
+immediate action, and revokes every key at once.
+
+The organization comes out of the key, never out of the request body. A node
+cannot name the tenant it wants to act on; it can only prove which one it
+belongs to.
+
+## The simulated transport is not a mock
+
+`SimulatedNodeTransport` stands in for a machine that is not there, and it is
+registered like any other transport rather than hidden behind a test flag.
+Every distributed behaviour worth having — placement, migration, lease expiry,
+quarantine, sync lag — is invisible on one machine and expensive to demonstrate
+on several. This makes them exercisable in-process and *deterministically*: it
+simulates latency and fails on command via `metadata.simulate`, so a test can
+assert that a node going bad moves its work somewhere else rather than hoping
+it would.
+
+Crucially it runs the same handlers a real node would. What is simulated is the
+machine and the network — never the work.
+
+The HTTP transport talks to `/nodes/agent/*` in this same codebase, so a node
+is not a separate product with its own release cycle: it is this server told to
+act as capacity, and the two halves cannot drift apart.
+
+## Testing
+
+```bash
+npm test                        # 223 unit tests, 12 suites
+node test/phase1-validation.js  # 57 checks
+node test/phase2-validation.js  # 58 checks
+node test/phase3-validation.js  # 74 checks
+node test/phase4-validation.js  # 112 checks
+```
+
+Phase 4's suite covers all ten required checks against live Postgres and Redis,
+including the negative cases: an unverified node never being scheduled, a
+remote node registered without an endpoint, duplicate slugs, unsatisfiable
+requirements, work no node can run, wrongly-signed and unsigned and tampered
+node requests, an unknown node, a stale sync write, two genuinely concurrent
+writes, a pending grant conferring nothing, a grant naming an unknown resource,
+a grant that shares nothing, revocation taking effect immediately, and
+cross-organization access to every new surface.
+
+Latest run: **112/112 Phase 4, 74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1,
+223/223 unit tests.** 197 documented API operations across 162 paths;
+40/40 tenant tables RLS-protected.
+
+## What Phase 4 deliberately does not do
+
+- **No second physical machine in this environment.** The HTTP transport and
+  the agent protocol are implemented on both ends and signature verification is
+  exercised over real HTTP against the running server, but a genuine
+  machine-to-machine deployment across a network has not been run here. Fleet
+  orchestration is proven end to end through the simulated transport.
+- **No mesh.** Nodes talk to the control plane, not to each other. Peer-to-peer
+  gossip would buy resilience at the cost of the single-source-of-truth
+  property the rest of PRISM-X depends on.
+- **No automatic cross-organization scheduling.** Federation makes a peer's
+  nodes *borrowable*; deciding to borrow one is still an explicit act. Silent
+  spillover into another organization's hardware is not a behaviour anyone
+  should get by accident.
+- **No transport-level encryption of its own.** Signing gives integrity and
+  authenticity; confidentiality is TLS's job, and terminating it here would
+  mean shipping a worse implementation of something the platform already does.
+- **No node installer or agent packaging.** Registering a node assumes a
+  PRISM-X instance is already running on the machine. Provisioning is an
+  operations concern, not an API one.

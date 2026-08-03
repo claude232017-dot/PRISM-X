@@ -74,10 +74,29 @@ const BETA = {
   const alphaToken = alphaLogin?.accessToken;
   const alphaOrg = alphaLogin?.organization?.id;
   check('login returns tokens, role and permissions', Boolean(alphaToken && alphaOrg));
+  // Later phases add resources and therefore permissions, so the assertion
+  // is that an owner holds every Phase 1 permission — not that the catalogue
+  // has stopped growing.
+  const PHASE1_PERMISSIONS = [
+    'organization:read', 'organization:update', 'organization:delete',
+    'member:read', 'member:invite', 'member:update', 'member:remove',
+    'worker:read', 'worker:create', 'worker:update', 'worker:delete',
+    'mission:read', 'mission:create', 'mission:update', 'mission:delete', 'mission:execute',
+    'knowledge:read', 'knowledge:create', 'knowledge:update', 'knowledge:delete',
+    'provider:read', 'provider:create', 'provider:update', 'provider:delete',
+    'integration:read', 'integration:create', 'integration:update', 'integration:delete',
+    'extension:read', 'extension:install', 'extension:update', 'extension:delete',
+    'event:read', 'audit:read', 'analytics:read',
+    'storage:read', 'storage:write', 'storage:delete',
+  ];
+  const missingForOwner = PHASE1_PERMISSIONS.filter(
+    (p) => !(alphaLogin?.permissions ?? []).includes(p),
+  );
   check(
     'login resolves OWNER role with full permission set',
-    alphaLogin?.role === 'OWNER' && alphaLogin?.permissions?.length === 38,
-    `${alphaLogin?.role}, ${alphaLogin?.permissions?.length} permissions`,
+    alphaLogin?.role === 'OWNER' && missingForOwner.length === 0,
+    `${alphaLogin?.role}, ${alphaLogin?.permissions?.length} permissions` +
+      (missingForOwner.length ? `, missing ${missingForOwner.join(', ')}` : ''),
   );
 
   const me = await api('GET', '/auth/me', { token: alphaToken });

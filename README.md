@@ -674,6 +674,26 @@ pluggable adapters (internal, n8n, Make.com, REST), so PRISM-X decides *what*
 should happen and external platforms decide *how* — and adopting one later is a
 step type, not a rewrite.
 
+**Phase 4 — Distributed Intelligence** turns one server into a fleet. Any
+machine — a laptop, a home server, a VPS, a GPU box, a Raspberry Pi — can
+register as a node, report its own hardware and capabilities, and start taking
+work. A scheduler places each execution on whichever node currently fits
+(health, spare capacity, latency, hardware, capabilities, cost), and explains
+its reasoning on request; leases and heartbeats move work off machines that go
+quiet; memory replicates through an append-only op log with vector-clock
+conflict resolution; and node-to-node traffic is mutually authenticated with
+signed, replay-resistant requests and overlapping key rotation.
+
+Two properties are load-bearing. **The control plane stays the single source of
+truth** — nodes are capacity and decide nothing, so an under-equipped or
+compromised machine can refuse work but cannot make a decision. And **nothing
+is shared between organizations by default**: cross-organization access needs an
+explicit, resource-scoped, revocable grant that the receiving side must accept.
+
+Adding capacity is one call. Registering a node is the whole of it — discovery,
+measurement and rescheduling follow, with no reconfiguration anywhere else.
+
 See `backend/README.md` for architecture, the decisions behind it, and how to
-run it. Verified against live PostgreSQL and Redis with 123 unit tests and
-three end-to-end suites: 57 (Phase 1), 58 (Phase 2) and 74 (Phase 3) checks.
+run it. Verified against live PostgreSQL and Redis with 223 unit tests and four
+end-to-end suites: 57 (Phase 1), 58 (Phase 2), 74 (Phase 3) and 112 (Phase 4)
+checks.

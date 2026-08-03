@@ -119,6 +119,42 @@ export const DomainEvent = {
   DeadLetterRecorded: 'deadletter.recorded',
   ApiKeyCreated: 'apikey.created',
   ApiKeyRevoked: 'apikey.revoked',
+
+  // --- Phase 4: distributed intelligence ---------------------------
+  NodeRegistered: 'node.registered',
+  NodeOnline: 'node.online',
+  NodeOffline: 'node.offline',
+  NodeDegraded: 'node.degraded',
+  NodeQuarantined: 'node.quarantined',
+  NodeRecovered: 'node.recovered',
+  NodeDraining: 'node.draining',
+  NodeDecommissioned: 'node.decommissioned',
+  NodeHeartbeatReceived: 'node.heartbeat',
+  NodeCapabilitiesDiscovered: 'node.capabilities_discovered',
+  NodeKeyRotated: 'node.key_rotated',
+  NodeTrustChanged: 'node.trust_changed',
+  NodeAuthFailed: 'node.auth_failed',
+
+  DistributedTaskQueued: 'distributed.task_queued',
+  DistributedTaskAssigned: 'distributed.task_assigned',
+  DistributedTaskStarted: 'distributed.task_started',
+  DistributedTaskCompleted: 'distributed.task_completed',
+  DistributedTaskFailed: 'distributed.task_failed',
+  DistributedTaskMigrated: 'distributed.task_migrated',
+  DistributedTaskDeadLettered: 'distributed.task_dead_lettered',
+  ClusterRebalanced: 'cluster.rebalanced',
+
+  MemoryShardWritten: 'memory.shard_written',
+  MemoryShardDeleted: 'memory.shard_deleted',
+  MemorySyncCompleted: 'memory.sync_completed',
+  MemorySyncConflict: 'memory.sync_conflict',
+  MemorySyncRecovered: 'memory.sync_recovered',
+
+  FederationGranted: 'federation.granted',
+  FederationAccepted: 'federation.accepted',
+  FederationRevoked: 'federation.revoked',
+  FederationAccessDenied: 'federation.access_denied',
+  FederationTaskBorrowed: 'federation.task_borrowed',
 } as const;
 
 export type DomainEventName = (typeof DomainEvent)[keyof typeof DomainEvent];

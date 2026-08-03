@@ -8,7 +8,10 @@ import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  // `rawBody` keeps the exact request bytes alongside the parsed body.
+  // Node-to-node signatures cover those bytes, and re-serializing a parsed
+  // object would change key order or spacing and fail a valid signature.
+  const app = await NestFactory.create(AppModule, { bufferLogs: false, rawBody: true });
   const config = app.get(ConfigService);
 
   const apiPrefix = config.get<string>('apiPrefix', 'api/v1');
@@ -76,6 +79,11 @@ async function bootstrap(): Promise<void> {
         .addTag('Analytics', 'Aggregate metrics')
         .addTag('Storage', 'File storage')
         .addTag('Queues', 'Background job queues')
+        .addTag('Nodes', 'The fleet of machines PRISM-X executes on')
+        .addTag('Distributed Execution', 'Placing, migrating and monitoring work across nodes')
+        .addTag('Distributed Memory', 'Replicated state and its synchronisation')
+        .addTag('Federation', 'Sharing resources between organizations')
+        .addTag('Node Agent', 'Machine-to-machine endpoints, authenticated by node signature')
         .addTag('Health', 'Liveness and dependencies')
         .build(),
     );

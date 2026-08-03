@@ -29,6 +29,10 @@ import { UsageModule } from './usage/usage.module';
 // Phase 3 — automation and integration platform
 import { AutomationModule } from './automation/automation.module';
 
+// Phase 4 — distributed intelligence
+import { NodesModule } from './nodes/nodes.module';
+import { DistributedModule } from './distributed/distributed.module';
+
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
@@ -70,6 +74,11 @@ import { RequestContextMiddleware } from './shared/context/request-context.middl
 
     // Phase 3 depends on missions, workers and integrations being present.
     AutomationModule,
+
+    // Phase 4 sits above the execution layer: the fleet first, then the
+    // scheduling and replication that operate on it.
+    NodesModule,
+    DistributedModule,
   ],
   providers: [
     // Order matters: authentication runs before permission checks.
