@@ -33,35 +33,35 @@ model Organization {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  memberships  Membership[]
-  workers      Worker[]
-  missions     Mission[]
-  tasks        Task[]
-  knowledge    Knowledge[]
-  providers    Provider[]
-  integrations Integration[]
-  extensions   Extension[]
-  events       Event[]
-  auditLogs    AuditLog[]
-  credentials  Credential[]
-  roles        Role[]
+  memberships   Membership[]
+  workers       Worker[]
+  missions      Mission[]
+  tasks         Task[]
+  knowledge     Knowledge[]
+  providers     Provider[]
+  integrations  Integration[]
+  extensions    Extension[]
+  events        Event[]
+  auditLogs     AuditLog[]
+  credentials   Credential[]
+  roles         Role[]
   memories      Memory[]
   executionLogs ExecutionLog[]
   toolCalls     ToolCall[]
   usageDaily    UsageDaily[]
 
   // Phase 3
-  workflows        Workflow[]
-  workflowVersions WorkflowVersion[]
-  workflowRuns     WorkflowRun[]
-  workflowStepRuns WorkflowStepRun[]
-  triggers         Trigger[]
-  approvals        ApprovalRequest[]
-  notifications    Notification[]
-  apiKeys          ApiKey[]
-  webhookEndpoints WebhookEndpoint[]
+  workflows         Workflow[]
+  workflowVersions  WorkflowVersion[]
+  workflowRuns      WorkflowRun[]
+  workflowStepRuns  WorkflowStepRun[]
+  triggers          Trigger[]
+  approvals         ApprovalRequest[]
+  notifications     Notification[]
+  apiKeys           ApiKey[]
+  webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
-  deadLetters      DeadLetter[]
+  deadLetters       DeadLetter[]
 
   // Phase 4
   nodes            Node[]
@@ -76,6 +76,16 @@ model Organization {
   federationGrants FederationGrant[] @relation("FederationOwner")
   /// Grants other organizations issued to this one.
   federationAccess FederationGrant[] @relation("FederationPeer")
+
+  // Phase 5
+  missionReviews       MissionReview[]
+  performanceSnapshots PerformanceSnapshot[]
+  recommendations      Recommendation[]
+  workerProfiles       WorkerProfile[]
+  detectedPatterns     DetectedPattern[]
+  learningEntries      LearningEntry[]
+  knowledgeAudits      KnowledgeAudit[]
+  experiments          Experiment[]
 
   @@index([deletedAt])
   @@map("organizations")
@@ -196,20 +206,20 @@ model Worker {
 
   // --- Phase 2: executable worker identity -------------------------
   /// Prepended to every execution. The worker's standing instructions.
-  systemPrompt String?
+  systemPrompt    String?
   /// Human-readable competencies, surfaced to the planner.
-  skills       String[] @default([])
+  skills          String[] @default([])
   /// Overrides the provider's default model when set.
-  defaultModel String?
-  temperature  Float    @default(0.7)
+  defaultModel    String?
+  temperature     Float    @default(0.7)
   /// Tool keys this worker may invoke. Empty means no tool access.
   toolPermissions String[] @default([])
 
   // Execution limits — the guardrails that stop a runaway worker from
   // looping forever or spending without bound.
-  maxIterations Int    @default(5)
-  maxTokens     Int    @default(4096)
-  timeoutMs     Int    @default(120000)
+  maxIterations Int     @default(5)
+  maxTokens     Int     @default(4096)
+  timeoutMs     Int     @default(120000)
   costLimitUsd  Float?
   /// When false, a failure on this worker's provider is not silently retried
   /// on a different one — used to pin a worker to a specific provider.
@@ -234,6 +244,7 @@ model Worker {
   knowledge     Knowledge[]
   memories      Memory[]
   executionLogs ExecutionLog[]
+  profile       WorkerProfile?
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -257,19 +268,20 @@ model Mission {
 
   // --- Phase 2: execution bookkeeping ------------------------------
   /// Plan produced by the planning phase: ordered steps and rationale.
-  plan          Json?
+  plan         Json?
   /// Why the mission is WAITING, when it is.
-  waitReason    String?
-  retryCount    Int      @default(0)
-  maxRetries    Int      @default(2)
+  waitReason   String?
+  retryCount   Int       @default(0)
+  maxRetries   Int       @default(2)
   /// Rolled up from this mission's execution logs.
-  totalCostUsd  Float    @default(0)
-  totalTokens   Int      @default(0)
-  archivedAt    DateTime?
+  totalCostUsd Float     @default(0)
+  totalTokens  Int       @default(0)
+  archivedAt   DateTime?
 
   organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   tasks         Task[]
   executionLogs ExecutionLog[]
+  review        MissionReview?
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -302,9 +314,9 @@ model Task {
   estimatedSeconds Int?
   /// The worker's final answer, kept separate from structured `result`.
   output           String?
-  costUsd          Float  @default(0)
-  tokensUsed       Int    @default(0)
-  maxRetries       Int    @default(2)
+  costUsd          Float     @default(0)
+  tokensUsed       Int       @default(0)
+  maxRetries       Int       @default(2)
   /// When a retry becomes eligible, for exponential backoff.
   nextAttemptAt    DateTime?
 
@@ -335,8 +347,9 @@ model Knowledge {
   updatedAt      DateTime      @updatedAt
   deletedAt      DateTime?
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  worker       Worker?      @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  worker       Worker?          @relation(fields: [workerId], references: [id], onDelete: SetNull)
+  audits       KnowledgeAudit[]
 
   @@index([organizationId])
   @@index([organizationId, type])
@@ -371,15 +384,15 @@ model Provider {
   rateLimitTpm Int?
 
   // Rolling health + usage, updated by the Provider Manager.
-  avgLatencyMs  Int?
-  totalRequests Int      @default(0)
-  failedRequests Int     @default(0)
-  totalTokens   Int      @default(0)
-  totalCostUsd  Float    @default(0)
-  lastErrorAt   DateTime?
-  lastError     String?
+  avgLatencyMs   Int?
+  totalRequests  Int       @default(0)
+  failedRequests Int       @default(0)
+  totalTokens    Int       @default(0)
+  totalCostUsd   Float     @default(0)
+  lastErrorAt    DateTime?
+  lastError      String?
   /// Set when the circuit breaker opens; requests are refused until it passes.
-  cooldownUntil DateTime?
+  cooldownUntil  DateTime?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -406,26 +419,26 @@ model Integration {
 
   // --- Phase 3: connector metadata ---------------------------------
   /// Broad service category, for grouping and for policy.
-  category   IntegrationCategory @default(CUSTOM_API)
+  category    IntegrationCategory @default(CUSTOM_API)
   /// How this integration authenticates: api_key | bearer | basic | oauth2 | none.
-  authMethod String              @default("api_key")
+  authMethod  String              @default("api_key")
   /// Operations this integration is permitted to perform, e.g. ["send","read"].
   /// Empty means the connector's own default set.
-  permissions String[]           @default([])
+  permissions String[]            @default([])
 
   // Health and usage, updated by the Integration Manager.
-  healthy        Boolean   @default(false)
-  lastHealthAt   DateTime?
-  lastError      String?
-  callCount      Int       @default(0)
-  failureCount   Int       @default(0)
-  avgLatencyMs   Int?
+  healthy       Boolean   @default(false)
+  lastHealthAt  DateTime?
+  lastError     String?
+  callCount     Int       @default(0)
+  failureCount  Int       @default(0)
+  avgLatencyMs  Int?
   /// Set when the circuit breaker trips; calls are refused until it passes.
-  cooldownUntil  DateTime?
+  cooldownUntil DateTime?
 
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  deletedAt      DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -500,7 +513,7 @@ model AuditLog {
 /// Encrypted secret material (API keys, tokens). `value` is ciphertext
 /// produced by the CryptoService — plaintext never reaches the database.
 model Credential {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   name           String
   type           String
@@ -509,8 +522,8 @@ model Credential {
   authTag        String
   lastUsedAt     DateTime?
   expiresAt      DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   provider     Provider?
@@ -576,17 +589,17 @@ model ExecutionLog {
 
   /// Truncated at the edge — full prompts can be enormous and are not needed
   /// for audit, only for diagnosis.
-  prompt         String?
-  outputSummary  String?
-  promptTokens     Int   @default(0)
-  completionTokens Int   @default(0)
-  totalTokens      Int   @default(0)
-  costUsd          Float @default(0)
-  latencyMs        Int   @default(0)
+  prompt           String?
+  outputSummary    String?
+  promptTokens     Int     @default(0)
+  completionTokens Int     @default(0)
+  totalTokens      Int     @default(0)
+  costUsd          Float   @default(0)
+  latencyMs        Int     @default(0)
   /// How many provider attempts this execution consumed (retries included).
-  attempts         Int   @default(1)
+  attempts         Int     @default(1)
   error            String?
-  metadata         Json  @default("{}")
+  metadata         Json    @default("{}")
 
   startedAt  DateTime  @default(now())
   finishedAt DateTime?
@@ -644,9 +657,9 @@ model UsageDaily {
   /// Postgres treats NULLs as distinct in a unique index: a nullable slice key
   /// would make the constraint below stop deduplicating and the rollup would
   /// grow a new row per execution instead of accumulating.
-  providerId   String @default("")
-  model        String @default("")
-  workerId     String @default("")
+  providerId   String        @default("")
+  model        String        @default("")
+  workerId     String        @default("")
   providerKind ProviderKind?
 
   requests         Int   @default(0)
@@ -789,22 +802,22 @@ enum ExtensionStatus {
 /// A workflow definition. The mutable head; executable content lives in
 /// versions so a running instance is never changed underneath itself.
 model Workflow {
-  id             String         @id @default(cuid())
-  organizationId String
-  name           String
-  description    String?
-  status         WorkflowStatus @default(DRAFT)
+  id              String         @id @default(cuid())
+  organizationId  String
+  name            String
+  description     String?
+  status          WorkflowStatus @default(DRAFT)
   /// Points at the version new runs will use.
-  activeVersionId String?       @unique
+  activeVersionId String?        @unique
   /// Marks this as a reusable template rather than an operational workflow.
-  isTemplate     Boolean        @default(false)
-  category       String?
-  tags           String[]       @default([])
+  isTemplate      Boolean        @default(false)
+  category        String?
+  tags            String[]       @default([])
 
   // Reliability envelope applied to every run.
-  maxConcurrentRuns Int  @default(5)
-  timeoutMs         Int  @default(300000)
-  maxRetries        Int  @default(2)
+  maxConcurrentRuns Int @default(5)
+  timeoutMs         Int @default(300000)
+  maxRetries        Int @default(2)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -815,6 +828,7 @@ model Workflow {
   activeVersion WorkflowVersion?  @relation("active_version", fields: [activeVersionId], references: [id], onDelete: SetNull)
   runs          WorkflowRun[]
   triggers      Trigger[]
+  experiments   Experiment[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -827,21 +841,21 @@ model Workflow {
 /// old one: a run in flight must keep executing the definition it started with,
 /// and an audit needs to show what actually ran.
 model WorkflowVersion {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   workflowId     String
   version        Int
   /// Ordered step graph. Shape validated by the engine, not the database.
-  steps          Json     @default("[]")
+  steps          Json      @default("[]")
   /// Declared inputs with defaults, used to validate a run's payload.
-  inputSchema    Json     @default("{}")
+  inputSchema    Json      @default("{}")
   notes          String?
   publishedAt    DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workflow     Workflow     @relation("workflow_versions", fields: [workflowId], references: [id], onDelete: Cascade)
-  activeFor    Workflow?    @relation("active_version")
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow     Workflow      @relation("workflow_versions", fields: [workflowId], references: [id], onDelete: Cascade)
+  activeFor    Workflow?     @relation("active_version")
   runs         WorkflowRun[]
 
   @@unique([workflowId, version])
@@ -869,20 +883,20 @@ model WorkflowRun {
   awaitingApprovalId String?
   currentStepId      String?
 
-  attempts   Int @default(1)
+  attempts       Int     @default(1)
   /// Caller-supplied key; a repeat within the dedupe window returns this run
   /// instead of starting another.
   idempotencyKey String?
 
-  costUsd      Float @default(0)
-  totalTokens  Int   @default(0)
-  durationMs   Int   @default(0)
-  stepsTotal   Int   @default(0)
-  stepsRun     Int   @default(0)
+  costUsd     Float @default(0)
+  totalTokens Int   @default(0)
+  durationMs  Int   @default(0)
+  stepsTotal  Int   @default(0)
+  stepsRun    Int   @default(0)
 
-  startedAt   DateTime  @default(now())
-  finishedAt  DateTime?
-  resumedAt   DateTime?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  resumedAt  DateTime?
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   workflow     Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
@@ -936,18 +950,18 @@ model Trigger {
   enabled        Boolean     @default(true)
 
   /// Domain event name for EVENT triggers.
-  eventName String?
+  eventName       String?
   /// Cron expression for SCHEDULE triggers.
-  cron      String?
+  cron            String?
   /// Fixed interval alternative to cron, in seconds.
   intervalSeconds Int?
   /// Random path segment for WEBHOOK triggers — unguessable by design.
-  webhookPath   String? @unique
+  webhookPath     String? @unique
   /// HMAC secret for verifying inbound webhook signatures.
-  webhookSecret String?
+  webhookSecret   String?
 
   /// Optional predicate over the event/webhook payload.
-  conditions Json @default("{}")
+  conditions   Json @default("{}")
   /// Maps the incoming payload onto workflow inputs.
   inputMapping Json @default("{}")
 
@@ -971,17 +985,17 @@ model Trigger {
 
 /// A decision a human must make before a suspended run continues.
 model ApprovalRequest {
-  id             String         @id @default(cuid())
-  organizationId String
-  runId          String?
-  stepId         String?
-  title          String
-  reason         String
+  id              String         @id @default(cuid())
+  organizationId  String
+  runId           String?
+  stepId          String?
+  title           String
+  reason          String
   /// What the system would do if approved.
   suggestedAction String?
-  context        Json           @default("{}")
-  riskLevel      RiskLevel      @default(MEDIUM)
-  status         ApprovalStatus @default(PENDING)
+  context         Json           @default("{}")
+  riskLevel       RiskLevel      @default(MEDIUM)
+  status          ApprovalStatus @default(PENDING)
 
   requestedById String?
   decidedById   String?
@@ -990,10 +1004,10 @@ model ApprovalRequest {
   decision      String?
   comment       String?
 
-  expiresAt  DateTime?
-  decidedAt  DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  expiresAt DateTime?
+  decidedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   run          WorkflowRun? @relation(fields: [runId], references: [id], onDelete: Cascade)
@@ -1005,7 +1019,7 @@ model ApprovalRequest {
 
 /// A notification, recorded whether or not a channel delivered it.
 model Notification {
-  id             String             @id @default(cuid())
+  id             String               @id @default(cuid())
   organizationId String
   userId         String?
   category       String
@@ -1013,10 +1027,10 @@ model Notification {
   subject        String
   body           String
   /// Channels attempted, with per-channel outcome.
-  deliveries     Json               @default("[]")
-  metadata       Json               @default("{}")
+  deliveries     Json                 @default("[]")
+  metadata       Json                 @default("{}")
   readAt         DateTime?
-  createdAt      DateTime           @default(now())
+  createdAt      DateTime             @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -1030,21 +1044,21 @@ model Notification {
 /// Only a hash is stored; the plaintext is shown once at creation and is
 /// unrecoverable afterwards.
 model ApiKey {
-  id             String    @id @default(cuid())
-  organizationId String
-  name           String
+  id                 String    @id @default(cuid())
+  organizationId     String
+  name               String
   /// SHA-256 of the full key. Lookup is by `prefix`, verification by hash.
-  keyHash        String    @unique
+  keyHash            String    @unique
   /// First characters, stored plainly so a key can be identified in a list.
-  prefix         String
-  scopes         String[]  @default([])
-  rateLimitPerMinute Int   @default(120)
-  lastUsedAt     DateTime?
-  requestCount   Int       @default(0)
-  expiresAt      DateTime?
-  revokedAt      DateTime?
-  createdById    String?
-  createdAt      DateTime  @default(now())
+  prefix             String
+  scopes             String[]  @default([])
+  rateLimitPerMinute Int       @default(120)
+  lastUsedAt         DateTime?
+  requestCount       Int       @default(0)
+  expiresAt          DateTime?
+  revokedAt          DateTime?
+  createdById        String?
+  createdAt          DateTime  @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -1068,11 +1082,11 @@ model WebhookEndpoint {
 
   /// Consecutive failures. Past a threshold the endpoint is disabled so a dead
   /// URL stops consuming delivery capacity.
-  failureStreak Int      @default(0)
+  failureStreak Int       @default(0)
   lastSuccessAt DateTime?
   lastFailureAt DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -1083,19 +1097,19 @@ model WebhookEndpoint {
 }
 
 model WebhookDelivery {
-  id             String          @id @default(cuid())
+  id             String         @id @default(cuid())
   organizationId String
   endpointId     String
   eventName      String
-  payload        Json            @default("{}")
-  status         DeliveryStatus  @default(PENDING)
-  attempts       Int             @default(0)
+  payload        Json           @default("{}")
+  status         DeliveryStatus @default(PENDING)
+  attempts       Int            @default(0)
   responseStatus Int?
   responseBody   String?
   error          String?
   nextAttemptAt  DateTime?
   deliveredAt    DateTime?
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime       @default(now())
 
   organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   endpoint     WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
@@ -1107,16 +1121,16 @@ model WebhookDelivery {
 
 /// Work that exhausted its retries. Nothing fails silently — it lands here.
 model DeadLetter {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   source         String
   reference      String?
   reason         String
-  payload        Json     @default("{}")
-  attempts       Int      @default(0)
+  payload        Json      @default("{}")
+  attempts       Int       @default(0)
   resolvedAt     DateTime?
   resolvedById   String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
@@ -1231,8 +1245,8 @@ model Node {
   /// control plane's own in-process node, which needs no network hop.
   endpointUrl String?
   /// True for the node this process is running as. Exactly one per org.
-  isLocal     Boolean @default(false)
-  region      String  @default("default")
+  isLocal     Boolean  @default(false)
+  region      String   @default("default")
   /// Agent build reported at registration; used to gate protocol features.
   version     String?
   /// Free-form scheduling hints, e.g. "gpu", "eu-west", "cheap".
@@ -1417,8 +1431,8 @@ model DistributedTask {
   previousNodeId String?
   migrations     Int     @default(0)
 
-  attempts    Int     @default(0)
-  maxAttempts Int     @default(3)
+  attempts       Int     @default(0)
+  maxAttempts    Int     @default(3)
   /// Caller-supplied dedupe key. Re-submitting the same key returns the
   /// original task instead of running the work twice.
   idempotencyKey String?
@@ -1475,14 +1489,14 @@ model MemoryShard {
   /// `usage_daily`'s slice keys).
   nodeId         String      @default("")
 
-  value    Json   @default("{}")
-  version  Int    @default(1)
+  value       Json   @default("{}")
+  version     Int    @default(1)
   /// SHA-256 of the canonical value, so a sync can detect drift without
   /// shipping the whole payload.
-  checksum String @default("")
+  checksum    String @default("")
   /// Per-node counters. Detects concurrent divergent writes that a single
   /// version number would silently collapse.
-  vectorClock Json @default("{}")
+  vectorClock Json   @default("{}")
 
   ownerNodeId      String?
   lastWriterNodeId String?
@@ -1566,29 +1580,29 @@ model NodeSyncState {
 /// grant naming a resource, a cross-organization request is refused. A grant
 /// is one-directional — mutual sharing is two grants.
 model FederationGrant {
-  id                  String           @id @default(cuid())
+  id                 String           @id @default(cuid())
   /// The organization that owns the resources and issues the grant.
-  organizationId      String
+  organizationId     String
   /// The organization being granted access.
-  peerOrganizationId  String
-  name                String?
-  status              FederationStatus @default(PENDING)
+  peerOrganizationId String
+  name               String?
+  status             FederationStatus @default(PENDING)
   /// Enumerated capabilities, e.g. "nodes:execute", "memory:read".
   /// Empty means nothing is shared, which is also the default.
-  resources           String[]         @default([])
+  resources          String[]         @default([])
   /// Narrows the grant to specific nodes. Empty means every eligible node.
-  allowedNodeIds      String[]         @default([])
+  allowedNodeIds     String[]         @default([])
   /// Ceiling on simultaneous borrowed tasks, so a peer cannot starve the owner.
-  maxConcurrentTasks  Int              @default(1)
-  activeTasks         Int              @default(0)
-  expiresAt           DateTime?
-  acceptedAt          DateTime?
-  revokedAt           DateTime?
-  createdById         String?
-  revokedById         String?
-  terms               Json             @default("{}")
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  maxConcurrentTasks Int              @default(1)
+  activeTasks        Int              @default(0)
+  expiresAt          DateTime?
+  acceptedAt         DateTime?
+  revokedAt          DateTime?
+  createdById        String?
+  revokedById        String?
+  terms              Json             @default("{}")
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
   organization Organization @relation("FederationOwner", fields: [organizationId], references: [id], onDelete: Cascade)
   peer         Organization @relation("FederationPeer", fields: [peerOrganizationId], references: [id], onDelete: Cascade)
@@ -1692,4 +1706,493 @@ enum FederationStatus {
   SUSPENDED
   REVOKED
   EXPIRED
+}
+
+// ------------------------------------------------------------
+// Phase 5: learning and optimization
+//
+// The tables below are the system's memory *of itself*: what it did, how
+// well it went, what that implies, and what it proposes doing differently.
+// They are deliberately separate from operational knowledge — a mission
+// review is not a document a worker should retrieve mid-task, and mixing
+// the two would let the system's opinions about its own performance leak
+// into the answers it gives users.
+//
+// Every table that carries a claim also carries `confidence` and
+// `sampleSize`. See src/learning/confidence.ts for why: a finding drawn
+// from three missions and one drawn from five hundred must not be
+// indistinguishable at the point of reading.
+// ------------------------------------------------------------
+
+/// A structured post-mortem, written automatically when a mission ends.
+///
+/// One per mission, permanently. The mission itself may be archived or its
+/// tasks pruned; the review is what survives, and it is the unit the rest of
+/// the Learning Engine reasons over.
+model MissionReview {
+  id             String @id @default(cuid())
+  organizationId String
+  missionId      String @unique
+
+  objective    String
+  outcome      ReviewOutcome
+  /// 0..1. Derived from task completion, retries, errors and budget
+  /// adherence — not from anyone's opinion.
+  successScore Float         @default(0)
+
+  completionMs     Int    @default(0)
+  /// Planner's estimate at the time, kept so drift is measurable.
+  estimatedMs      Int?
+  costUsd          Float  @default(0)
+  estimatedCostUsd Float?
+  totalTokens      Int    @default(0)
+
+  taskCount      Int @default(0)
+  tasksSucceeded Int @default(0)
+  tasksFailed    Int @default(0)
+  retryCount     Int @default(0)
+
+  /// How much a person had to step in: approvals answered, manual retries.
+  humanInterventions Int   @default(0)
+  humanMinutes       Float @default(0)
+
+  /// Error signatures encountered, deduplicated.
+  errors              String[] @default([])
+  /// Steps that took disproportionately long, with their share of the total.
+  bottlenecks         Json     @default("[]")
+  /// Things that could have been done and were not — unused parallelism,
+  /// skipped knowledge, cheaper providers that were available.
+  missedOpportunities Json     @default("[]")
+  /// Improvements proposed off the back of this one mission.
+  recommendations     Json     @default("[]")
+
+  /// Free-text summary, searchable.
+  summary    String
+  tags       String[] @default([])
+  confidence Float    @default(0)
+  sampleSize Int      @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mission      Mission      @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, outcome])
+  @@index([organizationId, createdAt])
+  @@map("mission_reviews")
+}
+
+/// A metric rollup for one subject over one period.
+///
+/// Trends are derived by comparing snapshots rather than by storing a
+/// "trend" column, because a trend is a relationship between measurements
+/// and storing it would let it drift out of agreement with the measurements
+/// it claims to summarise.
+model PerformanceSnapshot {
+  id             String        @id @default(cuid())
+  organizationId String
+  subject        MetricSubject
+  /// Worker/provider/workflow id, or the organization id for org-level rows.
+  subjectId      String
+  subjectLabel   String        @default("")
+  period         MetricPeriod  @default(DAY)
+  /// Start of the period. With `period` this is the natural key.
+  periodStart    DateTime
+
+  /// Attempts observed in the window. The denominator for every rate here.
+  samples      Int   @default(0)
+  successes    Int   @default(0)
+  failures     Int   @default(0)
+  /// Wilson lower bound of the success rate, not the raw proportion —
+  /// see confidence.ts for why a 3-for-3 record must not outrank 480-for-500.
+  successRate  Float @default(0)
+  observedRate Float @default(0)
+
+  avgDurationMs  Float @default(0)
+  p95DurationMs  Float @default(0)
+  avgCostUsd     Float @default(0)
+  totalCostUsd   Float @default(0)
+  totalTokens    Int   @default(0)
+  avgLatencyMs   Float @default(0)
+  retryRate      Float @default(0)
+  errorRate      Float @default(0)
+  /// 0..1 composite, meaningful only within a subject type.
+  qualityScore   Float @default(0)
+  /// Work completed per dollar. Zero when nothing was spent.
+  costEfficiency Float @default(0)
+
+  /// Subject-specific extras: automation coverage, spend by provider, etc.
+  detail     Json  @default("{}")
+  confidence Float @default(0)
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, subject, subjectId, period, periodStart])
+  @@index([organizationId])
+  @@index([organizationId, subject, periodStart])
+  @@map("performance_snapshots")
+}
+
+/// Something the system thinks should change.
+///
+/// A recommendation is inert. It carries a proposed change and the means to
+/// undo it, but applying it is a separate, human-gated act — see the
+/// `status` lifecycle and the human validation layer.
+model Recommendation {
+  id             String             @id @default(cuid())
+  organizationId String
+  kind           RecommendationKind
+  subject        MetricSubject
+  subjectId      String
+  subjectLabel   String             @default("")
+
+  title     String
+  /// Why the system believes this, in plain language.
+  reasoning String
+  /// The numbers behind it, so a reader can check the reasoning.
+  evidence  Json   @default("{}")
+
+  /// 0..1 estimated benefit, and the same in readable terms.
+  estimatedImpact Float     @default(0)
+  impactSummary   String    @default("")
+  risk            RiskLevel @default(LOW)
+  riskNotes       String?
+
+  /// The change itself, as data. Applying it is the validation layer's job.
+  proposedChange Json @default("{}")
+  /// What to restore to undo it. Captured at propose time, not apply time,
+  /// so a recommendation is never approvable without a way back.
+  rollback       Json @default("{}")
+
+  confidence Float @default(0)
+  sampleSize Int   @default(0)
+  /// estimatedImpact × confidence. Ranking on impact alone promotes
+  /// confident nonsense; this is the column the list is sorted by.
+  priority   Float @default(0)
+
+  status          RecommendationStatus @default(PROPOSED)
+  decidedById     String?
+  decidedAt       DateTime?
+  decisionNotes   String?
+  appliedAt       DateTime?
+  rolledBackAt    DateTime?
+  /// State captured immediately before applying, for a faithful rollback.
+  appliedSnapshot Json?
+
+  /// Set when this supersedes an earlier recommendation about the same thing.
+  supersedesId String?
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, status, priority])
+  @@index([organizationId, subject, subjectId])
+  @@map("recommendations")
+}
+
+/// What the system has learned about one worker.
+///
+/// Rebuilt from execution history rather than edited, and never applied to
+/// the worker automatically: the profile is an observation, the worker's
+/// configuration is a decision.
+model WorkerProfile {
+  id             String @id @default(cuid())
+  organizationId String
+  workerId       String @unique
+
+  preferredProviderId String?
+  preferredModel      String?
+  /// Why that provider won, kept so the choice can be argued with.
+  preferenceEvidence  Json    @default("{}")
+
+  executions      Int   @default(0)
+  successes       Int   @default(0)
+  /// Wilson lower bound, as everywhere else.
+  successRate     Float @default(0)
+  avgQuality      Float @default(0)
+  avgCostUsd      Float @default(0)
+  avgDurationMs   Float @default(0)
+  avgTokens       Int   @default(0)
+  toolCallCount   Int   @default(0)
+  toolDenialCount Int   @default(0)
+
+  /// Prompt shape that correlated with the best outcomes.
+  bestPromptStyle String?
+  /// Recurring failure signatures with counts.
+  failureTypes    Json     @default("[]")
+  strengths       String[] @default([])
+  weaknesses      String[] @default([])
+
+  confidence     Float     @default(0)
+  lastAnalyzedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  worker       Worker       @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("worker_profiles")
+}
+
+/// A regularity observed across many missions.
+///
+/// Distinct from a Recommendation: a pattern is a claim about what *is*, a
+/// recommendation is a proposal about what to *do*. Patterns accumulate
+/// support over time and are re-scored as evidence arrives, which is why
+/// `occurrences` and `lastObservedAt` are updated in place rather than a new
+/// row being written for every sighting.
+model DetectedPattern {
+  id             String      @id @default(cuid())
+  organizationId String
+  kind           PatternKind
+  /// Stable identity for the regularity, so repeat sightings reinforce one
+  /// row instead of accumulating near-duplicates.
+  signature      String
+
+  statement   String
+  detail      Json     @default("{}")
+  /// Ids of the missions, workers or runs this was observed in.
+  evidenceIds String[] @default([])
+
+  occurrences    Int    @default(1)
+  contradictions Int    @default(0)
+  confidence     Float  @default(0)
+  /// ANECDOTAL / EMERGING / ESTABLISHED / STRONG, denormalised for filtering.
+  band           String @default("ANECDOTAL")
+
+  firstObservedAt DateTime  @default(now())
+  lastObservedAt  DateTime  @default(now())
+  /// Set when a human says the pattern is wrong; it stops being surfaced
+  /// but is kept, because a rejected pattern is itself information.
+  dismissedAt     DateTime?
+  dismissedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, signature])
+  @@index([organizationId])
+  @@index([organizationId, kind, confidence])
+  @@map("detected_patterns")
+}
+
+/// The learning repository: institutional memory, separate from operational
+/// knowledge.
+///
+/// Its purpose is improvement, not retrieval during work. Nothing here is
+/// fed to a worker as context — that separation is the whole point, because
+/// a system's notes about its own weaknesses have no business appearing in
+/// an answer to a customer's question.
+model LearningEntry {
+  id             String            @id @default(cuid())
+  organizationId String
+  kind           LearningEntryKind
+  title          String
+  body           String
+  /// Links back to whatever produced this: review, recommendation, pattern.
+  sourceType     String?
+  sourceId       String?
+  data           Json              @default("{}")
+  tags           String[]          @default([])
+
+  confidence     Float     @default(0)
+  sampleSize     Int       @default(0)
+  /// Set when a later entry replaces this one's conclusion.
+  supersededById String?
+  supersededAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, kind, createdAt])
+  @@map("learning_entries")
+}
+
+/// A quality finding about one knowledge document.
+///
+/// Findings are proposals, never edits. Merging two documents or deleting a
+/// stale one destroys information, so both stay behind a human decision.
+model KnowledgeAudit {
+  id             String           @id @default(cuid())
+  organizationId String
+  knowledgeId    String
+  finding        KnowledgeFinding
+  /// The other document involved, for duplicates and merges.
+  relatedId      String?
+  /// 0..1 textual similarity where relevant.
+  similarity     Float?
+  detail         String
+  suggestion     String
+  confidence     Float            @default(0)
+
+  resolvedAt   DateTime?
+  resolvedById String?
+  resolution   String?
+  createdAt    DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  knowledge    Knowledge    @relation(fields: [knowledgeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, finding, resolvedAt])
+  @@map("knowledge_audits")
+}
+
+/// An A/B test between two workflow versions.
+///
+/// Allocation is deterministic per run, and a winner is only declared when
+/// the two arms separate beyond their margins of error — an experiment that
+/// stops at the first favourable number is worse than no experiment, because
+/// it lends noise the authority of a measurement.
+model Experiment {
+  id             String @id @default(cuid())
+  organizationId String
+  workflowId     String
+  name           String
+  hypothesis     String
+
+  controlVersionId String
+  variantVersionId String
+  /// 0..1 share of runs sent to the variant.
+  allocation       Float  @default(0.5)
+
+  controlRuns       Int   @default(0)
+  controlSuccesses  Int   @default(0)
+  controlDurationMs Float @default(0)
+  controlCostUsd    Float @default(0)
+
+  variantRuns       Int   @default(0)
+  variantSuccesses  Int   @default(0)
+  variantDurationMs Float @default(0)
+  variantCostUsd    Float @default(0)
+
+  status     ExperimentStatus @default(RUNNING)
+  /// "control", "variant" or null while undecided.
+  winner     String?
+  confidence Float            @default(0)
+  conclusion String?
+
+  /// Minimum runs per arm before a winner may be declared at all.
+  minRunsPerArm Int @default(20)
+
+  startedAt   DateTime  @default(now())
+  concludedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow     Workflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@map("experiments")
+}
+
+enum ReviewOutcome {
+  SUCCESS
+  PARTIAL
+  FAILURE
+  CANCELLED
+}
+
+enum MetricSubject {
+  WORKER
+  PROVIDER
+  WORKFLOW
+  ORGANIZATION
+  MISSION
+}
+
+enum MetricPeriod {
+  HOUR
+  DAY
+  WEEK
+  MONTH
+}
+
+enum RecommendationKind {
+  /// Point a worker at a different provider or model.
+  PROVIDER_SWITCH
+  MODEL_SWITCH
+  /// Rewrite or restructure a worker's standing instructions.
+  PROMPT_REFINEMENT
+  /// Grant or revoke tool access.
+  TOOL_PERMISSION
+  /// Adjust memory limits, retrieval depth or iteration caps.
+  MEMORY_TUNING
+  LIMIT_ADJUSTMENT
+  /// Structural change to a workflow graph.
+  WORKFLOW_STRUCTURE
+  /// Remove a step that never changes an outcome.
+  WORKFLOW_PRUNE
+  /// Run independent steps concurrently.
+  WORKFLOW_PARALLELISE
+  /// Insert a missing approval or guard.
+  WORKFLOW_GUARD
+  KNOWLEDGE_MERGE
+  KNOWLEDGE_REFRESH
+  KNOWLEDGE_GAP
+  COST_THRESHOLD
+  CAPACITY
+}
+
+enum RecommendationStatus {
+  PROPOSED
+  ACCEPTED
+  REJECTED
+  APPLIED
+  ROLLED_BACK
+  /// Superseded by a newer recommendation, or its evidence went stale.
+  EXPIRED
+}
+
+enum PatternKind {
+  PROVIDER_AFFINITY
+  WORKER_COLLABORATION
+  FAILURE_MODE
+  TIMING
+  COST
+  TEMPLATE_PERFORMANCE
+  DOMAIN_STYLE
+  ROI
+}
+
+enum LearningEntryKind {
+  MISSION_REVIEW
+  OPTIMIZATION
+  PERFORMANCE_TREND
+  DECISION
+  BENCHMARK
+  AB_TEST
+  LESSON
+}
+
+enum KnowledgeFinding {
+  DUPLICATE
+  NEAR_DUPLICATE
+  OUTDATED
+  UNUSED
+  MERGE_CANDIDATE
+  MISCATEGORISED
+  GAP
+  LOW_CONFIDENCE
+}
+
+enum ExperimentStatus {
+  RUNNING
+  CONCLUDED
+  ABANDONED
 }

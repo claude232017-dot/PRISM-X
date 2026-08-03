@@ -155,6 +155,23 @@ export const DomainEvent = {
   FederationRevoked: 'federation.revoked',
   FederationAccessDenied: 'federation.access_denied',
   FederationTaskBorrowed: 'federation.task_borrowed',
+
+  // --- Phase 5: learning and optimization --------------------------
+  MissionReviewed: 'learning.mission_reviewed',
+  PerformanceSnapshotTaken: 'learning.snapshot_taken',
+  RecommendationProposed: 'learning.recommendation_proposed',
+  RecommendationAccepted: 'learning.recommendation_accepted',
+  RecommendationRejected: 'learning.recommendation_rejected',
+  RecommendationApplied: 'learning.recommendation_applied',
+  RecommendationRolledBack: 'learning.recommendation_rolled_back',
+  PatternDetected: 'learning.pattern_detected',
+  PatternReinforced: 'learning.pattern_reinforced',
+  PatternDismissed: 'learning.pattern_dismissed',
+  WorkerProfileUpdated: 'learning.worker_profile_updated',
+  KnowledgeAudited: 'learning.knowledge_audited',
+  ExperimentStarted: 'learning.experiment_started',
+  ExperimentConcluded: 'learning.experiment_concluded',
+  LessonRecorded: 'learning.lesson_recorded',
 } as const;
 
 export type DomainEventName = (typeof DomainEvent)[keyof typeof DomainEvent];

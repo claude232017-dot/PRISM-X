@@ -33,6 +33,9 @@ import { AutomationModule } from './automation/automation.module';
 import { NodesModule } from './nodes/nodes.module';
 import { DistributedModule } from './distributed/distributed.module';
 
+// Phase 5 — learning and optimization
+import { LearningModule } from './learning/learning.module';
+
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
@@ -79,6 +82,9 @@ import { RequestContextMiddleware } from './shared/context/request-context.middl
     // scheduling and replication that operate on it.
     NodesModule,
     DistributedModule,
+
+    // Phase 5 observes everything below it and depends on nothing above.
+    LearningModule,
   ],
   providers: [
     // Order matters: authentication runs before permission checks.

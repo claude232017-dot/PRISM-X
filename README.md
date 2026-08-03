@@ -693,7 +693,25 @@ explicit, resource-scoped, revocable grant that the receiving side must accept.
 Adding capacity is one call. Registering a node is the whole of it — discovery,
 measurement and rescheduling follow, with no reconfiguration anywhere else.
 
+**Phase 5 — Learning & Optimization** closes the loop. Every completed mission
+is automatically turned into a structured review built from its own record —
+tasks, execution logs, audit trail, not a model's opinion of how it went. Those
+reviews accumulate into performance history for every worker, provider,
+workflow and the organization itself, which in turn produces recommendations,
+worker profiles, workflow findings, detected patterns and A/B experiments.
+
+Two properties are load-bearing. **Confidence is a primitive, not a column**:
+every claim is scored on one shared scale (`volume × quality × recency`,
+multiplied so any fatal factor sinks the claim) and rates are ranked by Wilson
+lower bounds, so three successes out of three never outranks 480 out of 500 —
+and "better" is only claimed when two confidence intervals genuinely separate.
+And **nothing reaches production unattended**: a recommendation is inert data
+carrying its own rollback, applying it requires a human decision, and the
+autopilot that can bypass that is off by default, limited to four low-risk
+change types, and gated at 85% confidence. Prompt wording, tool grants and
+workflow structure never qualify at any confidence.
+
 See `backend/README.md` for architecture, the decisions behind it, and how to
-run it. Verified against live PostgreSQL and Redis with 223 unit tests and four
-end-to-end suites: 57 (Phase 1), 58 (Phase 2), 74 (Phase 3) and 112 (Phase 4)
-checks.
+run it. Verified against live PostgreSQL and Redis with 314 unit tests and five
+end-to-end suites: 57 (Phase 1), 58 (Phase 2), 74 (Phase 3), 112 (Phase 4) and
+86 (Phase 5) checks.

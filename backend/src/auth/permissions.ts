@@ -78,6 +78,17 @@ export const Permissions = {
   FederationRead: 'federation:read',
   FederationGrant: 'federation:grant',
   FederationRevoke: 'federation:revoke',
+
+  // Learning — split three ways because reading what the system concluded,
+  // deciding whether it is right, and letting it touch production are
+  // genuinely different levels of trust.
+  LearningRead: 'learning:read',
+  /** Trigger analysis: rollups, audits, profiling, pattern detection. */
+  LearningRun: 'learning:run',
+  /** Accept or reject a proposal, dismiss a pattern, resolve a finding. */
+  LearningApprove: 'learning:approve',
+  /** Write an approved change to production, or roll one back. */
+  LearningApply: 'learning:apply',
 } as const;
 
 export type PermissionKey = (typeof Permissions)[keyof typeof Permissions];
@@ -140,6 +151,11 @@ export const ROLE_PERMISSIONS: Record<SystemRoleKey, PermissionKey[]> = {
     Permissions.NodeRead,
     Permissions.NodeExecute,
     Permissions.FederationRead,
+    // An operator may read what the system has concluded and re-run the
+    // analysis, but deciding whether a conclusion is right — and letting it
+    // reach production — stays with an administrator.
+    Permissions.LearningRead,
+    Permissions.LearningRun,
   ],
 
   [SystemRole.Viewer]: readOnly,

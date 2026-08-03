@@ -1,5 +1,5 @@
-# PRISM-X Backend — Phases 1–4
-### Core Foundation · Intelligence & Execution · Automation & Integration · Distributed Intelligence
+# PRISM-X Backend — Phases 1–5
+### Core Foundation · Intelligence & Execution · Automation & Integration · Distributed Intelligence · Learning & Optimization
 
 The production backend for the PRISM-X Intelligence Operating System. It is a
 standalone service: it holds all business logic, owns the data model, and is
@@ -142,6 +142,7 @@ src/
 ├── queues/          BullMQ queues
 ├── nodes/           the fleet register, node security, transports
 ├── distributed/     scheduling · queues · replication · federation · monitoring
+├── learning/        confidence · reviews · analytics · recommendations · patterns
 └── health/          liveness + dependency checks
 ```
 
@@ -152,7 +153,7 @@ logic never leaves its module, and never talks to Prisma directly.
 
 ## Authorization
 
-Four seeded system roles over 46 `resource:action` permissions:
+Four seeded system roles over 50 `resource:action` permissions:
 
 | Role | Scope |
 |---|---|
@@ -166,6 +167,11 @@ lending them to another organization (`federation:grant`, `federation:revoke`)
 stay with administrators. Federation is its own permission rather than an
 implication of node administration, because its blast radius is a *different*
 organization's data rather than this one's uptime.
+
+Learning is split four ways for the same reason: reading what the system
+concluded (`learning:read`), triggering analysis (`learning:run`), deciding
+whether a conclusion is right (`learning:approve`), and letting it touch
+production (`learning:apply`) are genuinely different levels of trust.
 
 `JwtAuthGuard` and `PermissionsGuard` are registered globally, so a new route is
 protected unless it opts out with `@Public()`. A caller missing a permission
@@ -863,3 +869,287 @@ Latest run: **112/112 Phase 4, 74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1,
 - **No node installer or agent packaging.** Registering a node assumes a
   PRISM-X instance is already running on the machine. Provisioning is an
   operations concern, not an API one.
+
+---
+---
+
+# Phase 5 — Learning & Optimization Engine
+
+Phase 5 is where PRISM-X starts learning from itself. Every completed mission
+becomes a structured review; reviews accumulate into performance history;
+history produces recommendations, patterns and optimized configurations — and
+none of it touches production without a person saying yes.
+
+```
+   Missions · executions · workflow runs · knowledge · approvals
+                              │  read-only
+                              ▼
+   Mission Review ──► Performance Analytics ──► Pattern Recognition
+          │                     │                       │
+          └─────────────────────┼───────────────────────┘
+                                ▼
+                      Recommendation Engine
+                                │
+                 Worker & Workflow Optimizers
+                                │
+                       Learning Repository
+                                │
+                    ── Human Validation ──          ← nothing passes unattended
+                                │
+                        Production Systems
+```
+
+The learning module depends on nothing above it and writes to production
+through exactly one method. That direction is deliberate: a system that had to
+know it was being observed is one where analysis could change behaviour by
+accident.
+
+## Confidence is a primitive, not a column
+
+Every claim the engine makes — a recommendation, a pattern, a worker profile, a
+trend — is scored on one shared scale, computed in one place
+(`src/learning/confidence.ts`). That matters more than the formula: a system
+that learns will produce a claim from three missions and a claim from five
+hundred, and if both arrive looking alike, the weak one is indistinguishable
+from established knowledge.
+
+```
+confidence = volume × quality × recency
+```
+
+**Multiplied, not averaged.** Any one factor being near zero should sink the
+claim on its own. Three data points are not rescued by being recent and
+perfectly consistent — three consistent points are exactly what coincidence
+looks like. Averaging would let two strong factors carry a fatal one.
+
+| factor | shape | why |
+|---|---|---|
+| volume | `n / (n + 12)` | Diminishing returns. The 11th datum is not worthless and the 12th is not everything, so no hard threshold. |
+| quality | 1 − coefficient of variation | Scale-free: ±200ms means something different at 300ms than at 30s. |
+| recency | decay to a floor of 0.4 | Old evidence discounts but never vanishes; 500 missions last quarter still mean something. |
+
+Scores land in four bands — **ANECDOTAL**, **EMERGING**, **ESTABLISHED**,
+**STRONG** — and the band is what the interface leads with, so a thin finding
+reads as a question rather than a fact.
+
+### Rates are Wilson lower bounds
+
+Anywhere the system ranks something by a success rate, it ranks by the lower
+bound of the Wilson interval rather than the observed proportion.
+
+| record | observed | ranked on |
+|---|---|---|
+| 3 of 3 | 100% | ~44% |
+| 480 of 500 | 96% | ~94% |
+
+Sorted by the raw figure the first outranks the second, which is wrong in a way
+that compounds: every recommendation built on that ordering chases noise. The
+observed rate is kept alongside as `observedRate` so nothing is hidden.
+
+### "Better" requires the intervals to separate
+
+`comparisonConfidence` returns **exactly zero** when two confidence intervals
+overlap — not a small number. "We cannot tell these apart" is a different
+statement from "there is a small effect", and rounding the first into the
+second is how a learning system talks itself into nonsense. A claim like *"this
+worker performs 28% better on Sonnet"* is only ever made when the two arms
+genuinely separate.
+
+## Mission reviews
+
+Written automatically when a mission ends, from the mission's own record —
+tasks, execution logs, audit trail. Not from asking a model how it went: that
+produces fluent prose whose relationship to what happened is unverifiable, and
+every downstream analysis would inherit it. Everything here is arithmetic over
+rows, so any number in a review traces back to the events that produced it.
+
+Each review carries outcome, success score, timing against estimate, cost
+against estimate, human interventions, deduplicated error signatures,
+bottlenecks with their share of total task time, missed opportunities and
+proposed improvements. One per mission, permanently — it outlives the mission's
+tasks and is the unit everything else reasons over.
+
+Missed opportunities are only stated where the record supports them: unused
+parallelism (independent tasks that ran in sequence), estimate drift, budget
+overrun, retries that were paid for and discarded, model sprawl. No speculative
+advice — a review full of plausible suggestions nobody can check is worse than
+a short one.
+
+Error messages are collapsed to signatures (ids, timestamps and quantities
+stripped) so the same fault is recognisable across missions. Without that,
+every failure looks unique and the pattern engine can never notice something
+has happened eleven times.
+
+## Performance analytics
+
+Rollups per period for workers, providers, workflows and the organization.
+Recomputing a window converges rather than accumulating — the snapshot is keyed
+on `(subject, id, period, start)` and rewritten in place.
+
+Trends are **derived** from snapshots, never stored. A trend is a relationship
+between measurements; storing it would let it drift out of agreement with the
+measurements it summarises. And a trend with too little history reports
+`unknown`, not `steady` — those are different claims.
+
+Leaderboards flag rows with too few samples as `rankable: false` rather than
+silently ranking them among figures that mean far more.
+
+## Recommendations
+
+Inert data. A recommendation says what it would change and how to put it back,
+and until a person accepts it, nothing happens.
+
+- **Rollback is captured at propose time.** A proposal that cannot describe how
+  to undo itself is rejected at creation, which rules out the class of change
+  nobody can reverse.
+- **Priority is impact × confidence.** Ranking on impact alone puts confident
+  nonsense at the top of the list, which is where a busy person's attention goes.
+- **Re-analysis supersedes.** A nightly analyser would otherwise produce the
+  same suggestion every night, and forty identical proposals is a list nobody
+  reads.
+- **Rejection requires a reason**, and the reason is written into the learning
+  repository. A rejected recommendation is evidence about the analyser; "no"
+  without a reason teaches nothing.
+
+## Human validation
+
+`RecommendationService.apply()` is the only path from the Learning Engine to
+production, and it refuses anything a person has not accepted. The state being
+overwritten is read back *immediately before* the write, so a rollback restores
+what was actually there rather than what the proposal assumed.
+
+Autopilot exists and is off. Turning it on requires three independent
+conditions to hold, because an organization opting into automation has not
+thereby consented to changes based on three data points:
+
+1. `learning.autoApply` explicitly enabled in organization settings, **and**
+2. the kind is one of the low-risk four (model, provider, limits, memory), **and**
+3. confidence ≥ 85%.
+
+Prompt wording, tool grants, workflow structure and knowledge merges never
+qualify, at any confidence. A prompt is what an agent *is*; a tool grant widens
+what it can do; a merge destroys information. Those are judgements, not numbers.
+
+## Worker profiles
+
+Rebuilt from execution history rather than edited incrementally, so a profile
+always agrees with the logs it summarises and a bad update cannot accumulate. A
+worker with no history gets **no profile** rather than an empty one — writing
+zeros would make a brand-new worker look measured rather than unknown.
+
+The profile records reliability, cost, speed, tool usage and denials, the
+prompt-length band that correlated with the best outcomes (labelled as
+correlation), recurring failure signatures, and plain-language strengths and
+weaknesses. Provider preference is chosen by Wilson lower bound, so a worker is
+never moved onto a provider it has barely used on the strength of a lucky
+afternoon.
+
+## Workflow optimization
+
+Findings come from step-level run history, not from reading the graph: a step
+that *looks* redundant may be load-bearing, and a step that looks essential may
+never have changed an outcome in three hundred runs. Detected: repeated
+failures, always-skipped steps, bottlenecks, steps producing an identical
+result every time, and independent steps running in sequence.
+
+Below five runs the analyser returns nothing at all, because below that every
+"finding" is a coincidence with a confident sentence attached.
+
+**A/B testing** compares two versions properly. Allocation is deterministic on
+the run id — recomputable from the record afterwards, unlike a random split
+nobody stored. A winner is declared only when both arms clear a minimum run
+count *and* their intervals separate. An experiment that stops at the first
+favourable number is worse than no experiment, because it lends noise the
+authority of a measurement.
+
+## Knowledge evolution
+
+Findings, never edits. Merging two documents or deleting a stale one destroys
+information, and judging whether two documents say the same thing is exactly
+what a similarity score gets wrong at the margins. So the audit records
+duplicates, staleness, disuse, missing tags, low confidence and gaps; a human
+resolves them; the system's opinion never silently becomes the corpus.
+
+Similarity is Jaccard overlap on tokens — the same measure the Phase 2
+retrieval layer uses. An audit judging similarity differently than retrieval
+does would flag duplicates retrieval never confuses, and miss the ones it does.
+
+Gaps are found by looking for error signatures that recur across mission
+reviews with nothing in the corpus addressing them.
+
+## Pattern recognition
+
+The hard part is not spotting repetition — it is not announcing a discovery
+every time two things happen twice. Three defences: a minimum of three
+occurrences before anything is recorded, **contradictions counted alongside
+occurrences** so a regularity that holds eight times and fails seven is visibly
+not one, and a confidence band the interface leads with.
+
+Patterns are keyed on a stable signature and reinforced in place, so something
+seen fifty times is one row with a count — the difference between "we have
+noticed this repeatedly" and "we have noticed fifty things". A dismissed
+pattern is kept rather than deleted: a human saying "that is not real" is
+itself evidence, and a detector that can re-propose it next week has learned
+nothing.
+
+## The learning repository
+
+Institutional memory, deliberately separate from operational knowledge. Nothing
+in it is fed to a worker as context — a system's notes about its own weaknesses
+have no business appearing in an answer to a customer's question. It holds
+mission reviews, applied optimizations, decisions (including rejections),
+benchmarks, A/B outcomes and hand-written lessons, each with confidence and
+sample size.
+
+## The dashboard
+
+One screen answering *"what has PRISM-X learned this week?"* It derives nothing
+of its own — a dashboard that recalculates its own success rates can disagree
+with the engine it reports on, and then nobody knows which number is real.
+
+The `learned` list is the point. Only genuinely new findings go in it:
+established patterns, concluded experiments, actionable recommendations, real
+movement against the previous window. When nothing recurs often enough to
+conclude anything, it says so rather than padding the list with standing facts.
+
+## Testing
+
+```bash
+npm test                        # 314 unit tests, 13 suites
+node test/phase1-validation.js  # 57 checks
+node test/phase2-validation.js  # 58 checks
+node test/phase3-validation.js  # 74 checks
+node test/phase4-validation.js  # 112 checks
+node test/phase5-validation.js  # 86 checks
+```
+
+Phase 5's suite covers all ten required checks against live Postgres and Redis,
+including the negative cases: a worker with no history getting no profile, a
+workflow with too little history yielding no findings, an experiment refusing
+to declare a winner early, a second concurrent experiment on one workflow, an
+audit that records duplicates without deleting anything, applying without
+acceptance, autopilot without opt-in, rejecting without a reason, re-applying
+after rollback, and cross-organization access to every new surface.
+
+Latest run: **86/86 Phase 5, 112/112 Phase 4, 74/74 Phase 3, 58/58 Phase 2,
+57/57 Phase 1, 314/314 unit tests.** 231 documented API operations across 193
+paths; 48/48 tenant tables RLS-protected.
+
+## What Phase 5 deliberately does not do
+
+- **No model in the loop.** Reviews, patterns and recommendations are
+  arithmetic over stored rows. An LLM-written post-mortem reads better and
+  cannot be checked, and every downstream number would inherit that. The seam
+  exists if a later phase wants to *add* model-written narrative on top of the
+  measured facts — not in place of them.
+- **No semantic similarity.** Knowledge auditing and pattern themes use token
+  overlap, not embeddings, so learning does not stop when an API key expires.
+  Themes are correspondingly crude and say so.
+- **No automatic prompt rewriting.** The engine proposes that a prompt needs
+  work and drafts a starting point; the wording stays a human judgement.
+- **No cross-organization learning.** Patterns never leave the tenant that
+  produced them. Aggregating across customers is a product and privacy decision,
+  not an engineering one.
+- **No scheduled analysis loop.** Rollups, audits, profiling and detection are
+  endpoints. Wiring them to a timer is a one-line change per job, deliberately
+  left to whoever decides how often is often enough.
