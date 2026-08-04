@@ -50,6 +50,39 @@ export class ToolRegistry implements OnModuleInit {
     this.tools.set(tool.key, tool);
   }
 
+  /**
+   * Installs a resolver for tools that are not process-wide singletons.
+   *
+   * Contributed tools cannot live in `this.tools`: the map is one per process
+   * while the set of installed extensions is one per organization, so a static
+   * registration would leak one tenant's tools into another's catalogue. The
+   * resolver is consulted per key, inside the caller's request context, which
+   * is what keeps the lookup tenant-scoped.
+   *
+   * Kept as a callback rather than an injected dependency: the platform module
+   * depends on this registry, and an edge back would be a cycle.
+   */
+  setDynamicResolver(
+    resolver: (key: string) => Promise<ToolDefinition | undefined>,
+  ): void {
+    this.dynamicResolver = resolver;
+  }
+
+  private dynamicResolver?: (key: string) => Promise<ToolDefinition | undefined>;
+
+  /** A built-in tool, or a contributed one resolved for the current tenant. */
+  async resolve(key: string): Promise<ToolDefinition | undefined> {
+    const builtin = this.tools.get(key);
+    if (builtin) return builtin;
+    if (!this.dynamicResolver) return undefined;
+    try {
+      return await this.dynamicResolver(key);
+    } catch (error) {
+      this.logger.warn(`Dynamic tool resolution failed for "${key}": ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
   keys(): string[] {
     return [...this.tools.keys()];
   }
@@ -71,21 +104,27 @@ export class ToolRegistry implements OnModuleInit {
   }
 
   /** The subset a given worker is both granted and authorized to use. */
-  availableTo(worker: Pick<Worker, 'toolPermissions'>): ToolDefinition[] {
+  async availableTo(worker: Pick<Worker, 'toolPermissions'>): Promise<ToolDefinition[]> {
     const ctx = RequestContextStore.get();
     const permissions = ctx?.permissions ?? [];
     const unrestricted = permissions.includes('*');
 
-    return [...this.tools.values()].filter(
-      (tool) =>
-        worker.toolPermissions.includes(tool.key) &&
+    // Driven by the worker's grant rather than by the registry, so contributed
+    // tools — which are not in the map — are reached through the resolver.
+    const resolved = await Promise.all(
+      worker.toolPermissions.map((key) => this.resolve(key)),
+    );
+
+    return resolved.filter(
+      (tool): tool is ToolDefinition =>
+        tool !== undefined &&
         (unrestricted || permissions.includes(tool.requiredPermission)),
     );
   }
 
   /** Tool descriptions rendered for a prompt. */
-  describeForPrompt(worker: Pick<Worker, 'toolPermissions'>): string {
-    const available = this.availableTo(worker);
+  async describeForPrompt(worker: Pick<Worker, 'toolPermissions'>): Promise<string> {
+    const available = await this.availableTo(worker);
     if (!available.length) return '';
 
     return available
@@ -117,7 +156,7 @@ export class ToolRegistry implements OnModuleInit {
       organizationId: ctx.organizationId,
     };
 
-    const tool = this.tools.get(key);
+    const tool = await this.resolve(key);
     if (!tool) {
       return this.deny(key, input, worker.id, fullContext, `Unknown tool "${key}"`, startedAt);
     }

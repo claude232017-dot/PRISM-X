@@ -110,6 +110,26 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Atomically increments a counter, setting its expiry on first use.
+   *
+   * Returns null — rather than a number — when Redis is unavailable, because
+   * the caller needs to be able to tell "the count is 1" from "there is no
+   * shared counter right now". A rate limiter that cannot tell those apart
+   * fails open, which is the one failure mode a rate limiter must not have;
+   * the null lets the caller fall back to a local count instead.
+   */
+  async increment(key: string, ttlSeconds: number): Promise<number | null> {
+    if (!this.available || !this.client) return null;
+    try {
+      const value = await this.client.incr(key);
+      if (value === 1) await this.client.expire(key, ttlSeconds);
+      return value;
+    } catch {
+      return null;
+    }
+  }
+
   /** Read-through helper: returns the cached value or computes and stores it. */
   async remember<T>(key: string, ttlSeconds: number, factory: () => Promise<T>): Promise<T> {
     const hit = await this.get<T>(key);

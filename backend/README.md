@@ -1437,9 +1437,8 @@ throws on `push`, that a foreign organization id nested three levels deep is
 caught, that a partial rollback is refused by name, and that 99% confidence
 does not satisfy `HUMAN_CONSENT`.
 
-Latest run: **86/86 Phase 6, 86/86 Phase 5, 112/112 Phase 4, 74/74 Phase 3,
-58/58 Phase 2, 57/57 Phase 1, 422/422 unit tests.** 268 documented API
-operations across 226 paths; 56/56 tenant tables RLS-protected.
+Latest run at the close of Phase 6: **86/86 Phase 6, 86/86 Phase 5, 112/112
+Phase 4, 74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 422/422 unit tests.**
 
 ## What Phase 6 deliberately does not do
 
@@ -1459,3 +1458,278 @@ operations across 226 paths; 56/56 tenant tables RLS-protected.
 - **No automatic experiment scheduling.** Candidates queue themselves;
   starting experiments and running trials are explicit calls, because trials
   cost money and how many is worth spending is not the system's decision.
+
+
+---
+
+# Phase 7 — Platform & Extensibility Ecosystem
+
+Phase 6 let PRISM-X change itself. Phase 7 lets other people change it —
+without touching the core. Extensions, contributed workers and tools, a
+marketplace, a public API and a developer portal, all of it hosted rather than
+merged.
+
+Hosting a stranger's code raises exactly one hard question, and everything here
+is an answer to it: **what is this thing allowed to do?**
+
+## Capabilities are the primitive
+
+`src/platform/capabilities.ts` is the spine of the phase, the way
+`confidence.ts` was for Phase 5 and `constitution.ts` for Phase 6. It is a
+frozen catalogue of sixteen capabilities — `can_execute_missions`,
+`can_access_knowledge`, `can_manage_workers`, `can_register_triggers`,
+`can_send_notifications`, `can_invoke_external_apis` and ten more — each
+carrying a risk level, the RBAC permissions it draws on, and the host methods
+it unlocks.
+
+The platform never asks *what kind of thing is this*. It asks *which
+capabilities does it hold*. A worker contributed by an extension and a worker
+written by the organization are subject to the identical check, because the
+check reads a capability set rather than a type.
+
+Three properties make the indirection worth it.
+
+**Capabilities are the only authority.** There is no ambient access and no
+wildcard for hosted code. A host method that no capability names is
+unreachable: `authorize` returns a denial, and `SandboxService.onModuleInit`
+refuses to boot if the implemented surface and the guarded surface disagree.
+Adding a method without a capability is a startup failure, not a hole.
+
+**Grants intersect, never union.** An extension's effective authority is what
+it requested *and* what the installing principal already holds:
+
+```ts
+grant({ requested: manifest.capabilities, holderPermissions: context.permissions })
+// → { granted, withheld: [{ capability, missing: [permission] }], risk, reviewRequired }
+```
+
+An installer who cannot delete workers cannot install an extension that
+deletes workers. The capability is withheld at install time, recorded on the
+row, and the extension runs with the smaller set. Privilege cannot be laundered
+through an install. The same rule governs contributions — `attenuate` narrows
+and never widens — and API keys, whose scopes *are* their permissions.
+
+**Risk drives review.** HIGH and CRITICAL capabilities hold an install at
+`PENDING_REVIEW` until a person approves it, and hold a marketplace release out
+of the catalogue until a moderator does. The install screen and the governance
+queue read the same numbers the sandbox enforces.
+
+The catalogue is frozen code rather than a table for the same reason the
+Constitution is: a row can be updated by anything holding a connection, and the
+set of things a stranger's code may do is not something that should be editable
+at runtime. Its content hash is stamped on every grant, so a grant issued under
+an older catalogue is recognisable as such.
+
+## The lifecycle
+
+`install → validate → register → initialize → run → update → disable →
+uninstall`, with `migrate`, `quarantine` and `rollback` alongside. Every
+transition passes through one method that writes an `ExtensionLifecycleEvent`
+before and after the work — which is what makes "the extension is FAILED"
+answerable with *which phase failed and why*, months later, without
+reproducing it.
+
+A failed `initialize` is not a failed install: the extension exists, its grant
+is recorded, and it is inert and repairable. Teardown phases tolerate failure,
+because refusing to uninstall something because its own cleanup threw is not a
+safety property.
+
+## The sandbox
+
+`SandboxService` is the only place extension code can reach the platform. There
+is no object an extension holds that reaches a repository, a Prisma client or
+the request context — only a `HostApi` whose 35 methods all funnel through one
+`invoke`, which does the same five things regardless of which was called:
+capability check, rate limit, timeout, dispatch, audit.
+
+Every call is recorded — allowed, denied, failed or throttled. Denials are the
+interesting ones: an extension repeatedly reaching for a capability it lacks is
+the signal that it is doing something other than what its listing said. The
+audit preview redacts anything that looks like a secret rather than truncating
+it, because a truncated token is still a leaked prefix.
+
+Outbound HTTP blocks loopback, link-local, RFC1918 and the cloud metadata
+endpoint. It does not resolve DNS, so a hostname pointing at a private address
+still gets through — that defence belongs at the egress proxy, where the
+resolved address is actually known, and the code says so rather than implying
+otherwise.
+
+`can_use_credentials` is narrower than "read secrets": the host injects the
+credential into the outbound request after the extension has composed it, on a
+header object the extension never holds. It can *use* a stored token; it can
+never *read* one.
+
+The rate limiter uses Redis when it is there and a per-process counter when it
+is not. `CacheService.increment` returns `null` rather than a number on cache
+failure, precisely so the caller can tell "the count is 1" from "there is no
+shared counter" — a rate limiter that fails open is not a rate limiter.
+
+## Version management
+
+`analyseUpgrade` compares two manifests and separates two things that are
+usually conflated:
+
+- **BLOCKING** — impossible or incoherent. A downgrade, a reinstall of the same
+  version, an engine range this platform cannot satisfy, a candidate for a
+  different extension.
+- **BREAKING** — possible, but it changes the deal the operator agreed to. A
+  new capability, a removed contribution, a newly required setting, a config
+  type change, a major bump.
+
+Only the second is negotiable. Keeping them apart is what stops "detect
+breaking changes" from collapsing into "refuse to ever upgrade". A capability
+added in a *patch* release is flagged separately, because that is the exact
+shape of a supply-chain attack.
+
+The whole analysis runs on manifests, so it is available before a byte of the
+new version has been trusted — which is what "breaking changes must be detected
+before installation" actually requires. Consent carries the analysed manifest
+with it, so approving days later applies what was shown rather than whatever is
+current. Rollback restores from a snapshot taken before the write: manifest,
+grant, config and limits together.
+
+The manifest digest is computed over a canonically serialised subset — keys
+sorted recursively — because Postgres `jsonb` normalises key order, and hashing
+raw `JSON.stringify` output would produce one digest at publish time and a
+different one on read. Every signature would have failed to verify. The unit
+suite pins this with a jsonb round-trip simulation.
+
+## The marketplace
+
+Ten asset kinds, publisher identities, immutable versions, ratings, advisories.
+
+Releases are signed with **Ed25519**: the platform keeps the public half and
+returns the private half exactly once. It can verify a release but can never
+produce one — which is the only version of "signed" that means anything, since
+a signature the registry could forge attests to nothing beyond the row having
+been written.
+
+Breaking changes are computed at publish time by running the installer's own
+analysis against the previous release. The publisher's version number is a
+claim; the diff is the evidence.
+
+An install checks the listing's status, the publisher's standing, the version's
+review state, whether it was yanked, whether a live advisory covers it, and
+whether its signature still verifies against a *recomputed* digest — before the
+manifest reaches the lifecycle.
+
+## Governance
+
+Publisher verification and suspension, listing suspension and deprecation,
+version yanking, review moderation, compatibility testing, security advisories,
+and a platform audit log assembled from the decision rows themselves — a log
+that can disagree with the decisions it describes is worse than no log.
+
+Advisories are enforced, not just published. `publishAdvisory` quarantines every
+affected install across every organization, because the tenants most at risk
+are the least likely to be reading the catalogue. It quarantines rather than
+uninstalls: taking an extension away is the organization's decision once they
+can see why. `QUARANTINED` is deliberately distinct from `DISABLED`, so
+re-enabling requires addressing the reason rather than clicking the same button
+again.
+
+Deprecation is *not* suspension. A deprecated asset stays installable, because
+pulling it out from under everyone mid-migration is how a deprecation becomes an
+outage.
+
+## Two RLS shapes
+
+Phase 7 is the first phase whose data is not entirely tenant-private, so the
+migration carries two policy shapes:
+
+- **Tenant tables** (8) — the usual contract: no organization context means no
+  rows, `WITH CHECK` stops a constrained session writing rows it does not own.
+- **Catalogue tables** (5) — publishers, listings, versions and advisories are
+  read by everyone by design; a marketplace partitioned by tenant is not a
+  marketplace. They get separate SELECT and INSERT/UPDATE/DELETE policies:
+  readable by all, writable only by the owning organization. One combined
+  `USING` clause cannot express that — it would hide other publishers' rows
+  from the catalogue entirely.
+
+Version ownership is derived from the parent listing rather than duplicated onto
+the row, so a listing changing hands cannot leave versions behind that the
+previous owner can still rewrite. `governance_reviews` gets a read policy and
+deliberately no write policies: a moderation decision is not the publisher's to
+write, and the publisher is the only organization a constrained session could
+claim to be.
+
+Verified against a constrained `prismx_tenant` session: catalogue readable
+across tenants, another organization's listing not updatable, forged ownership
+rejected by policy, tenant tables invisible.
+
+## The SDK and the developer portal
+
+`src/platform/sdk.ts` imports no service, no repository and no Prisma type. An
+author can read that one file and know exactly what they get; the platform can
+rewrite everything behind it without breaking an extension.
+
+The portal's documentation is *generated* from the same constants the runtime
+enforces — the capability catalogue, the guarded surface, the manifest schema,
+the limits. A developer reading "these are the capabilities" is reading the
+actual catalogue, so the docs cannot drift. The manifest reference ships an
+example that is validated on the way out, so a change to the validator that
+would break it fails in the test run rather than in someone's editor.
+
+API keys now authenticate. `ApiKeyService` installs a resolver on `AuthService`
+through the same callback seam the approvals and node-routing paths use, and
+the guard accepts `x-api-key` where there is no bearer token. A key's scopes are
+its permissions — the same intersection rule, applied to a credential that
+travels outside the product.
+
+## What the loader does, and does not, do
+
+PRISM-X ships one `IExtensionLoader`: an in-process loader that synthesises a
+module from the manifest rather than executing publisher-supplied code. This is
+the same seam the provider, connector and node-transport layers use, for the
+same reason — the interesting behaviour to get right first is the platform's.
+
+Everything above the loader is real and exercised end to end against it: the
+grant, the sandbox, the lifecycle, the audit trail, the upgrade analysis, the
+signing, the governance. Running a publisher's actual code is a second
+implementation of one interface — an isolate, a container, a remote runtime —
+not a change to anything above it.
+
+## Testing
+
+```bash
+npm test                        # 477 unit tests, 16 suites
+node test/phase1-validation.js  # 57 checks
+node test/phase2-validation.js  # 58 checks
+node test/phase3-validation.js  # 74 checks
+node test/phase4-validation.js  # 112 checks
+node test/phase5-validation.js  # 86 checks
+node test/phase6-validation.js  # 86 checks
+node test/phase7-validation.js  # 84 checks
+```
+
+Phase 7's suite covers all ten required checks, including the negative cases: an
+invalid manifest, a capability outside the catalogue, an extension enabled while
+its grant is pending, a contribution asking for authority its extension was
+refused, an installer lending authority it does not hold, a downgrade, a
+capability added in a patch release, an engine range the platform cannot
+satisfy, a republished version, an install while a review is open, an install
+covered by an advisory, a quarantined extension re-enabled, an invalid API key,
+and a tool whose extension has been uninstalled.
+
+Latest run: **84/84 Phase 7, 86/86 Phase 6, 86/86 Phase 5, 112/112 Phase 4,
+74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 477/477 unit tests.** 325
+documented API operations across 274 paths; 69 tables RLS-protected; migrations
+verified from an empty database.
+
+## What Phase 7 deliberately does not do
+
+- **No arbitrary code execution.** The shipped loader synthesises behaviour
+  from the manifest. Isolation primitives — an isolate, a container, a
+  seccomp profile — are a loader implementation, and shipping the enforcement
+  layer first is the right order.
+- **No DNS-level SSRF defence.** Literal private addresses are blocked; a
+  hostname resolving to one is not. That check belongs where the resolved
+  address is known.
+- **No OAuth.** API keys authenticate the public API. OAuth is a Phase 8
+  concern alongside the rest of the production surface.
+- **No cross-organization capability inference.** An extension trusted in one
+  tenant earns nothing in another. Verification is a publisher property, not a
+  transfer of trust between installs.
+- **No automatic upgrades.** A non-breaking upgrade applies when asked for. The
+  platform never reaches out for a new version on its own — an unattended
+  upgrade of third-party code is the supply-chain risk, not the mitigation.

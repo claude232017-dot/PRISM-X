@@ -34,14 +34,26 @@ export class JwtAuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const token = JwtAuthGuard.extractToken(request.headers?.authorization);
-    if (!token) {
+    const apiKey = request.headers?.['x-api-key'] as string | undefined;
+
+    if (!token && !apiKey) {
       throw new UnauthorizedException('Missing bearer token');
     }
 
-    // Lets a user who belongs to several organizations choose which one this
-    // request acts within; defaults to their first active membership.
-    const orgHeader = request.headers?.['x-organization-id'] as string | undefined;
-    const principal = await this.auth.authenticate(token, orgHeader);
+    // An API key is the public API's credential. It authenticates to an
+    // organization rather than to a person, and carries only its own scopes —
+    // so a key cannot reach anything the person who issued it did not grant.
+    // Bearer wins when both are present: a human's session is the more
+    // specific claim, and silently preferring a key would let a stale header
+    // downgrade an authenticated request.
+    const principal = token
+      ? await this.auth.authenticate(
+          token,
+          // Lets a user who belongs to several organizations choose which one
+          // this request acts within; defaults to their first active membership.
+          request.headers?.['x-organization-id'] as string | undefined,
+        )
+      : await this.auth.authenticateApiKey(apiKey!);
 
     request.user = principal;
     request.accessToken = token;

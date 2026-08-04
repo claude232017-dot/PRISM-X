@@ -324,7 +324,7 @@ export class WorkerRuntimeService {
       }
     }
 
-    const toolCatalogue = this.tools.describeForPrompt(worker);
+    const toolCatalogue = await this.tools.describeForPrompt(worker);
     if (toolCatalogue) {
       sections.push(
         `Available tools:\n${toolCatalogue}\n\n` +

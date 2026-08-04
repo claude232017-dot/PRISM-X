@@ -20,6 +20,14 @@ import { SystemRole } from './permissions';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { RequestContextStore } from '../shared/context/request-context';
 
+/** What an API key resolves to. Mirrors `ResolvedApiKey` without importing it. */
+export interface ResolvedApiKeyPrincipal {
+  apiKeyId: string;
+  organizationId: string;
+  scopes: string[];
+  rateLimitPerMinute: number;
+}
+
 export interface AuthenticatedPrincipal {
   userId: string;
   email: string;
@@ -180,6 +188,50 @@ export class AuthService {
    * Called by the JWT strategy on every request: verifies the token with the
    * active provider, then resolves the caller's org membership and permissions.
    */
+  /**
+   * Resolver for API-key authentication, installed by `ApiKeyService`.
+   *
+   * A callback rather than an injected dependency: key management lives in the
+   * automation module, which already depends on auth, and a second edge back
+   * would be a cycle. The same seam pattern the approvals, notification and
+   * node-routing paths use.
+   */
+  private apiKeyResolver?: (presented: string) => Promise<ResolvedApiKeyPrincipal>;
+
+  onApiKeyResolver(
+    resolver: (presented: string) => Promise<ResolvedApiKeyPrincipal>,
+  ): void {
+    this.apiKeyResolver = resolver;
+  }
+
+  /**
+   * Authenticates a programmatic caller presenting an API key.
+   *
+   * The key's scopes *are* its permissions — an API key is a subset of what
+   * the organization can do, never a superset, and a key issued with no scopes
+   * can therefore read nothing rather than everything. That is the same
+   * intersection rule the platform applies to extension capabilities, and it
+   * matters more here: an API key travels outside the product.
+   */
+  async authenticateApiKey(presented: string): Promise<AuthenticatedPrincipal> {
+    if (!this.apiKeyResolver) {
+      throw new UnauthorizedException('API key authentication is unavailable');
+    }
+    const resolved = await this.apiKeyResolver(presented);
+    const organization = await this.organizations.findById(resolved.organizationId);
+
+    return {
+      // Not a real user, and deliberately shaped so it can never collide with
+      // one: audit rows attribute the action to the key that performed it.
+      userId: `apikey:${resolved.apiKeyId}`,
+      email: `apikey:${resolved.apiKeyId}`,
+      organizationId: resolved.organizationId,
+      organizationName: organization?.name ?? 'unknown',
+      roleKey: 'API_KEY',
+      permissions: resolved.scopes,
+    };
+  }
+
   async authenticate(accessToken: string, organizationId?: string): Promise<AuthenticatedPrincipal> {
     const verified = await this.provider.verify(accessToken);
     const user = await this.resolveLocalUser(verified.email, verified.externalId);

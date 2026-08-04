@@ -191,6 +191,29 @@ export const DomainEvent = {
   ConstitutionViolated: 'evolution.constitution_violated',
   PlanningStrategyCreated: 'evolution.planning_strategy_created',
   PlanningStrategyActivated: 'evolution.planning_strategy_activated',
+
+  // Phase 7 — platform & extensibility
+  ExtensionCapabilitiesGranted: 'extension.capabilities_granted',
+  ExtensionCapabilitiesWithheld: 'extension.capabilities_withheld',
+  ExtensionInitialized: 'extension.initialized',
+  ExtensionUpgradeProposed: 'extension.upgrade_proposed',
+  ExtensionUpgraded: 'extension.upgraded',
+  ExtensionUpgradeBlocked: 'extension.upgrade_blocked',
+  ExtensionRolledBack: 'extension.rolled_back',
+  ExtensionQuarantined: 'extension.quarantined',
+  ExtensionUninstalled: 'extension.uninstalled',
+  ExtensionCallDenied: 'extension.call_denied',
+  ContributionRegistered: 'platform.contribution_registered',
+  MarketplaceListingPublished: 'marketplace.listing_published',
+  MarketplaceVersionPublished: 'marketplace.version_published',
+  MarketplaceListingInstalled: 'marketplace.listing_installed',
+  MarketplaceListingSuspended: 'marketplace.listing_suspended',
+  MarketplaceVersionYanked: 'marketplace.version_yanked',
+  PublisherVerified: 'marketplace.publisher_verified',
+  SecurityAdvisoryPublished: 'marketplace.advisory_published',
+  GovernanceReviewOpened: 'governance.review_opened',
+  GovernanceReviewDecided: 'governance.review_decided',
+  DeveloperAppCreated: 'developer.app_created',
 } as const;
 
 export type DomainEventName = (typeof DomainEvent)[keyof typeof DomainEvent];

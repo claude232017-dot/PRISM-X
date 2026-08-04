@@ -7,6 +7,7 @@ import { AUTOMATION_REPOSITORIES } from './repositories/automation.repositories'
 import { DISTRIBUTED_REPOSITORIES } from './repositories/distributed.repositories';
 import { LEARNING_REPOSITORIES } from './repositories/learning.repositories';
 import { EVOLUTION_REPOSITORIES } from './repositories/evolution.repositories';
+import { PLATFORM_REPOSITORIES } from './repositories/platform.repositories';
 
 const REPOSITORIES = [
   ...TENANT_REPOSITORIES,
@@ -16,6 +17,7 @@ const REPOSITORIES = [
   ...DISTRIBUTED_REPOSITORIES,
   ...LEARNING_REPOSITORIES,
   ...EVOLUTION_REPOSITORIES,
+  ...PLATFORM_REPOSITORIES,
 ];
 
 /**

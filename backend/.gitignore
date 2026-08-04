@@ -5,3 +5,6 @@ coverage/
 .env.local
 .storage/
 *.tsbuildinfo
+
+# Redis snapshot written by a locally-started server
+dump.rdb

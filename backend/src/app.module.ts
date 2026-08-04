@@ -38,6 +38,7 @@ import { LearningModule } from './learning/learning.module';
 
 // Phase 6 — evolution
 import { EvolutionModule } from './evolution/evolution.module';
+import { PlatformModule } from './platform/platform.module';
 
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
@@ -91,6 +92,11 @@ import { RequestContextMiddleware } from './shared/context/request-context.middl
 
     // Phase 6 acts on what Phase 5 concluded, behind the Constitution.
     EvolutionModule,
+
+    // Phase 7 hosts what other people build. It imports the domain modules;
+    // nothing below it imports the platform, so an extension can never require
+    // a change to the engine it extends.
+    PlatformModule,
   ],
   providers: [
     // Order matters: authentication runs before permission checks.

@@ -97,6 +97,18 @@ model Organization {
   constitutionViolations ConstitutionViolation[]
   planningStrategies     PlanningStrategy[]
 
+  // Phase 7
+  extensionLifecycle     ExtensionLifecycleEvent[]
+  extensionContributions ExtensionContribution[]
+  extensionState         ExtensionState[]
+  extensionHostCalls     ExtensionHostCall[]
+  extensionUpgrades      ExtensionUpgrade[]
+  marketplaceReviews     MarketplaceReview[]
+  developerApps          DeveloperApp[]
+  developerApiUsage      DeveloperApiUsage[]
+  /// Publisher identities this organization owns.
+  publishers             Publisher[]
+
   @@index([deletedAt])
   @@map("organizations")
 }
@@ -465,14 +477,68 @@ model Extension {
   status         ExtensionStatus @default(INSTALLED)
   manifest       Json            @default("{}")
   subscribes     String[]        @default([])
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  deletedAt      DateTime?
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // ---------------------------------------------------------- Phase 7
+  description String?
+  author      String?
+  publisherId String?
+  license     String?
+  homepage    String?
+
+  /// What the manifest asked for. Kept alongside what was granted so the gap
+  /// between the two is visible without recomputing it.
+  requestedCapabilities String[]            @default([])
+  /// What the extension actually holds: requested ∩ the installer's own
+  /// permissions. Never larger than `requestedCapabilities`.
+  capabilities          String[]            @default([])
+  /// `[{ capability, missing: [permission] }]` — why each gap exists.
+  withheldCapabilities  Json                @default("[]")
+  /// Capability-catalogue fingerprint at the moment of the grant. A change
+  /// here means the meaning of a granted capability may have moved, which
+  /// re-opens consent rather than silently carrying forward.
+  capabilityVersion     String              @default("")
+  riskLevel             CapabilityRiskLevel @default(LOW)
+
+  /// Operator-supplied settings the manifest declared. Non-secret only.
+  config  Json @default("{}")
+  /// Sealed values for `secret` config fields. Never returned by any endpoint.
+  secrets Json @default("{}")
+  /// Resolved sandbox ceiling, clamped to the platform maximum at install.
+  limits  Json @default("{}")
+
+  engine            String?
+  dependencies      Json    @default("{}")
+  /// sha256 over the security-relevant manifest fields — what a signature attests.
+  manifestDigest    String  @default("")
+  signature         String?
+  signatureVerified Boolean @default(false)
+
+  /// The marketplace listing this was installed from, when it came from one.
+  listingId      String?
+  installedById  String?
+  /// Set while an upgrade is waiting on fresh consent for new capabilities.
+  pendingVersion String?
+  lastError      String?
+  initializedAt  DateTime?
+  lastRunAt      DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  organization  Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  publisher     Publisher?                @relation(fields: [publisherId], references: [id], onDelete: SetNull)
+  listing       MarketplaceListing?       @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  lifecycle     ExtensionLifecycleEvent[]
+  contributions ExtensionContribution[]
+  state         ExtensionState[]
+  hostCalls     ExtensionHostCall[]
+  upgrades      ExtensionUpgrade[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([listingId])
   @@map("extensions")
 }
 
@@ -803,6 +869,14 @@ enum ExtensionStatus {
   INSTALLED
   ENABLED
   DISABLED
+  /// Requests capabilities that need a human decision before they are granted.
+  PENDING_REVIEW
+  /// Installed, but initialization or a migration failed. Inert until repaired.
+  FAILED
+  /// Stopped by governance — a security advisory, a suspended publisher, a
+  /// signature that no longer verifies. Distinct from DISABLED, which is the
+  /// operator's own choice.
+  QUARANTINED
 }
 
 // ============================================================
@@ -1070,10 +1144,16 @@ model ApiKey {
   createdById        String?
   createdAt          DateTime  @default(now())
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// The developer app this key belongs to, when it was issued through the
+  /// developer portal rather than the organization's own settings.
+  developerAppId String?
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  developerApp DeveloperApp? @relation(fields: [developerAppId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([prefix])
+  @@index([developerAppId])
   @@map("api_keys")
 }
 
@@ -2689,4 +2769,551 @@ enum VersionOrigin {
   CANDIDATE
   ROLLBACK
   IMPORT
+}
+
+// ============================================================
+// Phase 7 — Platform & Extensibility Ecosystem
+//
+// Everything hosted by PRISM-X — extensions, contributed workers, contributed
+// tools, marketplace assets — is described by the same vocabulary: capabilities.
+// The platform never asks what *kind* of thing a component is; it asks which
+// capabilities it holds, and every guarded surface reads that one answer.
+//
+// Scope note. Most tables here are tenant-scoped and carry RLS like every
+// other phase. Five are deliberately global — publishers, listings, listing
+// versions, advisories and governance reviews — because a catalogue everyone
+// installs from cannot be partitioned by tenant without ceasing to be a
+// catalogue. Those get a different policy shape: readable by all, writable
+// only by the organization that owns the row. See the Phase 7 RLS migration.
+// ============================================================
+
+enum CapabilityRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+/// The lifecycle an extension moves through, one value per transition the
+/// platform performs. Recording the phase rather than only the resulting
+/// status is what makes a failed install diagnosable after the fact.
+enum ExtensionPhase {
+  INSTALL
+  VALIDATE
+  REGISTER
+  INITIALIZE
+  RUN
+  UPDATE
+  MIGRATE
+  DISABLE
+  ENABLE
+  QUARANTINE
+  ROLLBACK
+  UNINSTALL
+}
+
+enum LifecycleOutcome {
+  STARTED
+  SUCCEEDED
+  FAILED
+  /// Refused by policy — missing capability, failed signature, blocked upgrade.
+  REFUSED
+}
+
+enum ContributionKind {
+  WORKER
+  TOOL
+  TRIGGER
+}
+
+/// What the sandbox decided about a single host call.
+enum SandboxDecision {
+  ALLOWED
+  /// Capability not held, or the method is not part of the API at all.
+  DENIED
+  /// Allowed, then the extension's own code failed.
+  FAILED
+  /// Allowed, but over its rate limit or past its timeout.
+  THROTTLED
+}
+
+/// The ten kinds of asset the marketplace carries.
+enum MarketplaceAssetKind {
+  EXTENSION
+  WORKER
+  TOOL
+  WORKFLOW
+  CONNECTOR
+  TRIGGER
+  KNOWLEDGE_PACK
+  PROMPT_PACK
+  DASHBOARD
+  POLICY
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  /// Pulled by moderation. Existing installs keep working; new ones are blocked.
+  SUSPENDED
+  /// Still installable, but the publisher has signalled it is going away.
+  DEPRECATED
+}
+
+enum PublisherTrust {
+  UNVERIFIED
+  VERIFIED
+  PARTNER
+  OFFICIAL
+}
+
+enum AdvisorySeverity {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+enum GovernanceReviewStatus {
+  PENDING
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+}
+
+enum GovernanceSubject {
+  LISTING_VERSION
+  PUBLISHER
+  ADVISORY
+}
+
+enum UpgradeOutcome {
+  PENDING
+  /// Impossible or incoherent — a downgrade, an engine mismatch, a bad version.
+  BLOCKED
+  /// Possible, but changes the deal the operator agreed to.
+  AWAITING_CONSENT
+  APPLIED
+  FAILED
+  ROLLED_BACK
+}
+
+// ------------------------------------------------------------
+// Extension runtime
+// ------------------------------------------------------------
+
+/// One row per lifecycle transition attempted on an extension.
+model ExtensionLifecycleEvent {
+  id             String           @id @default(cuid())
+  organizationId String
+  extensionId    String
+  phase          ExtensionPhase
+  outcome        LifecycleOutcome
+  fromStatus     ExtensionStatus?
+  toStatus       ExtensionStatus?
+  version        String?
+  /// Phase-specific detail: validation errors, granted capabilities, the
+  /// upgrade analysis. Bounded before it is written.
+  detail         Json             @default("{}")
+  message        String?
+  durationMs     Int?
+  actorId        String?
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  extension    Extension    @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, extensionId, createdAt])
+  @@index([organizationId, phase, outcome])
+  @@map("extension_lifecycle_events")
+}
+
+/// A worker type, tool or trigger an extension contributed to the platform.
+///
+/// Contributions are registered rather than executed at install time, so the
+/// catalogue is knowable without running anything, and a disabled extension's
+/// contributions disappear from every lookup in one update.
+model ExtensionContribution {
+  id             String           @id @default(cuid())
+  organizationId String
+  extensionId    String
+  kind           ContributionKind
+  /// Namespaced at registration as `<extension-slug>.<declared key>`, so two
+  /// extensions can contribute a tool called `search` without colliding.
+  key            String
+  name           String
+  description    String?
+  definition     Json             @default("{}")
+  /// The slice of the extension's grant this contribution runs under. Always a
+  /// subset — attenuation can narrow, never widen.
+  capabilities   String[]         @default([])
+  enabled        Boolean          @default(true)
+  /// Worker row materialised for WORKER contributions.
+  workerId       String?
+  /// Trigger row materialised for TRIGGER contributions.
+  triggerId      String?
+  invocations    Int              @default(0)
+  failures       Int              @default(0)
+  lastInvokedAt  DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  extension    Extension    @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, kind, key])
+  @@index([organizationId, extensionId])
+  @@index([organizationId, kind, enabled])
+  @@map("extension_contributions")
+}
+
+/// An extension's private keyspace.
+///
+/// Partitioned by extension, so `can_persist_state` borrows no organization
+/// permission: an extension reading its own settings is not reading anything
+/// that belonged to anyone else.
+model ExtensionState {
+  id             String   @id @default(cuid())
+  organizationId String
+  extensionId    String
+  key            String
+  value          Json
+  /// Serialised size, summed to enforce the storage ceiling without a scan.
+  bytes          Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  extension    Extension    @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+
+  @@unique([extensionId, key])
+  @@index([organizationId, extensionId])
+  @@map("extension_state")
+}
+
+/// Every call an extension made into the host, allowed or not.
+///
+/// Denials matter more than successes here: an extension repeatedly reaching
+/// for a capability it was not granted is the signal that it is doing
+/// something other than what its listing said.
+model ExtensionHostCall {
+  id             String          @id @default(cuid())
+  organizationId String
+  extensionId    String
+  method         String
+  capability     String?
+  decision       SandboxDecision
+  reason         String?
+  durationMs     Int             @default(0)
+  /// Bounded snapshot of the arguments — enough to diagnose, not enough to
+  /// turn the audit log into a second copy of the data.
+  argsPreview    Json            @default("{}")
+  contributionId String?
+  createdAt      DateTime        @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  extension    Extension    @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, extensionId, createdAt])
+  @@index([organizationId, decision, createdAt])
+  @@map("extension_host_calls")
+}
+
+/// An attempted version change, with the analysis that justified or blocked it.
+///
+/// The snapshot is what makes rollback a restore rather than a reinstall: the
+/// previous manifest, config and grant are captured before anything is written.
+model ExtensionUpgrade {
+  id                  String         @id @default(cuid())
+  organizationId      String
+  extensionId         String
+  fromVersion         String
+  toVersion           String
+  /// MAJOR, MINOR, PATCH or PRERELEASE.
+  release             String         @default("PATCH")
+  outcome             UpgradeOutcome @default(PENDING)
+  breaking            Boolean        @default(false)
+  blocked             Boolean        @default(false)
+  /// The full `[{ severity, code, message }]` list from the analysis.
+  changes             Json           @default("[]")
+  addedCapabilities   String[]       @default([])
+  removedCapabilities String[]       @default([])
+  migrations          Json           @default("[]")
+  /// Everything needed to put the old version back.
+  snapshot            Json           @default("{}")
+  consentedById       String?
+  consentedAt         DateTime?
+  appliedAt           DateTime?
+  rolledBackAt        DateTime?
+  error               String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  extension    Extension    @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, extensionId, createdAt])
+  @@index([organizationId, outcome])
+  @@map("extension_upgrades")
+}
+
+// ------------------------------------------------------------
+// Marketplace — global catalogue, owner-write
+// ------------------------------------------------------------
+
+/// A publishing identity. Global: the same publisher appears identically to
+/// every organization, which is the whole point of verification.
+model Publisher {
+  id                  String         @id @default(cuid())
+  slug                String         @unique
+  displayName         String
+  /// The organization that controls this identity.
+  ownerOrganizationId String
+  contactEmail        String?
+  website             String?
+  trust               PublisherTrust @default(UNVERIFIED)
+  verifiedAt          DateTime?
+  verifiedById        String?
+  /// Public material releases are verified against.
+  signingKey          String?
+  suspendedAt         DateTime?
+  suspensionReason    String?
+  listingCount        Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  owner      Organization         @relation(fields: [ownerOrganizationId], references: [id], onDelete: Cascade)
+  listings   MarketplaceListing[]
+  extensions Extension[]
+
+  @@index([ownerOrganizationId])
+  @@index([trust])
+  @@map("publishers")
+}
+
+/// A marketplace entry. The mutable head; installable content lives in
+/// versions, so a listing edit never changes what an existing install runs.
+model MarketplaceListing {
+  id                  String               @id @default(cuid())
+  assetKind           MarketplaceAssetKind
+  slug                String
+  name                String
+  summary             String
+  description         String?
+  publisherId         String
+  ownerOrganizationId String
+  license             String               @default("proprietary")
+  homepage            String?
+  documentation       String?
+  tags                String[]             @default([])
+  /// Highest published, non-yanked version.
+  latestVersion       String               @default("0.0.0")
+  /// Platform API range the latest version supports.
+  compatibility       String               @default("*")
+  /// Capabilities the latest version requests, denormalised so the catalogue
+  /// can be filtered by risk without joining every version row.
+  capabilities        String[]             @default([])
+  riskLevel           CapabilityRiskLevel  @default(LOW)
+  status              ListingStatus        @default(DRAFT)
+  downloads           Int                  @default(0)
+  installCount        Int                  @default(0)
+  /// Sum and count rather than a stored average, so a new rating is one
+  /// increment and the average is never drifting from its inputs.
+  ratingSum           Int                  @default(0)
+  ratingCount         Int                  @default(0)
+  deprecatedAt        DateTime?
+  deprecationNotice   String?
+  supersededBySlug    String?
+  suspendedAt         DateTime?
+  suspensionReason    String?
+  publishedAt         DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  publisher  Publisher            @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+  versions   MarketplaceVersion[]
+  reviews    MarketplaceReview[]
+  advisories SecurityAdvisory[]
+  installs   Extension[]
+
+  @@unique([assetKind, slug])
+  @@index([status, assetKind])
+  @@index([publisherId])
+  @@index([ownerOrganizationId])
+  @@map("marketplace_listings")
+}
+
+/// One immutable release of a listing.
+model MarketplaceVersion {
+  id            String                 @id @default(cuid())
+  listingId     String
+  version       String
+  manifest      Json                   @default("{}")
+  /// sha256 of the security-relevant manifest fields.
+  digest        String                 @default("")
+  signature     String?
+  signedBy      String?
+  changelog     String?
+  /// True when the analysis against the previous version found breaking changes.
+  breaking      Boolean                @default(false)
+  capabilities  String[]               @default([])
+  riskLevel     CapabilityRiskLevel    @default(LOW)
+  compatibility String                 @default("*")
+  /// A yanked version stays visible to anyone already on it — so they can see
+  /// why — but can never be newly installed.
+  yankedAt      DateTime?
+  yankReason    String?
+  reviewStatus  GovernanceReviewStatus @default(PENDING)
+  downloads     Int                    @default(0)
+  publishedById String?
+  publishedAt   DateTime               @default(now())
+
+  listing MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, version])
+  @@index([listingId, publishedAt])
+  @@map("marketplace_versions")
+}
+
+/// A published security advisory against a range of versions.
+model SecurityAdvisory {
+  id             String           @id @default(cuid())
+  listingId      String?
+  /// Kept as a slug too, so an advisory survives the listing being removed.
+  affectedSlug   String
+  severity       AdvisorySeverity
+  title          String
+  summary        String
+  /// Semver range of affected versions.
+  affectedRange  String
+  patchedVersion String?
+  reference      String?
+  /// Organization that raised it. Advisories themselves are readable by all.
+  raisedByOrgId  String?
+  publishedById  String?
+  publishedAt    DateTime         @default(now())
+  withdrawnAt    DateTime?
+
+  listing MarketplaceListing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+
+  @@index([affectedSlug])
+  @@index([listingId])
+  @@index([severity, publishedAt])
+  @@map("security_advisories")
+}
+
+/// A moderation decision on a listing version, a publisher or an advisory.
+model GovernanceReview {
+  id               String                 @id @default(cuid())
+  subject          GovernanceSubject
+  subjectId        String
+  /// Denormalised so the queue renders without a join per row.
+  subjectLabel     String                 @default("")
+  status           GovernanceReviewStatus @default(PENDING)
+  /// Capabilities under review, and what the automated checks found.
+  capabilities     String[]               @default([])
+  riskLevel        CapabilityRiskLevel    @default(LOW)
+  findings         Json                   @default("[]")
+  notes            String?
+  reviewerId       String?
+  requestedById    String?
+  /// Organization that submitted the subject, for attribution in the queue.
+  requestedByOrgId String?
+  decidedAt        DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([status, createdAt])
+  @@index([subject, subjectId])
+  @@map("governance_reviews")
+}
+
+/// An organization's rating of a listing. Tenant-scoped: the aggregate on the
+/// listing is public, the individual review belongs to whoever wrote it.
+model MarketplaceReview {
+  id             String    @id @default(cuid())
+  organizationId String
+  listingId      String
+  /// 1 to 5.
+  rating         Int
+  title          String?
+  body           String?
+  /// The version being rated, so a fixed complaint is identifiable as stale.
+  version        String?
+  authorId       String?
+  /// Hidden by moderation and excluded from the aggregate; the row is kept so
+  /// the decision is auditable rather than a silent deletion.
+  hiddenAt       DateTime?
+  hiddenReason   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  listing      MarketplaceListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, listingId])
+  @@index([listingId])
+  @@map("marketplace_reviews")
+}
+
+// ------------------------------------------------------------
+// Developer portal
+// ------------------------------------------------------------
+
+/// A registered integration built against the public API.
+model DeveloperApp {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  description    String?
+  homepage       String?
+  /// Publisher identity this app publishes marketplace assets under.
+  publisherId    String?
+  /// Where the platform calls back to.
+  webhookUrl     String?
+  /// Sealed. Deliveries carry an HMAC computed with it.
+  webhookSecret  String?
+  enabled        Boolean   @default(true)
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  apiKeys      ApiKey[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@map("developer_apps")
+}
+
+/// Daily public-API usage, rolled up per app, key and endpoint.
+///
+/// `appId` and `apiKeyId` are plain columns rather than foreign keys: the slice
+/// keys use an empty-string sentinel (see below), which no foreign key could
+/// satisfy, and a usage row should outlive the key that produced it anyway.
+model DeveloperApiUsage {
+  id              String   @id @default(cuid())
+  organizationId  String
+  /// Empty string rather than NULL for both slice keys: Postgres treats NULLs
+  /// as distinct in a unique index, so a nullable slice would accumulate a new
+  /// duplicate row on every increment instead of updating one.
+  appId           String   @default("")
+  apiKeyId        String   @default("")
+  day             DateTime @db.Date
+  endpoint        String   @default("")
+  requests        Int      @default(0)
+  errors          Int      @default(0)
+  throttled       Int      @default(0)
+  totalDurationMs Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, appId, apiKeyId, day, endpoint])
+  @@index([organizationId, day])
+  @@map("developer_api_usage")
 }

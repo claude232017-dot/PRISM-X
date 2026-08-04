@@ -40,10 +40,12 @@ import {
 } from 'class-validator';
 import { ExtensionRepository } from '../database/repositories/tenant.repositories';
 import { EventBusService } from '../events/event-bus.service';
-import { DomainEvent } from '../events/domain-events';
+import { RequestContextStore } from '../shared/context/request-context';
 import { PaginationQueryDto, paginate } from '../shared/dto/pagination.dto';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { Permissions } from '../auth/permissions';
+import { PlatformModule } from '../platform/platform.module';
+import { ExtensionRuntimeService } from '../platform/extension-runtime.service';
 
 // ---------------------------------------------------------------- DTOs
 
@@ -95,11 +97,26 @@ export class QueryExtensionsDto extends PaginationQueryDto {
 
 // ------------------------------------------------------------- Service
 
+/**
+ * The simple extension registry.
+ *
+ * Phase 7 replaced the machinery behind these endpoints with the full
+ * lifecycle — validation, the capability grant, contribution registration,
+ * initialization, the audit trail. This service now composes a manifest from
+ * the flat DTO and hands it to `ExtensionRuntimeService`, so there is exactly
+ * one install path rather than two that could disagree about what an
+ * extension is allowed to do.
+ *
+ * The endpoints and their shapes are unchanged: an extension installed here
+ * declares no capabilities, holds an empty grant, and is therefore denied
+ * every host call. That is the correct outcome for a manifest that asked for
+ * nothing, and it is why the two paths can safely share a table.
+ */
 @Injectable()
 export class ExtensionsService {
   constructor(
     private readonly extensions: ExtensionRepository,
-    private readonly events: EventBusService,
+    private readonly runtime: ExtensionRuntimeService,
   ) {}
 
   async install(dto: InstallExtensionDto): Promise<Extension> {
@@ -107,20 +124,22 @@ export class ExtensionsService {
       throw new ConflictException(`An extension with slug "${dto.slug}" is already installed`);
     }
 
-    const extension = await this.extensions.create({
-      name: dto.name,
-      slug: dto.slug,
-      version: dto.version ?? '1.0.0',
-      manifest: (dto.manifest ?? {}) as never,
-      subscribes: dto.subscribes ?? [],
-      status: ExtensionStatus.INSTALLED,
+    const supplied = (dto.manifest ?? {}) as Record<string, unknown>;
+    const result = await this.runtime.install({
+      manifest: {
+        // Anything the caller put in `manifest` is honoured — capabilities,
+        // contributions, config — but identity always comes from the DTO,
+        // which is what these endpoints have always treated as canonical.
+        ...supplied,
+        slug: dto.slug,
+        name: dto.name,
+        version: dto.version ?? '1.0.0',
+        capabilities: Array.isArray(supplied.capabilities) ? supplied.capabilities : [],
+        subscribes: dto.subscribes ?? [],
+      },
     });
 
-    await this.events.publish(DomainEvent.ExtensionInstalled, {
-      extensionId: extension.id,
-      slug: extension.slug,
-    });
-    return extension;
+    return result.extension!;
   }
 
   async findAll(query: QueryExtensionsDto) {
@@ -145,33 +164,26 @@ export class ExtensionsService {
     return this.extensions.update(id, patch as Record<string, unknown>);
   }
 
-  async enable(id: string): Promise<Extension> {
-    await this.extensions.findByIdOrFail(id);
-    const updated = await this.extensions.update(id, { status: ExtensionStatus.ENABLED });
-    await this.events.publish(DomainEvent.ExtensionEnabled, { extensionId: id });
-    return updated;
+  enable(id: string): Promise<Extension> {
+    return this.runtime.enable(id);
   }
 
-  async disable(id: string): Promise<Extension> {
-    await this.extensions.findByIdOrFail(id);
-    const updated = await this.extensions.update(id, { status: ExtensionStatus.DISABLED });
-    await this.events.publish(DomainEvent.ExtensionDisabled, { extensionId: id });
-    return updated;
+  disable(id: string): Promise<Extension> {
+    return this.runtime.disable(id);
   }
 
-  async remove(id: string): Promise<void> {
-    await this.extensions.findByIdOrFail(id);
-    await this.extensions.remove(id);
+  remove(id: string): Promise<void> {
+    return this.runtime.uninstall(id);
   }
 }
 
 /**
- * Bridges the event bus to installed extensions.
+ * Delivers domain events to the extensions that subscribed to them.
  *
- * Phase 1 records which enabled extensions would have received each event.
- * Actual dispatch (sandboxed execution, webhooks) arrives in a later phase —
- * the subscription wiring is proven here so that adding delivery is a change
- * in one method rather than a new integration point.
+ * Phase 1 established the subscription wiring and logged what *would* have
+ * been delivered. Phase 7 makes the delivery real: each subscriber is handed
+ * the event through the sandbox, under its own grant, and one extension
+ * failing on one event neither stops the others nor goes unrecorded.
  */
 @Injectable()
 export class ExtensionEventBridge implements OnModuleInit {
@@ -180,6 +192,7 @@ export class ExtensionEventBridge implements OnModuleInit {
   constructor(
     private readonly bus: EventBusService,
     private readonly extensions: ExtensionRepository,
+    private readonly runtime: ExtensionRuntimeService,
   ) {}
 
   onModuleInit(): void {
@@ -188,12 +201,35 @@ export class ExtensionEventBridge implements OnModuleInit {
       if (event.name.startsWith('extension.')) return;
 
       try {
-        const subscribers = await this.extensions.findSubscribers(event.name);
-        if (subscribers.length) {
-          this.logger.debug(
-            `"${event.name}" -> ${subscribers.map((e) => e.slug).join(', ')}`,
-          );
-        }
+        // The bus delivers asynchronously, after the originating request's
+        // context has been torn down, so the tenant has to be re-entered from
+        // the envelope. Without this every lookup below fails closed — which
+        // is the right failure, but it means no extension ever hears anything.
+        await RequestContextStore.run(
+          {
+            userId: 'system',
+            organizationId: event.organizationId,
+            roleKey: 'SYSTEM',
+            permissions: ['*'],
+            requestId: `extension-fanout-${event.name}`,
+          },
+          async () => {
+            const subscribers = await this.extensions.findSubscribers(event.name);
+            if (!subscribers.length) return;
+
+            this.logger.debug(`"${event.name}" -> ${subscribers.map((e) => e.slug).join(', ')}`);
+
+            // Sequential rather than parallel: each delivery draws on the
+            // extension's own rate budget, and fanning out concurrently would
+            // let one busy event burn a whole minute's allowance at once.
+            for (const subscriber of subscribers) {
+              await this.runtime.deliver(subscriber, {
+                name: event.name,
+                payload: event.payload as Record<string, unknown>,
+              });
+            }
+          },
+        );
       } catch (error) {
         this.logger.error(`Extension fan-out failed: ${(error as Error).message}`);
       }
@@ -339,6 +375,7 @@ export class ExtensionsController {
 }
 
 @Module({
+  imports: [PlatformModule],
   controllers: [ExtensionsController],
   providers: [ExtensionsService, ExtensionEventBridge],
   exports: [ExtensionsService],

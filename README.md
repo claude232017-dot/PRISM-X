@@ -734,7 +734,40 @@ organization sets its own ceiling through an Evolution Policy: which change
 kinds are allowed at all, which always need a person, confidence thresholds,
 deployment windows and auto-rollback behaviour.
 
+**Phase 7 — Platform & Extensibility** opens PRISM-X to other people. Extensions
+install through a full lifecycle, contribute worker types, tools and triggers,
+run inside a sandbox, publish to a marketplace of ten asset kinds, and reach the
+system only through a versioned SDK. A developer portal documents it, and
+platform governance — publisher verification, moderation, deprecation, signed
+releases, security advisories — keeps the ecosystem from degrading the platform
+underneath it.
+
+The organizing idea is **capability-based architecture**. Instead of asking "is
+this a Worker?" or "is this an Extension?", every component declares what it is
+allowed to do — `can_execute_missions`, `can_access_knowledge`,
+`can_manage_workers`, `can_register_triggers`, `can_send_notifications`,
+`can_invoke_external_apis`, and ten more — and the platform grants capabilities
+rather than broad access. A contributed worker and a native one pass the
+identical check, because the check reads a capability set rather than a type.
+
+Two properties are load-bearing. **Grants intersect, never union**: an
+extension's authority is what it asked for *and* what the person installing it
+already holds, so an operator who cannot delete workers cannot install an
+extension that does — the capability is withheld, recorded, and the extension
+runs with the smaller set. And **a capability is the only route in**: the
+sandbox refuses any host method no capability claims, and refuses to boot at all
+if the implemented surface and the guarded surface disagree, so an unguarded
+method is a startup failure rather than a hole.
+
+Breaking changes are caught before installation, not after: upgrades are decided
+by diffing two manifests, separating what is *impossible* (a downgrade, an
+incompatible engine range) from what merely *changes the deal* and therefore
+needs fresh consent (a new capability, a removed tool, a newly required
+setting). Marketplace releases are signed with Ed25519 keys the platform can
+verify but never produce, and a security advisory does not just warn — it
+quarantines every affected install across every organization.
+
 See `backend/README.md` for architecture, the decisions behind it, and how to
-run it. Verified against live PostgreSQL and Redis with 422 unit tests and six
+run it. Verified against live PostgreSQL and Redis with 477 unit tests and seven
 end-to-end suites: 57 (Phase 1), 58 (Phase 2), 74 (Phase 3), 112 (Phase 4),
-86 (Phase 5) and 86 (Phase 6) checks.
+86 (Phase 5), 86 (Phase 6) and 84 (Phase 7) checks.

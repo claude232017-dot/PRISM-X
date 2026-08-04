@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { ApiKey } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import { ApiKeyRepository } from '../database/repositories/automation.repositories';
@@ -6,6 +6,7 @@ import { CacheService } from '../shared/cache/cache.service';
 import { EventBusService } from '../events/event-bus.service';
 import { DomainEvent } from '../events/domain-events';
 import { RequestContextStore } from '../shared/context/request-context';
+import { AuthService } from '../auth/auth.service';
 
 export interface IssuedApiKey {
   id: string;
@@ -37,7 +38,7 @@ export interface ResolvedApiKey {
  * already describe.
  */
 @Injectable()
-export class ApiKeyService {
+export class ApiKeyService implements OnModuleInit {
   private readonly logger = new Logger(ApiKeyService.name);
   private static readonly PREFIX = 'px';
   private static readonly CACHE_TTL = 60;
@@ -46,7 +47,14 @@ export class ApiKeyService {
     private readonly keys: ApiKeyRepository,
     private readonly cache: CacheService,
     private readonly events: EventBusService,
+    private readonly auth: AuthService,
   ) {}
+
+  onModuleInit(): void {
+    // Hands the auth guard a way to turn a presented key into a principal,
+    // without the guard needing to know this service exists.
+    this.auth.onApiKeyResolver((presented) => this.resolve(presented));
+  }
 
   async issue(input: {
     name: string;

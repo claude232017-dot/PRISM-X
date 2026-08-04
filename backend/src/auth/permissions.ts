@@ -102,6 +102,19 @@ export const Permissions = {
   EvolutionDeploy: 'evolution:deploy',
   /** Amend the organization's evolution policy. */
   EvolutionPolicyManage: 'evolution:policy',
+
+  // Marketplace — the shared catalogue. Reading it, adding to it and policing
+  // it are three different levels of trust, and the third one reaches beyond
+  // this organization: a moderator's decision is felt by every tenant.
+  MarketplaceRead: 'marketplace:read',
+  /** Register a publisher, create a listing, publish a version. */
+  MarketplacePublish: 'marketplace:publish',
+  /** Approve, suspend, verify, yank, issue advisories. */
+  MarketplaceModerate: 'marketplace:moderate',
+
+  // Developer portal — registering apps and issuing keys against the public API.
+  DeveloperRead: 'developer:read',
+  DeveloperManage: 'developer:manage',
 } as const;
 
 export type PermissionKey = (typeof Permissions)[keyof typeof Permissions];
@@ -173,6 +186,11 @@ export const ROLE_PERMISSIONS: Record<SystemRoleKey, PermissionKey[]> = {
     // touch nothing. Approving and deploying stay with administrators.
     Permissions.EvolutionRead,
     Permissions.EvolutionRun,
+    // An operator may browse the marketplace and read what the organization's
+    // developers have registered. Publishing puts this organization's name on
+    // something every other tenant can install, so it stays with an admin.
+    Permissions.MarketplaceRead,
+    Permissions.DeveloperRead,
   ],
 
   [SystemRole.Viewer]: readOnly,
