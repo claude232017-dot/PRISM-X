@@ -1,13 +1,23 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { MissionOrchestrator } from './mission-orchestrator.service';
+import { MAX_WAIT_SECONDS, MissionQueueService } from './mission-queue.service';
 import { ExecutionLogRepository } from '../../database/repositories/execution.repositories';
 import { RequirePermissions } from '../../auth/decorators/permissions.decorator';
 import { Permissions } from '../../auth/permissions';
@@ -23,8 +33,19 @@ import { Permissions } from '../../auth/permissions';
 export class MissionExecutionController {
   constructor(
     private readonly orchestrator: MissionOrchestrator,
+    private readonly queue: MissionQueueService,
     private readonly executionLogs: ExecutionLogRepository,
   ) {}
+
+  /** Parses `?wait=` into a bounded number of seconds. */
+  private static waitSeconds(raw?: string): number {
+    if (raw === undefined) return 0;
+    // `?wait` with no value means "wait as long as you're allowed".
+    if (raw === '' || raw === 'true') return MAX_WAIT_SECONDS;
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    return Math.min(parsed, MAX_WAIT_SECONDS);
+  }
 
   @Post('plan')
   @RequirePermissions(Permissions.MissionExecute)
@@ -61,34 +82,75 @@ export class MissionExecutionController {
 
   @Post('execute')
   @RequirePermissions(Permissions.MissionExecute)
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.ACCEPTED)
   @ApiParam({ name: 'id', example: 'clx0mission01' })
+  @ApiQuery({
+    name: 'wait',
+    required: false,
+    description:
+      `Seconds to wait for the outcome, up to ${MAX_WAIT_SECONDS}. The mission ` +
+      'runs on a queue worker either way; waiting only changes whether the ' +
+      'result comes back on this request or is polled from `/missions/:id`. ' +
+      'A wait that expires returns the job handle, not an error.',
+    example: 60,
+  })
   @ApiOperation({
     summary: 'Execute a mission',
     description:
-      'Runs the mission to completion or to its first blocking condition. Plans ' +
-      'first if needed, then walks the task graph in dependency waves — a task ' +
-      'starts only once everything it depends on has completed, and receives those ' +
-      'outputs as context. Mission status is derived from task state after each ' +
-      'wave, so COMPLETED, FAILED and WAITING are reached automatically.',
+      'Accepts the mission for execution and returns 202. The run happens on a ' +
+      'queue worker: it plans first if needed, then walks the task graph in ' +
+      'dependency waves — a task starts only once everything it depends on has ' +
+      'completed, and receives those outputs as context. Mission status is derived ' +
+      'from task state after each wave, so COMPLETED, FAILED and WAITING are ' +
+      'reached automatically.\n\n' +
+      'Execution is queued rather than inline because a mission is unbounded work: ' +
+      'holding an HTTP request open for it means a balancer timeout kills it ' +
+      'mid-wave, a deploy abandons it, nothing retries it, and nothing limits how ' +
+      'many run at once. Queued, it gets retries, a concurrency ceiling, and ' +
+      'survival across a restart. Pass `?wait=` when you want the answer inline.',
   })
   @ApiOkResponse({
     schema: {
       example: {
         missionId: 'clx0mission01',
-        status: 'COMPLETED',
-        tasksExecuted: 3,
-        tasksSucceeded: 3,
-        tasksFailed: 0,
-        totalCostUsd: 0,
-        totalTokens: 1524,
-        durationMs: 96,
+        status: 'QUEUED',
+        jobId: 'mission-clx0mission01',
+        queue: 'mission-execution',
+        accepted: true,
+        statusUrl: '/missions/clx0mission01',
       },
     },
   })
   @ApiBadRequestResponse({ description: 'The mission is in a state that cannot be executed.' })
-  execute(@Param('id') id: string) {
-    return this.orchestrator.run(id);
+  execute(@Param('id') id: string, @Query('wait') wait?: string) {
+    return this.queue.enqueue(id, {
+      waitSeconds: MissionExecutionController.waitSeconds(wait),
+    });
+  }
+
+  @Get('job/:jobId')
+  @RequirePermissions(Permissions.MissionRead)
+  @ApiParam({ name: 'id', example: 'clx0mission01' })
+  @ApiParam({ name: 'jobId', example: 'mission-clx0mission01' })
+  @ApiOperation({
+    summary: 'State of an accepted execution job',
+    description:
+      'For a caller that did not wait. Reports the queue state, how many attempts ' +
+      'have been made, and the result or failure reason once there is one.',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        jobId: 'mission-clx0mission01',
+        state: 'completed',
+        attemptsMade: 1,
+        result: { status: 'COMPLETED', tasksExecuted: 3 },
+        failedReason: null,
+      },
+    },
+  })
+  job(@Param('jobId') jobId: string) {
+    return this.queue.job(jobId);
   }
 
   @Post('resume')
@@ -97,7 +159,9 @@ export class MissionExecutionController {
   @ApiParam({ name: 'id', example: 'clx0mission01' })
   @ApiOperation({
     summary: 'Resume a paused or waiting mission',
-    description: 'Picks up from the current task state. Emits `mission.resumed`.',
+    description:
+      'Picks up from the current task state, on a queue worker. Emits ' +
+      '`mission.resumed`. Accepts `?wait=` exactly as `execute` does.',
   })
   @ApiOkResponse({
     schema: {
@@ -114,8 +178,13 @@ export class MissionExecutionController {
     },
   })
   @ApiBadRequestResponse({ description: 'Mission is neither PAUSED nor WAITING.' })
-  resume(@Param('id') id: string) {
-    return this.orchestrator.resume(id);
+  resume(@Param('id') id: string, @Query('wait') wait?: string) {
+    // Queued on the same terms as `execute`: resuming re-enters the same
+    // unbounded walk of the task graph, so it belongs in the same place.
+    return this.queue.enqueue(id, {
+      intent: 'resume',
+      waitSeconds: MissionExecutionController.waitSeconds(wait),
+    });
   }
 
   @Post('retry')

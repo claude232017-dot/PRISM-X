@@ -281,6 +281,10 @@ export class EvolutionPolicyService {
 
     const hour = at.getUTCHours();
 
+    // `end` is exclusive and may be 24, meaning midnight — so 0–24 is a window
+    // that is always open. Without that, `hour < end` left the 23:00 hour
+    // outside every possible window.
+    //
     // A window that wraps midnight (22:00 to 04:00) is a real thing an
     // operations team asks for, and reading it as an empty window would
     // silently block every deployment.

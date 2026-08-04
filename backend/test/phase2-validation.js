@@ -394,7 +394,9 @@ const ACCOUNT = {
     planned?.plan?.waves?.every((w) => w.tasks.every((x) => x.workerId)),
   );
 
-  const run = await api('POST', `/missions/${mission.id}/execute`, t());
+  // `?wait=` blocks on the queued job rather than running the mission inside
+  // the request — the work happens on a queue worker either way.
+  const run = await api('POST', `/missions/${mission.id}/execute?wait=60`, t());
   check(
     'mission executes to completion',
     run?.status === 'COMPLETED' && run?.tasksSucceeded === 3 && run?.tasksFailed === 0,
@@ -453,7 +455,7 @@ const ACCOUNT = {
     },
   });
   // maxRetries defaults to 2, so this task is attempted three times overall.
-  const failRun = await api('POST', `/missions/${failMission.id}/execute`, t());
+  const failRun = await api('POST', `/missions/${failMission.id}/execute?wait=60`, t());
   check(
     'a mission whose tasks cannot succeed ends FAILED rather than hanging',
     failRun?.status === 'FAILED',
@@ -474,7 +476,7 @@ const ACCOUNT = {
   const cancelled = await api('POST', `/missions/${cancelMission.id}/cancel`, t());
   check('a mission can be cancelled', cancelled?.status === 'CANCELLED');
 
-  const badTransition = await api('POST', `/missions/${cancelMission.id}/execute`, {
+  const badTransition = await api('POST', `/missions/${cancelMission.id}/execute?wait=60`, {
     ...t(),
     raw: true,
   });
@@ -667,7 +669,7 @@ const ACCOUNT = {
     Array.isArray(otherMemory) && otherMemory.length === 0,
   );
 
-  const otherRun = await api('POST', `/missions/${mission.id}/execute`, {
+  const otherRun = await api('POST', `/missions/${mission.id}/execute?wait=60`, {
     token: otherToken,
     raw: true,
   });

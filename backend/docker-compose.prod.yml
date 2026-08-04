@@ -66,6 +66,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Per instance; multiplied by `replicas` below. This is the throttle on
+      # concurrent provider calls across the fleet.
+      MISSION_CONCURRENCY: ${MISSION_CONCURRENCY:-5}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY}

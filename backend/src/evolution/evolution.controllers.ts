@@ -160,8 +160,17 @@ export class UpdatePolicyDto {
   @ApiPropertyOptional({ example: 9, description: 'UTC hour deployment may start.' })
   @IsOptional() @IsInt() @Min(0) @Max(23) businessHoursStart?: number;
 
-  @ApiPropertyOptional({ example: 17, description: 'UTC hour deployment must stop.' })
-  @IsOptional() @IsInt() @Min(0) @Max(23) businessHoursEnd?: number;
+  @ApiPropertyOptional({
+    example: 17,
+    description:
+      'UTC hour deployment must stop, exclusive. 24 means midnight, so 0–24 is ' +
+      'a window that is always open.',
+  })
+  // Up to 24, not 23. The comparison is `hour < end`, so a ceiling of 23 made
+  // the 23:00 hour unreachable by any configuration — deployments were blocked
+  // for one hour a day with a message that read as if a window were closed on
+  // purpose.
+  @IsOptional() @IsInt() @Min(0) @Max(24) businessHoursEnd?: number;
 
   @ApiPropertyOptional({ type: [Number], example: [1, 2, 3, 4, 5], description: '0 = Sunday.' })
   @IsOptional() @IsArray() @IsInt({ each: true }) businessDays?: number[];

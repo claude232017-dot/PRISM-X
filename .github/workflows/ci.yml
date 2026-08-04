@@ -223,6 +223,8 @@ jobs:
             echo "--- Phase $phase ---"
             node test/phase${phase}-validation.js
           done
+          echo "--- Phase Omega ---"
+          node test/omega-validation.js
 
       - name: Production readiness review
         # Informational on a branch: a CI environment legitimately fails checks

@@ -10,6 +10,11 @@ import { IntegrationManager } from '../../integrations/integration-manager.servi
 import { WorkerRuntimeService } from '../../workers/runtime/worker-runtime.service';
 import { MissionsService } from '../../missions/missions.service';
 import { MissionOrchestrator } from '../../missions/orchestrator/mission-orchestrator.service';
+import {
+  MAX_WAIT_SECONDS,
+  MissionQueueService,
+} from '../../missions/orchestrator/mission-queue.service';
+import type { MissionRunResult } from '../../missions/orchestrator/mission-orchestrator.service';
 import { resolveTemplate } from '../../integrations/connectors/http-connector';
 
 /**
@@ -31,6 +36,7 @@ export class InternalExecutionAdapter implements IExecutionAdapter {
     private readonly integrations: IntegrationManager,
     private readonly missions: MissionsService,
     private readonly orchestrator: MissionOrchestrator,
+    private readonly missionQueue: MissionQueueService,
   ) {}
 
   async execute(step: WorkflowStep, ctx: AdapterExecutionContext): Promise<AdapterResult> {
@@ -122,7 +128,27 @@ export class InternalExecutionAdapter implements IExecutionAdapter {
           tasks: (config.tasks as never) ?? [],
         });
 
-    const run = await this.orchestrator.run(mission.id);
+    // Queued like every other execution, then waited on. A workflow step needs
+    // the mission's output before the next step can run, so it does block — but
+    // the mission runs on a queue worker with its retries and its concurrency
+    // ceiling, rather than inside whatever is driving the workflow.
+    const outcome = await this.missionQueue.enqueue(mission.id, {
+      waitSeconds: MAX_WAIT_SECONDS,
+    });
+
+    if ('accepted' in outcome) {
+      // The wait expired. The mission is still running; the step reports that
+      // honestly rather than claiming a failure or a success.
+      return {
+        ok: false,
+        output: outcome,
+        error:
+          `Mission ${mission.id} is still running after ${MAX_WAIT_SECONDS}s — ` +
+          'poll it rather than treating this step as failed',
+      };
+    }
+
+    const run = outcome as MissionRunResult;
     return {
       ok: run.status === 'COMPLETED',
       output: run,

@@ -148,7 +148,7 @@ const ACCOUNT = {
       process.exit(1);
     }
     await api('POST', `/missions/${mission.id}/plan`, t());
-    await api('POST', `/missions/${mission.id}/execute`, t());
+    await api('POST', `/missions/${mission.id}/execute?wait=60`, t());
     missionIds.push(mission.id);
   }
 

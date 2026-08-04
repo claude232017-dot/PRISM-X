@@ -536,7 +536,7 @@ const ACCOUNT = {
       },
     });
     await api('POST', `/missions/${mission.id}/plan`, t());
-    await api('POST', `/missions/${mission.id}/execute`, t());
+    await api('POST', `/missions/${mission.id}/execute?wait=60`, t());
   }
 
   const analysis = await api('GET', '/evolution/planning/analysis', t());
@@ -666,7 +666,7 @@ const ACCOUNT = {
 
   await api('POST', '/evolution/policy', {
     ...t(),
-    body: { businessHoursStart: 0, businessHoursEnd: 23 },
+    body: { businessHoursStart: 0, businessHoursEnd: 24 },
   });
 
   const disabledPolicy = await api('POST', '/evolution/policy', {
