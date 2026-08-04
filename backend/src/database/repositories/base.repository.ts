@@ -66,6 +66,17 @@ export abstract class BaseRepository<TModel> {
     return RequestContextStore.require().organizationId;
   }
 
+  /**
+   * Runs before every read.
+   *
+   * A no-op by default. Repositories that buffer their writes override it to
+   * drain the buffer first, so "write then read" behaves the same whether or
+   * not batching is in play. Putting the hook here — rather than overriding
+   * each read method — means a read path added later is covered without anyone
+   * remembering to cover it.
+   */
+  protected async beforeRead(): Promise<void> {}
+
   /** Merges tenant scope (and soft-delete filter) into a caller's predicate. */
   protected scope(
     where: Record<string, unknown> = {},
@@ -80,6 +91,7 @@ export abstract class BaseRepository<TModel> {
   }
 
   async findById(id: string, options: ListOptions = {}): Promise<TModel | null> {
+    await this.beforeRead();
     return this.delegate().findFirst({
       where: this.scope({ id }, options),
       ...(options.include ? { include: options.include } : {}),
@@ -99,6 +111,7 @@ export abstract class BaseRepository<TModel> {
     where: Record<string, unknown> = {},
     options: ListOptions = {},
   ): Promise<TModel[]> {
+    await this.beforeRead();
     return this.delegate().findMany({
       where: this.scope(where, options),
       ...(options.skip !== undefined ? { skip: options.skip } : {}),
@@ -113,6 +126,7 @@ export abstract class BaseRepository<TModel> {
     where: Record<string, unknown> = {},
     options: ListOptions = {},
   ): Promise<{ rows: TModel[]; total: number }> {
+    await this.beforeRead();
     const scoped = this.scope(where, options);
     const [rows, total] = await Promise.all([
       this.delegate().findMany({
@@ -128,6 +142,7 @@ export abstract class BaseRepository<TModel> {
   }
 
   async count(where: Record<string, unknown> = {}): Promise<number> {
+    await this.beforeRead();
     return this.delegate().count({ where: this.scope(where) });
   }
 

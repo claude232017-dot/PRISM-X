@@ -9,7 +9,7 @@ export interface AppConfig {
   env: string;
   port: number;
   apiPrefix: string;
-  database: { url: string };
+  database: { url: string; connectionLimit: number; poolTimeoutSeconds: number };
   auth: {
     driver: AuthDriver;
     jwtSecret: string;
@@ -28,12 +28,20 @@ export interface AppConfig {
   swagger: { enabled: boolean; path: string };
 }
 
+/** Parses a positive integer from the environment, falling back on nonsense. */
+function positive(raw: string | undefined, fallback: number): number {
+  const value = Number.parseInt(raw ?? '', 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 export default (): AppConfig => ({
   env: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
   apiPrefix: process.env.API_PREFIX ?? 'api/v1',
   database: {
     url: process.env.DATABASE_URL ?? '',
+    connectionLimit: positive(process.env.DATABASE_CONNECTION_LIMIT, 10),
+    poolTimeoutSeconds: positive(process.env.DATABASE_POOL_TIMEOUT, 10),
   },
   auth: {
     driver: (process.env.AUTH_PROVIDER as AuthDriver) ?? 'local',

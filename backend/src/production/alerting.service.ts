@@ -5,6 +5,7 @@ import {
   AlertRuleRepository,
 } from '../database/repositories/production.repositories';
 import { Metric, MetricsService } from './metrics.service';
+import type { FleetMetrics } from './metrics.service';
 import { InstanceService } from './instance.service';
 
 /**
@@ -152,20 +153,35 @@ export class AlertingService implements OnModuleInit {
   }
 
   /** Resolves a rule's metric expression against the registry. */
-  private measure(rule: AlertRule): number | null {
+  /**
+   * Reads the value a rule is about.
+   *
+   * `fleet` is the merged view across every reporting instance, and the
+   * derived rules use it rather than this process's registry. Evaluation runs
+   * on the leader, so a locally-measured error rate would be one instance's
+   * share of the traffic — the alert would fire on a quarter of the evidence,
+   * or fail to, and either way for a reason unrelated to the deployment.
+   */
+  private measure(rule: AlertRule, fleet: FleetMetrics | null): number | null {
     const metric = rule.metric;
 
     if (metric.startsWith('percentile:')) {
       const [, name, quantile] = metric.split(':');
+      // The worst instance's percentile when the fleet view is available: a
+      // deployment where one instance is slow *is* a slow deployment.
+      if (fleet && name === Metric.HttpDuration && Number(quantile ?? 0.95) === 0.95) {
+        return fleet.worstInstanceP95Ms;
+      }
       return this.metrics.percentile(name, Number(quantile) || 0.95);
     }
 
     if (metric === 'derived:error_rate') {
-      const total = this.metrics.total(Metric.HttpRequests);
+      const total = fleet ? fleet.requests : this.metrics.total(Metric.HttpRequests);
       // Below a floor the ratio is noise: one failure in three requests is 33%
       // and means nothing. Returning null makes the rule abstain rather than
       // page someone about a sample size of three.
       if (total < 20) return null;
+      if (fleet) return fleet.errorRate;
       return this.metrics.total(Metric.HttpErrors) / total;
     }
 
@@ -191,11 +207,14 @@ export class AlertingService implements OnModuleInit {
 
   async evaluateAll(): Promise<{ evaluated: number; fired: number; resolved: number }> {
     const rules = await this.rules.list(true);
+    // Gathered once for the whole pass, so every rule is judged against the
+    // same view of the deployment rather than one that shifts between rules.
+    const fleet = await this.instances.fleetMetrics().catch(() => null);
     let fired = 0;
     let resolved = 0;
 
     for (const rule of rules) {
-      const outcome = await this.evaluate(rule);
+      const outcome = await this.evaluate(rule, fleet);
       if (outcome === 'fired') fired += 1;
       if (outcome === 'resolved') resolved += 1;
     }
@@ -203,8 +222,11 @@ export class AlertingService implements OnModuleInit {
     return { evaluated: rules.length, fired, resolved };
   }
 
-  private async evaluate(rule: AlertRule): Promise<'fired' | 'resolved' | 'quiet' | 'abstained'> {
-    const value = this.measure(rule);
+  private async evaluate(
+    rule: AlertRule,
+    fleet: FleetMetrics | null = null,
+  ): Promise<'fired' | 'resolved' | 'quiet' | 'abstained'> {
+    const value = this.measure(rule, fleet);
     if (value === null) {
       // Not enough data to judge. Clear any pending timer so a gap in traffic
       // does not accumulate toward a firing condition.

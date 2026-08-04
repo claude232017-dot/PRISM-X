@@ -10,6 +10,10 @@ import { randomBytes } from 'node:crypto';
 import * as os from 'node:os';
 import { Instance } from '@prisma/client';
 import { InstanceRepository } from '../database/repositories/production.repositories';
+import { CacheService } from '../shared/cache/cache.service';
+import { processHoldings } from '../shared/process-state';
+import { MetricsService } from './metrics.service';
+import type { FleetMetrics, InstanceMetrics } from './metrics.service';
 import type { Environment } from './readiness';
 
 /**
@@ -61,9 +65,21 @@ export class InstanceService implements OnModuleInit, OnApplicationShutdown {
   private handledRequests = 0n;
   private draining = false;
 
+  /**
+   * Where each instance publishes its share of the traffic figures.
+   *
+   * Short-lived on purpose: the key expires just after the next heartbeat is
+   * due, so an instance that dies stops contributing to the fleet view within
+   * one interval rather than skewing it until someone notices.
+   */
+  private static readonly METRICS_PREFIX = 'metrics:instance:';
+  private static readonly METRICS_TTL_SECONDS = 45;
+
   constructor(
     private readonly instances: InstanceRepository,
     private readonly config: ConfigService,
+    private readonly cache: CacheService,
+    private readonly metrics: MetricsService,
   ) {}
 
   get environment(): Environment {
@@ -148,6 +164,16 @@ export class InstanceService implements OnModuleInit, OnApplicationShutdown {
         handledRequests: this.handledRequests,
       });
 
+      // Publish this instance's share so readiness and alerting can evaluate
+      // the deployment rather than one process's quarter of it.
+      await this.cache
+        .set(
+          `${InstanceService.METRICS_PREFIX}${this.instanceId}`,
+          this.metrics.contribution(this.instanceId),
+          InstanceService.METRICS_TTL_SECONDS,
+        )
+        .catch(() => undefined);
+
       const held = this.draining
         ? false
         : await this.instances.claimLeadership(this.instanceId, InstanceService.LEASE_MS);
@@ -195,6 +221,25 @@ export class InstanceService implements OnModuleInit, OnApplicationShutdown {
       this.logger.error(`Leader task "${name}" failed: ${(error as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * Traffic figures across every instance that has reported recently.
+   *
+   * Falls back to this process alone when the shared cache is unreachable —
+   * a partial answer beats no answer, and the `instances` count makes the
+   * difference visible.
+   */
+  async fleetMetrics(): Promise<FleetMetrics> {
+    const published = await this.cache
+      .getByPrefix<InstanceMetrics>(InstanceService.METRICS_PREFIX)
+      .catch(() => [] as InstanceMetrics[]);
+
+    const contributions = published.length
+      ? published
+      : [this.metrics.contribution(this.instanceId)];
+
+    return MetricsService.merge(contributions);
   }
 
   // ------------------------------------------------------------- reporting
@@ -249,18 +294,32 @@ export class InstanceService implements OnModuleInit, OnApplicationShutdown {
    * Whether this process holds request state that would not survive being
    * rescheduled onto another instance.
    *
-   * Honest rather than hard-coded true: it reports what the process actually
-   * keeps. The in-flight counter and the leader flag are per-instance by
-   * design and are not request state, so they do not count against it.
+   * Measured rather than declared. This used to return a hard-coded `true`
+   * beside a list of reassuring prose, which meant the readiness review
+   * reported statelessness whether or not the process was stateless — a check
+   * that cannot fail is not a check. Now it reports what components actually
+   * registered, and `stateless` is false the moment any of it is load-bearing.
    */
-  statelessness(): { stateless: boolean; notes: string[] } {
+  statelessness(): {
+    stateless: boolean;
+    notes: string[];
+    holdings: Array<{ name: string; loadBearing: boolean; detail: string }>;
+  } {
+    const holdings = processHoldings();
+
     const notes = [
       'Sessions are rows in Postgres, resolved per request.',
-      'Cache and rate-limit counters live in Redis, shared by every instance.',
+      'Cache, rate-limit counters and password-reset tokens live in Redis, shared by every instance.',
       'Queues are BullMQ on shared Redis; a job is claimed, not routed.',
       'Request context is per-request AsyncLocalStorage, discarded on response.',
       'Scheduled work runs only for the lease holder, so it is not duplicated.',
     ];
-    return { stateless: true, notes };
+
+    const blocking = holdings.filter((holding) => holding.loadBearing);
+    for (const holding of blocking) {
+      notes.push(`Request state held in process: ${holding.name} — ${holding.detail}`);
+    }
+
+    return { stateless: blocking.length === 0, notes, holdings };
   }
 }

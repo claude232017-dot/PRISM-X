@@ -593,6 +593,123 @@ export class SchemaRepository {
     );
   }
 
+  /** True when the table exists in this database. */
+  async tableExists(table: string): Promise<boolean> {
+    const [row] = await this.prisma.$queryRawUnsafe<Array<{ present: boolean }>>(
+      `SELECT EXISTS (
+         SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = $1
+       ) AS present`,
+      SchemaRepository.assertIdentifier(table),
+    );
+    return Boolean(row?.present);
+  }
+
+  /**
+   * The primary key columns of a table, in order.
+   *
+   * Needed for keyset pagination: a chunked export has to walk the table in a
+   * stable order, and "stable" means the primary key rather than whatever order
+   * the heap happens to return. Join tables with composite keys are why this
+   * returns an array.
+   */
+  async primaryKey(table: string): Promise<string[]> {
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ column: string }>>(
+      `SELECT a.attname AS "column"
+         FROM pg_index i
+         JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+        WHERE i.indrelid = $1::regclass AND i.indisprimary
+        ORDER BY array_position(i.indkey, a.attnum)`,
+      `"${SchemaRepository.assertIdentifier(table)}"`,
+    );
+    return rows.map((row) => row.column);
+  }
+
+  /**
+   * One page of a table, ordered by primary key, starting after `after`.
+   *
+   * The row-value comparison `(a, b) > ($1, $2)` is what makes a composite key
+   * work in a single predicate — comparing columns individually would skip rows
+   * whose first column ties.
+   */
+  exportChunk(
+    table: string,
+    keyColumns: string[],
+    after: unknown[] | null,
+    limit: number,
+  ): Promise<Array<Record<string, unknown>>> {
+    const name = SchemaRepository.assertIdentifier(table);
+    const keys = keyColumns.map((column) => `"${SchemaRepository.assertIdentifier(column)}"`);
+    const tuple = keys.join(', ');
+    const size = Math.max(1, Math.floor(limit));
+
+    if (!keys.length) {
+      // No primary key: no stable order to page by, so read it in one go.
+      return this.exportTable(table, size);
+    }
+
+    const where = after
+      ? `WHERE (${tuple}) > (${after.map((_, index) => `$${index + 1}`).join(', ')})`
+      : '';
+
+    return this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT * FROM "${name}" ${where} ORDER BY ${tuple} LIMIT ${size}`,
+      ...(after ?? []),
+    );
+  }
+
+  /** Rows in a table. Used to size a chunked export before running it. */
+  async countRows(table: string): Promise<number> {
+    const [row] = await this.prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+      `SELECT COUNT(*)::bigint AS count FROM "${SchemaRepository.assertIdentifier(table)}"`,
+    );
+    return Number(row?.count ?? 0);
+  }
+
+  /**
+   * Deletes one batch of rows older than `cutoff`.
+   *
+   * `ctid IN (SELECT ... LIMIT n)` rather than a bare `DELETE ... WHERE age`
+   * for two reasons. It bounds the transaction, so the lock is held for
+   * milliseconds instead of however long ten million deletes take; and it works
+   * on tables with no primary key, which `id IN (...)` would not.
+   *
+   * `guard` is an additional SQL predicate supplied by the retention policy —
+   * never by a request — for rows the age test alone would wrongly take, such
+   * as an alert that is old but still firing.
+   */
+  async pruneBatch(
+    table: string,
+    column: string,
+    cutoff: Date,
+    batchSize: number,
+    guard?: string,
+  ): Promise<number> {
+    const name = SchemaRepository.assertIdentifier(table);
+    const age = SchemaRepository.assertIdentifier(column);
+    const size = Math.max(1, Math.floor(batchSize));
+    const extra = guard ? ` AND ${guard}` : '';
+
+    return this.prisma.$executeRawUnsafe(
+      `DELETE FROM "${name}"
+        WHERE ctid IN (
+          SELECT ctid FROM "${name}"
+           WHERE "${age}" < $1${extra}
+           LIMIT ${size}
+        )`,
+      cutoff,
+    );
+  }
+
+  /** Oldest surviving row, for reporting what retention actually achieved. */
+  async oldestRow(table: string, column: string): Promise<Date | null> {
+    const [row] = await this.prisma.$queryRawUnsafe<Array<{ oldest: Date | null }>>(
+      `SELECT MIN("${SchemaRepository.assertIdentifier(column)}") AS oldest
+         FROM "${SchemaRepository.assertIdentifier(table)}"`,
+    );
+    return row?.oldest ?? null;
+  }
+
   /**
    * Inserts one restored row, skipping anything that already exists. A restore
    * that clobbers rows newer than the backup turns a partial loss into a total
@@ -646,6 +763,44 @@ export class SchemaRepository {
 
   healthy(): Promise<boolean> {
     return this.prisma.isHealthy();
+  }
+
+  /**
+   * What this process is configured for versus what the server allows.
+   *
+   * `configured × instances` is the number that matters, and it is the one
+   * nobody computes until connections start being refused. Surfacing both
+   * halves in the deep health check means an operator can do that arithmetic
+   * from a single response instead of correlating a config file with a
+   * `SHOW max_connections`.
+   */
+  async pool(): Promise<{
+    configuredLimit: number;
+    poolTimeoutSeconds: number;
+    serverMaxConnections: number | null;
+    serverInUse: number | null;
+  }> {
+    let serverMaxConnections: number | null = null;
+    let serverInUse: number | null = null;
+    try {
+      const [max] = await this.prisma.$queryRawUnsafe<Array<{ setting: string }>>(
+        `SELECT setting FROM pg_settings WHERE name = 'max_connections'`,
+      );
+      serverMaxConnections = max ? Number.parseInt(max.setting, 10) : null;
+      const [used] = await this.prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+        `SELECT COUNT(*)::bigint AS count FROM pg_stat_activity`,
+      );
+      serverInUse = used ? Number(used.count) : null;
+    } catch {
+      // A restricted role may not see pg_stat_activity. The configured half is
+      // still worth reporting, and null is an honest answer for the rest.
+    }
+    return {
+      configuredLimit: this.prisma.pool.connectionLimit,
+      poolTimeoutSeconds: this.prisma.pool.poolTimeoutSeconds,
+      serverMaxConnections,
+      serverInUse,
+    };
   }
 }
 

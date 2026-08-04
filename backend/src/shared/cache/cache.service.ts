@@ -111,6 +111,49 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Reads every value under a prefix.
+   *
+   * SCAN rather than KEYS, for the same reason `deleteByPrefix` uses it: KEYS
+   * blocks the Redis event loop for the length of the keyspace. Used to gather
+   * what each instance published about itself, which is a small, bounded set —
+   * one key per running instance.
+   */
+  async getByPrefix<T>(prefix: string, limit = 500): Promise<T[]> {
+    if (!this.available || !this.client) return [];
+    try {
+      const found: string[] = [];
+      let cursor = '0';
+      do {
+        const [next, keys] = await this.client.scan(
+          cursor,
+          'MATCH',
+          `${prefix}*`,
+          'COUNT',
+          100,
+        );
+        cursor = next;
+        found.push(...keys);
+        if (found.length >= limit) break;
+      } while (cursor !== '0');
+
+      if (!found.length) return [];
+      const raw = await this.client.mget(...found.slice(0, limit));
+      return raw
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => {
+          try {
+            return JSON.parse(value) as T;
+          } catch {
+            return null;
+          }
+        })
+        .filter((value): value is T => value !== null);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Atomically increments a counter, setting its expiry on first use.
    *
    * Returns null — rather than a number — when Redis is unavailable, because

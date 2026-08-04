@@ -83,6 +83,14 @@ export interface ReadinessEvidence {
     leader: string | null;
     /** True when no request-scoped state is held in process memory. */
     stateless: boolean;
+    /**
+     * Named process-local holdings that would not survive rescheduling.
+     *
+     * Reported rather than summarised so a failure says *what* is held. A
+     * blocker whose detail is "there is state somewhere" is a blocker nobody
+     * can act on.
+     */
+    statefulHoldings?: string[];
   };
 
   database: {
@@ -261,7 +269,12 @@ const CHECKS: ReadinessCheck[] = [
     evaluate: (e) =>
       e.instances.stateless
         ? { outcome: 'PASS', detail: 'Session, cache and queue state are all external' }
-        : { outcome: 'FAIL', detail: 'In-process state would not survive rescheduling' },
+        : {
+            outcome: 'FAIL',
+            detail: `In-process state would not survive rescheduling: ${
+              e.instances.statefulHoldings?.join('; ') || 'unnamed holding'
+            }`,
+          },
   },
   {
     id: 'SCHEDULED_WORK_ELECTED',

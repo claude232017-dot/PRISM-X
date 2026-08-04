@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
 import { AUTH_PROVIDER, IAuthProvider } from './providers/auth-provider.interface';
@@ -16,6 +17,7 @@ import { PrismaService } from '../database/prisma.service';
 import { CacheService } from '../shared/cache/cache.service';
 import { EventBusService } from '../events/event-bus.service';
 import { DomainEvent } from '../events/domain-events';
+import type { DomainEventEnvelope } from '../events/domain-events';
 import { SystemRole } from './permissions';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { RequestContextStore } from '../shared/context/request-context';
@@ -38,9 +40,23 @@ export interface AuthenticatedPrincipal {
 }
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   private readonly logger = new Logger(AuthService.name);
-  private static readonly ACCESS_CACHE_TTL = 300; // seconds
+  /**
+   * How long a resolved permission set is trusted without re-reading it.
+   *
+   * This is the window in which a revoked role still works. Explicit
+   * invalidation closes it immediately for every change the platform knows
+   * about; the TTL only bounds the ones it does not.
+   */
+  private static readonly ACCESS_CACHE_TTL = AuthService.cacheTtl();
+
+  private static cacheTtl(): number {
+    const configured = Number.parseInt(process.env.ACCESS_CACHE_TTL_SECONDS ?? '', 10);
+    if (!Number.isFinite(configured) || configured < 0) return 60;
+    // Capped: a deployment may trade freshness for load, but not unboundedly.
+    return Math.min(configured, 300);
+  }
 
   constructor(
     @Inject(AUTH_PROVIDER) private readonly provider: IAuthProvider,
@@ -250,8 +266,13 @@ export class AuthService {
   /**
    * Membership + permission lookup, cached briefly in Redis.
    *
-   * The TTL is short on purpose: a revoked role should stop working within
-   * minutes without requiring a cache bust on every membership write.
+   * The cache is shared rather than per-process, so an explicit invalidation
+   * takes effect on every instance at once. The TTL is the backstop for
+   * anything that changes authorization *without* announcing it — and a
+   * backstop measured in minutes is a revoked administrator who still has
+   * administrator rights for those minutes, which is why it is a minute rather
+   * than five. Deployments that want to trade freshness for load can raise
+   * `ACCESS_CACHE_TTL_SECONDS`, but the default should be the safe one.
    */
   private async resolveAccess(userId: string, organizationId?: string) {
     const cacheKey = `access:${userId}:${organizationId ?? 'default'}`;
@@ -289,6 +310,49 @@ export class AuthService {
   /** Invalidates cached authorization for a user — call after role changes. */
   async invalidateAccess(userId: string): Promise<void> {
     await this.cache.deleteByPrefix(`access:${userId}`);
+  }
+
+  /**
+   * Invalidates every member of an organization.
+   *
+   * Needed when a change affects more than one principal — a role's permission
+   * set being edited, an organization being suspended. Reading the membership
+   * list to do it costs a query, on an operation that happens rarely, in
+   * exchange for revocation that takes effect on the next request rather than
+   * on the next TTL expiry.
+   */
+  async invalidateOrganizationAccess(organizationId: string): Promise<void> {
+    const members = await this.memberships
+      .listByOrganization(organizationId)
+      .catch(() => [] as Array<{ userId: string }>);
+    await Promise.all(members.map((member) => this.invalidateAccess(member.userId)));
+  }
+
+  /**
+   * Drops cached authorization whenever the platform says it changed.
+   *
+   * Subscribing rather than relying on call sites is the point. Every
+   * invalidation that depends on somebody remembering to call it is one
+   * refactor away from silently not happening, and the failure is invisible:
+   * permissions keep working, for up to a TTL, for someone who no longer has
+   * them. An event the mutation already publishes cannot be forgotten in the
+   * same way.
+   */
+  onModuleInit(): void {
+    const invalidate = async (envelope: DomainEventEnvelope): Promise<void> => {
+      const userId = envelope.payload?.userId;
+      if (typeof userId === 'string' && userId) {
+        await this.invalidateAccess(userId);
+        return;
+      }
+      // No specific user named: the change is organization-wide.
+      if (envelope.organizationId) {
+        await this.invalidateOrganizationAccess(envelope.organizationId);
+      }
+    };
+
+    this.events.on(DomainEvent.MemberAccessChanged, invalidate);
+    this.events.on(DomainEvent.UserRemoved, invalidate);
   }
 
   /**

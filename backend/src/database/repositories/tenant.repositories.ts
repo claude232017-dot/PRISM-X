@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import type {
   AuditLog,
   Credential,
@@ -13,6 +13,7 @@ import type {
 } from '@prisma/client';
 import { BaseRepository } from './base.repository';
 import { PrismaService, PrismaTx } from '../prisma.service';
+import { AppendBuffer } from '../append-buffer';
 
 @Injectable()
 export class WorkerRepository extends BaseRepository<Worker> {
@@ -213,10 +214,30 @@ export class ExtensionRepository extends BaseRepository<Extension> {
   }
 }
 
+/**
+ * The event log.
+ *
+ * The highest-volume write in the system: one row for every domain event, on
+ * every mutating request, on every worker step. Buffered rather than written
+ * one statement at a time — see `AppendBuffer` for the trade that makes.
+ *
+ * Reads drain the buffer first, so publishing an event and then listing events
+ * behaves exactly as it did before batching existed.
+ */
 @Injectable()
-export class EventRepository extends BaseRepository<Event> {
+export class EventRepository
+  extends BaseRepository<Event>
+  implements OnApplicationShutdown
+{
   protected readonly modelName = 'event';
   protected readonly softDeletes = false;
+
+  private readonly buffer = new AppendBuffer<Record<string, unknown>>(
+    'event',
+    (organizationId, rows) =>
+      this.writeBatch(organizationId, rows as Array<Record<string, unknown>>),
+  );
+
   // An explicit constructor is required even though it only calls super():
   // TypeScript emits `design:paramtypes` metadata only for classes that
   // declare a constructor, and without that metadata Nest injects nothing
@@ -225,20 +246,81 @@ export class EventRepository extends BaseRepository<Event> {
     super(prisma);
   }
 
+  /**
+   * Buffers an event row instead of writing it immediately.
+   *
+   * The tenant is captured here, from the ambient context, because by flush
+   * time the request that produced the row no longer exists.
+   */
+  async append(data: Record<string, unknown>): Promise<void> {
+    await this.buffer.add(this.organizationId, {
+      ...data,
+      // `createMany` does not run Prisma's `@default(now())` per row the way
+      // separate inserts do reliably enough to order by, so the timestamp is
+      // taken when the event happened rather than when the batch went out.
+      createdAt: new Date(),
+    });
+  }
 
-  findByName(name: string, take = 100): Promise<Event[]> {
+  private async writeBatch(
+    organizationId: string,
+    rows: Array<Record<string, unknown>>,
+  ): Promise<void> {
+    await this.prisma.event.createMany({
+      data: rows.map((row) => ({ ...row, organizationId })) as never,
+      skipDuplicates: true,
+    });
+  }
+
+  /** Forces buffered rows out. Called before any read of this table. */
+  flush(): Promise<void> {
+    return this.buffer.flush();
+  }
+
+  /** Rows waiting to be written, for the metrics gauge. */
+  get pending(): number {
+    return this.buffer.depth;
+  }
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.buffer.flush().catch(() => undefined);
+  }
+
+  /** Every read drains the buffer first, so batching is invisible to callers. */
+  protected async beforeRead(): Promise<void> {
+    await this.flush();
+  }
+
+  async findByName(name: string, take = 100): Promise<Event[]> {
     return this.findMany({ name }, { take, orderBy: { createdAt: 'desc' } });
   }
 
-  findRecent(take = 100): Promise<Event[]> {
+  async findRecent(take = 100): Promise<Event[]> {
     return this.findMany({}, { take, orderBy: { createdAt: 'desc' } });
   }
 }
 
+/**
+ * The audit trail. Buffered on the same terms as the event log.
+ *
+ * One row per mutating request, and the read path drains before querying, so
+ * an administrator who makes a change and immediately opens the audit view
+ * sees it.
+ */
 @Injectable()
-export class AuditLogRepository extends BaseRepository<AuditLog> {
+export class AuditLogRepository
+  extends BaseRepository<AuditLog>
+  implements OnApplicationShutdown
+{
   protected readonly modelName = 'auditLog';
   protected readonly softDeletes = false;
+
+  private readonly buffer = new AppendBuffer<Record<string, unknown>>(
+    'audit',
+    (organizationId, rows) =>
+      this.writeBatch(organizationId, rows as Array<Record<string, unknown>>),
+  );
+
   // An explicit constructor is required even though it only calls super():
   // TypeScript emits `design:paramtypes` metadata only for classes that
   // declare a constructor, and without that metadata Nest injects nothing
@@ -247,8 +329,39 @@ export class AuditLogRepository extends BaseRepository<AuditLog> {
     super(prisma);
   }
 
+  /** Buffers an audit row, capturing the tenant at the point of the write. */
+  async append(data: Record<string, unknown>): Promise<void> {
+    await this.buffer.add(this.organizationId, { ...data, createdAt: new Date() });
+  }
 
-  findByResource(resource: string, take = 100): Promise<AuditLog[]> {
+  private async writeBatch(
+    organizationId: string,
+    rows: Array<Record<string, unknown>>,
+  ): Promise<void> {
+    await this.prisma.auditLog.createMany({
+      data: rows.map((row) => ({ ...row, organizationId })) as never,
+      skipDuplicates: true,
+    });
+  }
+
+  flush(): Promise<void> {
+    return this.buffer.flush();
+  }
+
+  get pending(): number {
+    return this.buffer.depth;
+  }
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.buffer.flush().catch(() => undefined);
+  }
+
+  /** Every read drains the buffer first, so batching is invisible to callers. */
+  protected async beforeRead(): Promise<void> {
+    await this.flush();
+  }
+
+  async findByResource(resource: string, take = 100): Promise<AuditLog[]> {
     return this.findMany({ resource }, { take, orderBy: { createdAt: 'desc' } });
   }
 }

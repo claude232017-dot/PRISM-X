@@ -15,6 +15,7 @@ import {
   VerifiedToken,
 } from './auth-provider.interface';
 import { UserRepository } from '../../database/repositories/identity.repositories';
+import { CacheService } from '../../shared/cache/cache.service';
 
 /**
  * Self-contained identity driver: bcrypt password hashes in our own `users`
@@ -31,13 +32,28 @@ export class LocalAuthProvider implements IAuthProvider {
   private readonly logger = new Logger(LocalAuthProvider.name);
   private static readonly SALT_ROUNDS = 12;
 
-  /** Reset tokens live in memory: single-node dev convenience, not production. */
-  private readonly resetTokens = new Map<string, { email: string; expiresAt: number }>();
+  /**
+   * Reset tokens live in the shared cache, not in this process.
+   *
+   * They used to be a Map. That works on one instance and fails the moment
+   * there are two: the request that issues the token lands on instance A, the
+   * request that redeems it lands on instance B, and B has never heard of it.
+   * The failure is intermittent — roughly (N-1)/N of attempts — which is worse
+   * than a consistent one, because it reads as "email links sometimes don't
+   * work" rather than as a bug.
+   *
+   * Redis holds them with a native TTL, so expiry is enforced by the store
+   * rather than by a timestamp comparison that only runs when someone happens
+   * to look.
+   */
+  private static readonly RESET_TTL_SECONDS = 3_600;
+  private static readonly RESET_PREFIX = 'auth:reset:';
 
   constructor(
     private readonly users: UserRepository,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly cache: CacheService,
   ) {}
 
   async register(input: {
@@ -134,11 +150,13 @@ export class LocalAuthProvider implements IAuthProvider {
     if (!user) return;
 
     const token = randomBytes(32).toString('hex');
+    // The digest is the key, so a cache dump does not hand out reset tokens.
     const digest = createHash('sha256').update(token).digest('hex');
-    this.resetTokens.set(digest, {
-      email: user.email,
-      expiresAt: Date.now() + 60 * 60 * 1000,
-    });
+    await this.cache.set(
+      `${LocalAuthProvider.RESET_PREFIX}${digest}`,
+      { email: user.email },
+      LocalAuthProvider.RESET_TTL_SECONDS,
+    );
 
     // A real transport belongs to the notifications module; in this driver the
     // token is logged so a developer can complete the flow.
@@ -147,10 +165,12 @@ export class LocalAuthProvider implements IAuthProvider {
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
     const digest = createHash('sha256').update(token).digest('hex');
-    const entry = this.resetTokens.get(digest);
+    const key = `${LocalAuthProvider.RESET_PREFIX}${digest}`;
+    const entry = await this.cache.get<{ email: string }>(key);
 
-    if (!entry || entry.expiresAt < Date.now()) {
-      this.resetTokens.delete(digest);
+    // Expiry is the store's job — a key that is gone is a token that expired,
+    // and there is no window in which a stale entry is still readable.
+    if (!entry) {
       throw new UnauthorizedException('Reset token is invalid or has expired');
     }
 
@@ -160,7 +180,8 @@ export class LocalAuthProvider implements IAuthProvider {
     await this.users.update(user.id, {
       passwordHash: await bcrypt.hash(newPassword, LocalAuthProvider.SALT_ROUNDS),
     });
-    this.resetTokens.delete(digest);
+    // Single use: deleted whether or not anything downstream succeeds.
+    await this.cache.delete(key);
   }
 
   async sendVerificationEmail(): Promise<void> {

@@ -22,6 +22,8 @@ import {
   ExtensionUpgradeRepository,
 } from '../database/repositories/platform.repositories';
 import { EventBusService } from '../events/event-bus.service';
+import { BoundedMap } from '../shared/bounded-map';
+import { declareProcessState } from '../shared/process-state';
 import { DomainEvent } from '../events/domain-events';
 import { RequestContextStore } from '../shared/context/request-context';
 import { CryptoService } from '../shared/crypto/crypto.service';
@@ -71,8 +73,30 @@ import type {
 export class ExtensionRuntimeService implements OnModuleInit {
   private readonly logger = new Logger(ExtensionRuntimeService.name);
 
-  /** Loaded modules, keyed by extension id. Rebuilt on demand after a restart. */
-  private readonly loaded = new Map<string, ExtensionModule>();
+  /**
+   * Loaded modules, keyed by extension id. Rebuilt on demand after a restart.
+   *
+   * Bounded rather than a plain Map. One instance serves every organization,
+   * and each of them may install extensions; an unbounded cache of loaded
+   * modules therefore grows with the size of the customer base and is only
+   * ever emptied by a restart. Evicting the least recently used one costs a
+   * reload the next time it is called — which is exactly what happens after a
+   * deploy anyway, so the path is already exercised.
+   */
+  private static readonly LOADED_LIMIT = 256;
+  private readonly loaded = new BoundedMap<string, ExtensionModule>(
+    ExtensionRuntimeService.LOADED_LIMIT,
+  );
+
+    // Declared so the readiness review can see it. A miss reloads the module
+  // from the loader, so a request served elsewhere is slower, never wrong.
+  private readonly declared = declareProcessState({
+    name: 'extension-runtime.modules',
+    loadBearing: false,
+    describe: () =>
+      `${this.loaded.size} loaded module(s), ${this.loaded.evicted} evicted, ` +
+      `cap ${ExtensionRuntimeService.LOADED_LIMIT}`,
+  });
 
   constructor(
     private readonly extensions: ExtensionRepository,

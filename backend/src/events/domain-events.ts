@@ -12,6 +12,13 @@ export const DomainEvent = {
   UserInvited: 'user.invited',
   UserLoggedIn: 'user.logged_in',
   UserRemoved: 'user.removed',
+  /**
+   * A member's authorization changed. Anything that alters what a principal
+   * may do publishes this, and the auth layer drops their cached permission
+   * set on it — so revocation does not depend on every call site remembering
+   * to invalidate.
+   */
+  MemberAccessChanged: 'member.access_changed',
 
   // Organization
   OrganizationCreated: 'organization.created',

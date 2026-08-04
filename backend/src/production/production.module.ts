@@ -7,6 +7,7 @@ import { InstanceService } from './instance.service';
 import { MetricsService } from './metrics.service';
 import { AlertingService } from './alerting.service';
 import { BackupService } from './backup.service';
+import { RetentionService } from './retention.service';
 import { BillingService } from './billing.service';
 import { SecurityService } from './security.service';
 import { AdminService } from './admin.service';
@@ -20,6 +21,7 @@ import {
   ObservabilityController,
   ProbeController,
   ReadinessController,
+  RetentionController,
   SecurityController,
 } from './production.controllers';
 
@@ -54,6 +56,7 @@ import {
     ProbeController,
     ObservabilityController,
     BackupController,
+    RetentionController,
     BillingController,
     SecurityController,
     AdminController,
@@ -64,6 +67,7 @@ import {
     MetricsService,
     AlertingService,
     BackupService,
+    RetentionService,
     BillingService,
     SecurityService,
     AdminService,
@@ -77,6 +81,7 @@ import {
     BillingService,
     SecurityService,
     BackupService,
+    RetentionService,
     ReadinessService,
   ],
 })
@@ -85,6 +90,7 @@ export class ProductionModule implements OnModuleInit {
     private readonly instances: InstanceService,
     private readonly triggers: TriggerEngine,
     private readonly backups: BackupService,
+    private readonly retention: RetentionService,
     private readonly billing: BillingService,
   ) {}
 
@@ -95,11 +101,18 @@ export class ProductionModule implements OnModuleInit {
     this.triggers.onScheduleGuard(() => this.instances.isLeader);
 
     // Housekeeping the deployment needs and nobody would remember to run:
-    // expiring backups past retention, and advancing subscriptions whose
-    // period has ended. Leader-only, so N instances do it once.
+    // expiring backups past retention, applying the data retention policy to
+    // the append-only tables, and advancing subscriptions whose period has
+    // ended. Leader-only, so N instances do it once.
+    //
+    // The retention sweep is the one that stops a growth problem from becoming
+    // an outage, and it is deliberately *not* optional or manual. A policy
+    // somebody has to remember to run is a policy that stops being applied
+    // three weeks after the person who wrote it changes teams.
     this.maintenance = setInterval(
       () => {
         void this.instances.runIfLeader('backup-prune', () => this.backups.prune());
+        void this.instances.runIfLeader('data-retention', () => this.retention.sweep());
         void this.instances.runIfLeader('billing-renew', () => this.billing.renewDue());
       },
       // Hourly. Both tasks are idempotent and neither is urgent; running them

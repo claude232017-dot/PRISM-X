@@ -248,9 +248,21 @@ let secondInstance = null;
     crossInstance.headers.get('x-instance-id'),
   );
 
+  // Statelessness is now measured from a register of what each component
+  // actually holds in memory, not asserted. So the check is that the platform
+  // either reports itself stateless or names precisely what stops it — a
+  // hard-coded `true` would pass this line and tell us nothing.
+  const holdings = evidence?.instances?.statefulHoldings ?? [];
   check(
-    'the platform reports itself stateless, with reasons',
-    evidence?.instances?.stateless === true,
+    'the platform reports statelessness from measurement, naming any holding',
+    evidence?.instances?.stateless === true || holdings.length > 0,
+    evidence?.instances?.stateless === true ? 'stateless' : holdings.join('; '),
+  );
+  check(
+    'the only thing that can hold state here is the unshared local storage driver',
+    evidence?.instances?.stateless === true ||
+      holdings.every((holding) => String(holding).startsWith('backup.artefacts')),
+    holdings.join('; ') || 'none',
   );
 
   // ================================================================

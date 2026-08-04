@@ -18,6 +18,8 @@ import { EventBusService } from '../events/event-bus.service';
 import { DomainEvent } from '../events/domain-events';
 import { RequestContextStore } from '../shared/context/request-context';
 import { InstanceService } from './instance.service';
+import { BoundedMap } from '../shared/bounded-map';
+import { declareProcessState } from '../shared/process-state';
 
 /**
  * Backup, verification and restore.
@@ -91,8 +93,27 @@ export class BackupService {
     'webhook_endpoints',
   ];
 
-  /** Rows per table. A backup is a safety net, not an archive of everything. */
-  private static readonly ROW_CAP = 50_000;
+  /**
+   * Rows read per query while exporting a table.
+   *
+   * A page size, not a limit. The export walks the whole table in keyset pages
+   * so a large table is exported completely rather than quietly clipped, and so
+   * the client never holds a single result set the size of the table.
+   */
+  private static readonly CHUNK = 5_000;
+
+  /**
+   * The point at which a table is too large for a logical export.
+   *
+   * This is a ceiling, and reaching it is a *failure*, not a trim. The previous
+   * behaviour — take the first fifty thousand rows and say nothing — produced
+   * backups that verified, restored, and were missing data, which is the worst
+   * available outcome: the restore appears to succeed and the loss is discovered
+   * later, by a user, in production. If a deployment reaches this size the
+   * answer is a physical snapshot with WAL archiving, and the backup says so out
+   * loud instead of pretending.
+   */
+  private static readonly TABLE_LIMIT = 2_000_000;
 
   constructor(
     private readonly schema: SchemaRepository,
@@ -195,15 +216,42 @@ export class BackupService {
     }
   }
 
+  /** Bytes this process will hold in backup artefacts before evicting. */
+  private static readonly ARTEFACT_CACHE_BYTES = 64 * 1024 * 1024;
+
   /**
-   * Artefacts held in process.
+   * Artefacts held in process, bounded by total bytes.
    *
    * The local storage driver writes to a container filesystem, which another
    * instance cannot read. Holding the bytes lets verification and restore work
    * end to end in development and in tests; a shared object store makes this
    * cache redundant rather than load-bearing.
+   *
+   * It is bounded by size rather than by count because the entries are
+   * backups: ten of them might be ten megabytes or ten gigabytes, and a cache
+   * that counts entries cannot tell the difference until the process dies. An
+   * evicted artefact is re-read from storage, which is where it already is.
    */
-  private readonly artefacts = new Map<string, Buffer>();
+  private readonly artefacts = new BoundedMap<string, Buffer>(
+    BackupService.ARTEFACT_CACHE_BYTES,
+    (body) => body.length,
+  );
+
+  // Load-bearing only where the storage driver is not shared between
+  // instances. With `local` storage, a verify that lands on another instance
+  // cannot read the artefact — which is a real statelessness constraint, and
+  // is why the review is told about it rather than reassured.
+  private readonly declared = declareProcessState({
+    name: 'backup.artefacts',
+    loadBearing: (process.env.STORAGE_DRIVER ?? 'local') === 'local',
+    describe: () =>
+      `${this.artefacts.size} artefact(s), ${(this.artefacts.load / 1024 / 1024).toFixed(1)}MB ` +
+      `of ${(BackupService.ARTEFACT_CACHE_BYTES / 1024 / 1024).toFixed(0)}MB, ` +
+      `${this.artefacts.evicted} evicted` +
+      ((process.env.STORAGE_DRIVER ?? 'local') === 'local'
+        ? ' — STORAGE_DRIVER=local is not shared between instances'
+        : ''),
+  });
 
   private async exportDatabase(): Promise<{
     data: Record<string, unknown[]>;
@@ -211,14 +259,16 @@ export class BackupService {
   }> {
     const data: Record<string, unknown[]> = {};
     const tables: Record<string, number> = {};
+    const oversized: string[] = [];
     let rows = 0;
 
     for (const table of BackupService.TABLES) {
       try {
-        const result = await this.schema.exportTable(table, BackupService.ROW_CAP);
-        data[table] = result.map((row) => BackupService.serialisable(row));
-        tables[table] = result.length;
-        rows += result.length;
+        const exported = await this.exportTableFully(table);
+        data[table] = exported.rows;
+        tables[table] = exported.rows.length;
+        rows += exported.rows.length;
+        if (exported.truncated) oversized.push(table);
       } catch (error) {
         // A table that does not exist in this deployment is not a failed
         // backup; recording it in the manifest is more useful than aborting.
@@ -227,16 +277,64 @@ export class BackupService {
       }
     }
 
+    // Loud, and fatal to the backup. A partial export that reports success is
+    // the one an operator relies on during an incident and discovers is short.
+    if (oversized.length) {
+      throw new Error(
+        `Logical backup exceeded ${BackupService.TABLE_LIMIT} rows on: ${oversized.join(', ')}. ` +
+          'Switch to a physical snapshot with WAL archiving for this database — ' +
+          'see docs/runbooks/recovery.md. Refusing to write a partial backup.',
+      );
+    }
+
     return {
       data,
       manifest: {
-        format: 'prismx-logical-v1',
+        format: 'prismx-logical-v2',
         takenAt: new Date().toISOString(),
         tables,
         rows,
-        rowCap: BackupService.ROW_CAP,
+        complete: true,
+        chunkSize: BackupService.CHUNK,
+        tableLimit: BackupService.TABLE_LIMIT,
       },
     };
+  }
+
+  /**
+   * Exports one table completely, in keyset pages.
+   *
+   * Keyset rather than OFFSET: paging a large table with OFFSET re-scans every
+   * skipped row on each page, so the export gets quadratically slower the
+   * further it gets — the exact shape where the last page never arrives.
+   */
+  private async exportTableFully(
+    table: string,
+  ): Promise<{ rows: unknown[]; truncated: boolean }> {
+    const keyColumns = await this.schema.primaryKey(table);
+    const rows: unknown[] = [];
+    let after: unknown[] | null = null;
+
+    for (;;) {
+      const page: Array<Record<string, unknown>> = await this.schema.exportChunk(
+        table,
+        keyColumns,
+        after,
+        BackupService.CHUNK,
+      );
+      if (!page.length) break;
+
+      for (const row of page) rows.push(BackupService.serialisable(row));
+
+      if (rows.length >= BackupService.TABLE_LIMIT) return { rows, truncated: true };
+      if (page.length < BackupService.CHUNK) break;
+      if (!keyColumns.length) break; // No stable order to page by; one read only.
+
+      const last = page[page.length - 1];
+      after = keyColumns.map((column) => last[column]);
+    }
+
+    return { rows, truncated: false };
   }
 
   private exportConfiguration(): {

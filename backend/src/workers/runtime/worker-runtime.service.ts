@@ -16,6 +16,8 @@ import {
 import { EventBusService } from '../../events/event-bus.service';
 import { DomainEvent } from '../../events/domain-events';
 import { CompletionMessage } from '../../providers/contracts/intelligence-provider.interface';
+import { BoundedMap } from '../../shared/bounded-map';
+import { declareProcessState } from '../../shared/process-state';
 
 export interface WorkerExecutionRequest {
   workerId: string;
@@ -92,8 +94,26 @@ export class WorkerRuntimeService {
    */
   private static readonly TOOL_CALL_PATTERN = /TOOL_CALL:\s*(\{[\s\S]*?\})\s*(?:\n|$)/g;
 
-  /** providerId → kind. Immutable per provider, so safe to memoize. */
-  private readonly providerKindCache = new Map<string, ProviderKind | null>();
+  /**
+   * providerId → kind. Immutable per provider, so safe to memoize.
+   *
+   * Bounded: the key is a provider id, and provider ids belong to tenants, so
+   * an unbounded map here grows with the number of organizations this instance
+   * has ever served. A miss costs one indexed lookup.
+   */
+  private static readonly PROVIDER_KIND_LIMIT = 1_000;
+  private readonly providerKindCache = new BoundedMap<string, ProviderKind | null>(
+    WorkerRuntimeService.PROVIDER_KIND_LIMIT,
+  );
+
+    // A memo of an immutable fact. A miss costs one indexed read.
+  private readonly declared = declareProcessState({
+    name: 'worker-runtime.provider-kinds',
+    loadBearing: false,
+    describe: () =>
+      `${this.providerKindCache.size} memoized provider kind(s), ` +
+      `${this.providerKindCache.evicted} evicted`,
+  });
 
   constructor(
     private readonly workers: WorkerRepository,

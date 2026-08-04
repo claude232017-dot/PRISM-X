@@ -566,6 +566,7 @@ model Event {
 
   @@index([organizationId])
   @@index([organizationId, name])
+  @@index([organizationId, createdAt(sort: Desc)])
   @@index([createdAt])
   @@map("events")
 }
@@ -587,6 +588,7 @@ model AuditLog {
 
   @@index([organizationId])
   @@index([organizationId, resource])
+  @@index([organizationId, createdAt(sort: Desc)])
   @@index([createdAt])
   @@map("audit_logs")
 }
@@ -693,7 +695,8 @@ model ExecutionLog {
   toolCalls    ToolCall[]
 
   @@index([organizationId])
-  @@index([organizationId, startedAt])
+  @@index([organizationId, startedAt(sort: Desc)])
+  @@index([startedAt])
   @@index([missionId])
   @@index([workerId])
   @@map("execution_logs")
@@ -720,6 +723,8 @@ model ToolCall {
 
   @@index([organizationId])
   @@index([organizationId, tool])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([createdAt])
   @@map("tool_calls")
 }
 
@@ -1125,6 +1130,8 @@ model Notification {
 
   @@index([organizationId])
   @@index([organizationId, readAt])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([createdAt])
   @@map("notifications")
 }
 
@@ -3022,6 +3029,8 @@ model ExtensionHostCall {
 
   @@index([organizationId, extensionId, createdAt])
   @@index([organizationId, decision, createdAt])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([createdAt])
   @@map("extension_host_calls")
 }
 

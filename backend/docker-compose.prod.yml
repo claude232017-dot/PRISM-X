@@ -58,6 +58,11 @@ services:
       PORT: 3000
       TRUST_PROXY: 'true'
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-prismx}?schema=public
+      # Per instance. Two replicas at 10 each plus the migrate job leaves
+      # ample room under Postgres' default max_connections of 100; raise
+      # both together, never the replica count alone.
+      DATABASE_CONNECTION_LIMIT: ${DATABASE_CONNECTION_LIMIT:-10}
+      DATABASE_POOL_TIMEOUT: ${DATABASE_POOL_TIMEOUT:-10}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}

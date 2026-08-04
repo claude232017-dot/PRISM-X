@@ -62,7 +62,10 @@ export class AuditInterceptor implements NestInterceptor {
         : undefined);
 
     try {
-      await this.auditLogs.create({
+      // Buffered, not written one row at a time: this runs on every mutating
+      // request, and the read path drains before querying so nothing is
+      // invisible for having been batched.
+      await this.auditLogs.append({
         userId: ctx.userId,
         action: `${request.method} ${request.route?.path ?? request.url}`,
         resource,

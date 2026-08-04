@@ -89,7 +89,13 @@ export class ReadinessService {
     ]);
 
     const cacheReachable = await this.cache.ping().catch(() => false);
-    const errorRate = this.errorRate();
+
+    // Fleet-wide rather than this process's share. A four-instance deployment
+    // gives each process a quarter of the requests, and a review that graded
+    // performance on a quarter of the evidence would pass or fail for reasons
+    // that have nothing to do with the deployment.
+    const fleet = await this.instances.fleetMetrics().catch(() => null);
+    const statelessness = this.instances.statelessness();
 
     return {
       environment: this.instances.environment,
@@ -104,7 +110,10 @@ export class ReadinessService {
       instances: {
         healthy: cluster.healthy,
         leader: cluster.leader,
-        stateless: this.instances.statelessness().stateless,
+        stateless: statelessness.stateless,
+        statefulHoldings: statelessness.holdings
+          .filter((holding) => holding.loadBearing)
+          .map((holding) => `${holding.name} (${holding.detail})`),
       },
 
       database,
@@ -139,9 +148,12 @@ export class ReadinessService {
       },
 
       performance: {
-        p95Ms: this.metrics.percentile(Metric.HttpDuration, 0.95),
-        errorRate,
-        sampleCount: this.metrics.sampleCount(Metric.HttpDuration),
+        // The slowest instance's p95, not a merged quantile — see
+        // `MetricsService.merge`. Grading on the worst instance is the right
+        // direction to be approximate in.
+        p95Ms: fleet?.worstInstanceP95Ms ?? this.metrics.percentile(Metric.HttpDuration, 0.95),
+        errorRate: fleet ? fleet.errorRate : this.errorRate(),
+        sampleCount: fleet?.sampleCount ?? this.metrics.sampleCount(Metric.HttpDuration),
       },
 
       documentation: {

@@ -235,6 +235,82 @@ export class MetricsService {
   reset(): void {
     this.series.clear();
   }
+
+  // ============================================================ fleet view
+
+  /**
+   * What this instance would tell the rest of the fleet about itself.
+   *
+   * Deliberately small — a handful of numbers, not the whole registry. The
+   * point is to answer "how is the *deployment* doing", and a full metric dump
+   * per instance would cost more to move around than it is worth.
+   */
+  contribution(instanceId: string): InstanceMetrics {
+    return {
+      instanceId,
+      at: Date.now(),
+      requests: this.total(Metric.HttpRequests),
+      errors: this.total(Metric.HttpErrors),
+      p95Ms: this.percentile(Metric.HttpDuration, 0.95),
+      sampleCount: this.sampleCount(Metric.HttpDuration),
+    };
+  }
+
+  /**
+   * Merges per-instance contributions into a view of the whole deployment.
+   *
+   * This exists because every number a single process holds is its own share
+   * of the traffic. With four instances behind a balancer, each sees roughly a
+   * quarter of the requests — so an error-rate alert evaluated locally is
+   * evaluated on a quarter of the evidence, and a readiness review reporting
+   * "412 requests sampled" is reporting a quarter of the truth. Neither is
+   * wrong in a way that looks wrong.
+   *
+   * Counts sum exactly. The percentile does not: merging reservoirs across
+   * processes would need the raw samples, which is far more than this is worth
+   * moving. So `p95Ms` is the **worst instance's** p95, and the field is named
+   * and documented as such rather than presented as a global quantile. An
+   * approximation you can reason about beats a precise-looking number you
+   * cannot.
+   */
+  static merge(contributions: InstanceMetrics[]): FleetMetrics {
+    const requests = contributions.reduce((sum, entry) => sum + entry.requests, 0);
+    const errors = contributions.reduce((sum, entry) => sum + entry.errors, 0);
+    const sampleCount = contributions.reduce((sum, entry) => sum + entry.sampleCount, 0);
+    const percentiles = contributions
+      .map((entry) => entry.p95Ms)
+      .filter((value): value is number => typeof value === 'number');
+
+    return {
+      instances: contributions.length,
+      requests,
+      errors,
+      errorRate: requests === 0 ? null : errors / requests,
+      sampleCount,
+      worstInstanceP95Ms: percentiles.length ? Math.max(...percentiles) : null,
+    };
+  }
+}
+
+/** One instance's share, as published to the shared cache. */
+export interface InstanceMetrics {
+  instanceId: string;
+  at: number;
+  requests: number;
+  errors: number;
+  p95Ms: number | null;
+  sampleCount: number;
+}
+
+/** Every instance's share, merged. */
+export interface FleetMetrics {
+  instances: number;
+  requests: number;
+  errors: number;
+  errorRate: number | null;
+  sampleCount: number;
+  /** The slowest instance's p95, not a global percentile. See `merge`. */
+  worstInstanceP95Ms: number | null;
 }
 
 /** Metric names used across the platform, so a typo is a compile error. */
@@ -262,4 +338,10 @@ export const Metric = {
   RateLimited: 'prismx_rate_limited_total',
   AuthFailures: 'prismx_auth_failures_total',
   ExtensionHostCalls: 'prismx_extension_host_calls_total',
+  RetentionRowsDeleted: 'prismx_retention_rows_deleted_total',
+  RetentionBacklog: 'prismx_retention_backlog',
+  EventQueueDepth: 'prismx_event_dispatch_depth',
+  EventDispatchDropped: 'prismx_event_dispatch_dropped_total',
+  WriteBufferFlushed: 'prismx_write_buffer_flushed_total',
+  WriteBufferDepth: 'prismx_write_buffer_depth',
 } as const;

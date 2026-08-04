@@ -55,9 +55,11 @@ import { Permissions } from '../auth/permissions';
 import { SchemaRepository } from '../database/repositories/production.repositories';
 import { CacheService } from '../shared/cache/cache.service';
 import { InstanceService } from './instance.service';
-import { MetricsService } from './metrics.service';
+import { Metric, MetricsService } from './metrics.service';
 import { AlertingService } from './alerting.service';
 import { BackupService } from './backup.service';
+import { RetentionService } from './retention.service';
+import { EventBusService } from '../events/event-bus.service';
 import { BillingService } from './billing.service';
 import { SecurityService } from './security.service';
 import { AdminService } from './admin.service';
@@ -83,6 +85,16 @@ export class BackupDto {
   @IsOptional()
   @IsBoolean()
   encrypt?: boolean;
+}
+
+export class RetentionSweepDto {
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Report which tables hold rows past their window without deleting any.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  dryRun?: boolean;
 }
 
 export class RestoreDto {
@@ -346,14 +358,16 @@ export class ProbeController {
     },
   })
   async deep() {
-    const [database, cache, cluster] = await Promise.all([
+    const [database, cache, cluster, pool] = await Promise.all([
       this.schema.healthy(),
       this.cache.ping().catch(() => false),
       this.instances.cluster(),
+      this.schema.pool().catch(() => null),
     ]);
     return {
       status: database ? 'ok' : 'degraded',
       checks: { database, cache },
+      database: { pool },
       cluster: {
         healthy: cluster.healthy,
         leader: cluster.leader,
@@ -375,6 +389,7 @@ export class ObservabilityController {
     private readonly metrics: MetricsService,
     private readonly alerting: AlertingService,
     private readonly instances: InstanceService,
+    private readonly events: EventBusService,
   ) {}
 
   @Get('metrics')
@@ -404,6 +419,26 @@ export class ObservabilityController {
       { instance: this.instances.instanceId },
       'Resident memory for this process',
     );
+
+    // Buffered rows waiting to be written, and events refused for running
+    // away. Both are quiet failures otherwise: a buffer that never drains and
+    // a cascade that keeps being cut off are only visible if something counts
+    // them.
+    this.metrics.set(
+      Metric.WriteBufferDepth,
+      this.events.pendingWrites(),
+      { instance: this.instances.instanceId, buffer: 'event' },
+      'Append-only rows buffered but not yet written',
+    );
+    for (const [name, count] of Object.entries(this.events.refusedCascades())) {
+      this.metrics.set(
+        Metric.EventDispatchDropped,
+        count,
+        { event: name },
+        'Events persisted but not dispatched for exceeding the cascade depth',
+      );
+    }
+
     return this.metrics.prometheus();
   }
 
@@ -634,6 +669,62 @@ export class BackupController {
   })
   restores() {
     return this.backups.restores_();
+  }
+}
+
+// ================================================= Retention
+
+@ApiTags('Operations / Retention')
+@ApiBearerAuth()
+@Controller('ops/retention')
+export class RetentionController {
+  constructor(private readonly retention: RetentionService) {}
+
+  @Get()
+  @RequirePermissions(Permissions.OrganizationUpdate)
+  @ApiOperation({
+    summary: 'The data retention policy in force',
+    description:
+      'Which append-only tables are pruned, how far back, and why. A window of 0 ' +
+      'days means the table is kept forever, which is how a legal hold is expressed.',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        version: '1.0.0',
+        batchSize: 1000,
+        tables: [
+          { table: 'events', column: 'createdAt', days: 90, enabled: true, isDefault: true },
+        ],
+      },
+    },
+  })
+  policy() {
+    return this.retention.policy();
+  }
+
+  @Post('sweep')
+  @RequirePermissions(Permissions.OrganizationUpdate)
+  @HttpCode(HttpStatus.OK)
+  @RateLimit(6, 3600)
+  @ApiOperation({
+    summary: 'Run the retention sweep now',
+    description:
+      'Normally runs hourly on the leader. Pass `dryRun` to see which tables hold ' +
+      'rows past their window without deleting anything — the check to run before ' +
+      'living with a window change.',
+  })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        deleted: 4_213,
+        durationMs: 1_840,
+        tables: [{ table: 'events', deleted: 4_213, moreRemaining: false }],
+      },
+    },
+  })
+  sweep(@Body() dto: RetentionSweepDto) {
+    return this.retention.sweep({ dryRun: dto?.dryRun === true });
   }
 }
 

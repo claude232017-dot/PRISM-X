@@ -203,9 +203,17 @@ export class OrganizationsService {
 
     const updated = await this.memberships.update(membershipId, { roleId: role.id });
 
-    // The caller's cached permission set is now stale.
+    // The caller's cached permission set is now stale. Invalidated directly so
+    // this request's own response is consistent, and announced so any other
+    // layer holding a derived view drops it too.
     await this.auth.invalidateAccess(membership.userId);
     if (membership.userId !== actingUserId) await this.auth.invalidateAccess(actingUserId);
+    await this.events.publish(DomainEvent.MemberAccessChanged, {
+      userId: membership.userId,
+      membershipId: updated.id,
+      from: membership.role.key,
+      to: role.key,
+    });
 
     return { membershipId: updated.id, role: role.key };
   }

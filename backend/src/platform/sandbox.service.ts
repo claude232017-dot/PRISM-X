@@ -25,6 +25,8 @@ import { authorize, capabilityForSurface, guardedSurface } from './capabilities'
 import type { SandboxLimits } from './manifest';
 import { CapabilityDeniedError, SandboxLimitError } from './sdk';
 import type { HostApi } from './sdk';
+import { BoundedMap } from '../shared/bounded-map';
+import { declareProcessState } from '../shared/process-state';
 
 /**
  * The sandbox: the one place extension code can reach the platform, and the
@@ -98,7 +100,21 @@ export class SandboxService implements OnModuleInit {
    * in that degraded window — which is still a limit, and is the right trade
    * against a rate limiter that stops limiting the moment the cache blinks.
    */
-  private readonly localCounters = new Map<string, { count: number; resetAt: number }>();
+  private static readonly LOCAL_COUNTER_LIMIT = 5_000;
+  private readonly localCounters = new BoundedMap<
+    string,
+    { count: number; resetAt: number }
+  >(SandboxService.LOCAL_COUNTER_LIMIT);
+
+  // Only reached while Redis is unreachable, and deliberately permissive in
+  // that window rather than failing open entirely. Not load-bearing: the
+  // shared counters are the real limit.
+  private readonly declared = declareProcessState({
+    name: 'sandbox.fallback-counters',
+    loadBearing: false,
+    describe: () =>
+      `${this.localCounters.size} fallback counter(s) — used only while the cache is unreachable`,
+  });
 
   constructor(
     private readonly organizations: OrganizationRepository,
