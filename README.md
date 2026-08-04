@@ -767,7 +767,43 @@ setting). Marketplace releases are signed with Ed25519 keys the platform can
 verify but never produce, and a security advisory does not just warn — it
 quarantines every affected install across every organization.
 
+**Phase 8 — Production & Enterprise** is about running it. Containers and a
+gated pipeline, horizontal scaling, observability, disaster recovery,
+enterprise security, billing, central administration, and a final readiness
+review — all eight backend phases now complete.
+
+The organizing idea is that **readiness is a function, not a document**. Twenty-nine
+checks across ten dimensions are executable predicates over evidence gathered
+from the live system: the Postgres catalogue for row-level-security coverage,
+the applied migrations against those on disk, the metrics registry for latency
+and error rate, the backup history for the recovery point, the instance table
+for redundancy and leadership. Nobody can make the review green by editing a
+file, a failing blocker decides production readiness whatever else passes, and a
+check that could not be evaluated returns UNKNOWN rather than a pass — missing
+evidence is not evidence of health.
+
+The load-bearing engineering change is smaller and less visible: **scheduled
+work now runs once per cluster rather than once per instance**. Everything else
+was already stateless, but a cron tick on every instance fires every schedule N
+times, and it does so quietly — nothing errors, the work simply happens
+repeatedly. A database lease elects one leader through a single conditional
+UPDATE, so two instances racing produce one winner because Postgres serialises
+the statement rather than because the application looked first and hoped. The
+validation suite starts a genuine second process and proves it.
+
+The rest follows the same instinct of preferring the honest answer to the
+convenient one. Backups are checksummed over the plaintext, so verifying
+exercises the whole restore path instead of proving a file arrived intact;
+restores default to a dry run, because the moment one is needed is the moment
+nobody is thinking clearly. Rate limiting fails closed on identity and open on
+infrastructure — a limiter that takes the API down when the cache blinks has
+turned a degraded dependency into an outage. Point-in-time recovery says in its
+own response that it reconstructs to the nearest backup rather than to the
+second. And billing is genuinely optional: an organization with no subscription
+is *unlicensed*, not restricted, so a deployment that never touches billing
+behaves exactly as it did before.
+
 See `backend/README.md` for architecture, the decisions behind it, and how to
-run it. Verified against live PostgreSQL and Redis with 477 unit tests and seven
-end-to-end suites: 57 (Phase 1), 58 (Phase 2), 74 (Phase 3), 112 (Phase 4),
-86 (Phase 5), 86 (Phase 6) and 84 (Phase 7) checks.
+run it. Verified against live PostgreSQL and Redis with 518 unit tests and eight
+end-to-end suites totalling 653 checks: 57 (Phase 1), 58 (Phase 2), 74 (Phase 3),
+112 (Phase 4), 86 (Phase 5), 86 (Phase 6), 84 (Phase 7) and 96 (Phase 8).

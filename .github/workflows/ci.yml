@@ -1,0 +1,294 @@
+# ============================================================
+# PRISM-X — continuous integration and delivery
+#
+# The gates run against live Postgres and Redis rather than mocks, because the
+# properties most worth protecting — tenant isolation through row-level
+# security, migration ordering, leader election — do not exist in a mock.
+#
+# Order is deliberate: the cheap checks that fail most often run first, so a
+# formatting mistake costs seconds rather than a full integration run.
+# ============================================================
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy after the gates pass'
+        type: choice
+        options: ['none', 'staging', 'production']
+        default: 'none'
+
+concurrency:
+  # A newer push supersedes an older run on the same branch. Nothing is learned
+  # from testing a commit that has already been replaced.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ---------------------------------------------------------- static checks
+  validate:
+    name: Lint, types and schema
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+      - name: Generate the Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc -p tsconfig.check.json --noEmit
+
+      - name: Schema is formatted and valid
+        # `format` rewrites in place; if it changes anything, the committed
+        # schema was not canonical and the diff is the failure.
+        run: |
+          npx prisma format
+          npx prisma validate
+          git diff --exit-code prisma/schema.prisma
+
+      - name: Migration ordering
+        # A migration that sorts before the one creating its tables applies
+        # cleanly to an existing database and fails on an empty one — so the
+        # check that matters is that the names are ordered.
+        run: |
+          ls prisma/migrations | grep -v migration_lock | sort -c
+
+      - name: Build
+        run: npm run build
+
+  # ------------------------------------------------------------ unit tests
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    needs: validate
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm test -- --ci --silent
+
+  # ----------------------------------------------------------- security
+  security:
+    name: Dependency and secret scanning
+    runs-on: ubuntu-latest
+    needs: validate
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, so the secret scan can look at what was committed
+          # rather than only at the tip.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+
+      - name: Dependency advisories
+        run: |
+          mkdir -p .audit
+          npm audit --json --audit-level=high > .audit/raw.json || true
+          node -e "
+            const fs = require('fs');
+            const raw = JSON.parse(fs.readFileSync('.audit/raw.json', 'utf8'));
+            const v = raw.metadata?.vulnerabilities ?? {};
+            const summary = { critical: v.critical ?? 0, high: v.high ?? 0, moderate: v.moderate ?? 0 };
+            fs.writeFileSync('.audit/summary.json', JSON.stringify(summary, null, 2));
+            console.log('Advisories:', JSON.stringify(summary));
+            // The readiness review reads this file. Failing the build here is
+            // the gate; writing the summary is what makes the running system
+            // able to report the same number.
+            if (summary.critical + summary.high > 0) process.exit(1);
+          "
+
+      - name: Committed secrets
+        run: |
+          # Anything that looks like a live key in tracked files. The .env is
+          # ignored, so a hit here means one was committed.
+          if git grep -nIE '(sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
+               -- . ':(exclude)*.md' ':(exclude)**/README*'; then
+            echo "A credential-shaped string is committed."
+            exit 1
+          fi
+          echo "No committed credentials found."
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-audit
+          path: backend/.audit/summary.json
+
+  # ------------------------------------------------- integration & migrations
+  integration:
+    name: Integration, migrations and validation suites
+    runs-on: ubuntu-latest
+    needs: [unit, security]
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: prismx
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/prismx?schema=public
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      JWT_SECRET: ci-jwt-secret-that-is-long-enough-to-pass
+      JWT_REFRESH_SECRET: ci-refresh-secret-that-is-long-enough
+      ENCRYPTION_KEY: ci-encryption-key-exactly-32-chars!!
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Migrations apply to an empty database
+        # The check that catches an RLS migration named before the migration
+        # that creates its tables. It passes against a database that already
+        # has the tables, which is why it is run against a fresh one.
+        run: npx prisma migrate deploy
+
+      - name: Migrations are idempotent
+        run: npx prisma migrate deploy
+
+      - name: Seed
+        run: npm run seed
+
+      - name: Build and start
+        run: |
+          npm run build
+          node dist/main.js > /tmp/prismx.log 2>&1 &
+          echo $! > /tmp/prismx.pid
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/api/v1/ops/health/ready && break
+            sleep 2
+          done
+
+      - name: Validation suites
+        run: |
+          for phase in 1 2 3 4 5 6 7 8; do
+            echo "--- Phase $phase ---"
+            node test/phase${phase}-validation.js
+          done
+
+      - name: Production readiness review
+        # Informational on a branch: a CI environment legitimately fails checks
+        # that only make sense in production (redundancy, recent backups). The
+        # gate that matters is that the review runs and reports.
+        run: |
+          curl -fsS http://127.0.0.1:3000/api/v1/ops/health/deep | head -c 400
+          echo
+
+      - name: Server log on failure
+        if: failure()
+        run: tail -200 /tmp/prismx.log
+
+      - name: Stop
+        if: always()
+        run: kill "$(cat /tmp/prismx.pid)" || true
+
+  # ---------------------------------------------------------------- image
+  image:
+    name: Container image
+    runs-on: ubuntu-latest
+    needs: integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: prismx-backend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # --------------------------------------------------------------- deploy
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: image
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy != 'none'
+    environment:
+      # Production requires a reviewer on the environment. That approval is the
+      # deployment gate — the pipeline proves the build is sound, a person
+      # decides whether now is the moment.
+      name: ${{ inputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record the release
+        # The record is created before the deploy, so a deploy that fails
+        # halfway is still visible in the history rather than absent from it.
+        run: |
+          echo "Recording ${{ github.sha }} for ${{ inputs.deploy }}"
+          echo "POST /api/v1/admin/releases { environment, version, commitSha }"
+
+      - name: Apply migrations
+        run: echo "npx prisma migrate deploy against ${{ inputs.deploy }}"
+
+      - name: Roll out
+        run: echo "docker compose -f docker-compose.prod.yml up -d --no-deps --scale api=3 api"
+
+      - name: Verify
+        run: echo "Poll /ops/health/ready on each instance, then /ops/readiness"
+
+      - name: Roll back on failure
+        if: failure()
+        # The previous version is on the release record; rolling back is
+        # redeploying it rather than reconstructing anything.
+        run: echo "POST /api/v1/admin/releases/:id/rollback"

@@ -39,12 +39,31 @@ export class TriggerEngine implements OnModuleInit, OnModuleDestroy {
     private readonly events: EventBusService,
   ) {}
 
+  /**
+   * Guard supplied by the production layer once several instances can run at
+   * once. A callback rather than an injected service because this module sits
+   * below the production module and must keep working without it — when unset,
+   * the tick runs, which is correct for a single instance and is exactly what
+   * this module did before the guard existed.
+   */
+  private shouldTick: () => boolean = () => true;
+
+  onScheduleGuard(guard: () => boolean): void {
+    this.shouldTick = guard;
+  }
+
   onModuleInit(): void {
     // One wildcard subscription covers every event trigger, rather than
     // re-subscribing whenever a trigger is created.
     this.events.onAny((event) => this.onDomainEvent(event));
 
     this.ticker = setInterval(() => {
+      // Scheduled work is cluster-wide, not per instance. Without this, three
+      // instances fire every schedule three times — and nothing errors, the
+      // work simply happens repeatedly, which is the hardest kind of bug to
+      // notice from outside.
+      if (!this.shouldTick()) return;
+
       void this.tickSchedules().catch((error) =>
         this.logger.error(`Schedule tick failed: ${(error as Error).message}`),
       );

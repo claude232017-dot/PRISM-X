@@ -1711,10 +1711,9 @@ satisfy, a republished version, an install while a review is open, an install
 covered by an advisory, a quarantined extension re-enabled, an invalid API key,
 and a tool whose extension has been uninstalled.
 
-Latest run: **84/84 Phase 7, 86/86 Phase 6, 86/86 Phase 5, 112/112 Phase 4,
-74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 477/477 unit tests.** 325
-documented API operations across 274 paths; 69 tables RLS-protected; migrations
-verified from an empty database.
+Latest run at the close of Phase 7: **84/84 Phase 7, 86/86 Phase 6, 86/86
+Phase 5, 112/112 Phase 4, 74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 477/477
+unit tests.**
 
 ## What Phase 7 deliberately does not do
 
@@ -1733,3 +1732,267 @@ verified from an empty database.
 - **No automatic upgrades.** A non-breaking upgrade applies when asked for. The
   platform never reaches out for a new version on its own — an unattended
   upgrade of third-party code is the supply-chain risk, not the mitigation.
+
+
+---
+
+# Phase 8 — Production & Enterprise Operating System
+
+Phase 7 opened PRISM-X to other people. Phase 8 is about running it: deploying
+it, watching it, scaling it, recovering it, billing for it, and being able to
+say — with evidence — whether it is fit for production.
+
+## Readiness is a function, not a document
+
+`src/production/readiness.ts` anchors the phase, the way `capabilities.ts`
+anchored Phase 7 and `constitution.ts` anchored Phase 6. It is a frozen
+catalogue of 29 checks across the ten dimensions Step 10 names, and every one is
+a predicate over gathered evidence rather than a box someone ticks.
+
+```
+GET /ops/readiness
+→ { readyForProduction, score, summary: { PASS, WARN, FAIL, UNKNOWN }, blockers, verdicts }
+```
+
+The evidence is measured: `pg_tables` for RLS coverage, `_prisma_migrations`
+against the migrations on disk, the metrics registry for p95 and error rate, the
+backup history for recovery point, the filesystem for runbooks, the instance
+table for redundancy and leadership. Nobody can make the review green by editing
+a file.
+
+Three properties matter more than the check count.
+
+**BLOCKER and REQUIRED are different things.** A failing blocker makes
+`readyForProduction` false whatever else passes. A failing REQUIRED check is a
+gap someone owns, not a reason to stop the deploy. Collapsing the two is how a
+readiness bar becomes something people route around.
+
+**UNKNOWN is not a pass.** A check that could not be evaluated says so and is
+excluded from the score. Missing evidence is not evidence of health, and a
+review that quietly counted absent data as success would be confidently wrong in
+exactly the situation it exists to catch.
+
+**Production is held to a higher bar than staging.** A wildcard CORS origin
+fails in production and warns in development; a single instance is a failure in
+production and a note elsewhere. The same catalogue, graded against where it is
+running.
+
+## The load-bearing change: one instance becomes N
+
+Everything else in the stack was already stateless — sessions in Postgres, cache
+in Redis, queues in BullMQ, request context in per-request `AsyncLocalStorage`.
+Scheduled work was not. A cron tick running on every instance fires every
+schedule N times, and it does so *quietly*: nothing errors, the work simply
+happens repeatedly.
+
+`InstanceService` fixes that with a database lease. The election is a single
+conditional `UPDATE`:
+
+```sql
+UPDATE instances SET "leaderUntil" = $until
+ WHERE "instanceId" = $me
+   AND NOT EXISTS (SELECT 1 FROM instances o WHERE o."leaderUntil" > now() AND o."instanceId" <> $me)
+```
+
+One statement, not a read followed by a write. Two instances racing produce one
+winner because Postgres serialises the statement — a check-then-act would hand
+the lease to both under exactly the contention it exists to handle. The lease is
+renewed every 15s and held for 45s, so a leader can miss a renewal without the
+lease changing hands, and a dead leader's lease expires on its own.
+
+`TriggerEngine` receives the guard as a callback, not an injected dependency, so
+it keeps working with the production layer removed — which is correct for a
+single instance and is what the module did before the guard existed.
+
+The Phase 8 suite starts **a genuine second process** against the same database
+and asserts that both appear, that exactly one holds the lease, and that a
+session created on one is accepted by the other. Leader election that has only
+ever run with one instance has not been tested.
+
+## Observability
+
+A metrics registry with counters, gauges and histograms, exposed both as
+Prometheus text and as structured JSON with percentiles. Histograms keep a
+bounded reservoir of raw observations rather than only bucket counts, because
+the readiness review asks for a p95 and a p95 reconstructed from coarse buckets
+is a p95-shaped number rather than a p95. `percentile` returns **null** rather
+than zero when there is nothing to measure — a system with no traffic has no
+p95, and reporting zero would look like excellent performance.
+
+Requests are labelled by route *template*. A label with an unbounded value set
+is a memory leak with a dashboard attached, so `/missions/:id` is the label and
+`/missions/clx0abc` never is.
+
+Three health endpoints, deliberately separate:
+
+- **liveness** checks that the process is running and nothing else. A liveness
+  probe that fails on a database blip restarts a healthy instance and turns a
+  dependency wobble into an outage.
+- **readiness** checks the database and returns 503 without it, so the balancer
+  routes elsewhere. It does *not* fail on cache loss — taking every instance out
+  of rotation because a cache is down is the same mistake in the other direction.
+- **deep** adds the cluster view, rate limited, for people rather than orchestrators.
+
+Eight alert rules ship seeded and are evaluated only on the lease holder. A rule
+must hold for `forSeconds` before firing, and firing is idempotent — one open
+event per rule. A metric hovering at the threshold otherwise produces an event
+per evaluation, which is how an alerting system becomes a denial of service
+against its own operators.
+
+## Recovery
+
+Backups are encrypted with a **fresh data key per backup**, sealed with the
+platform key: one compromised archive does not read the others, and rotating the
+platform key re-seals rather than re-encrypts.
+
+The checksum is taken over the **plaintext**, before compression and encryption.
+Verifying a ciphertext proves the storage layer did not corrupt the file; it
+proves nothing about the data inside. Hashing first means verification decrypts,
+decompresses and re-hashes — it exercises the entire restore path.
+
+`SUCCEEDED` means written. `VERIFIED` means read back and matched. `CORRUPT` is
+a separate status and it is loud, because a backup that fails verification is
+worse than a missing one: it is the one somebody would have relied on.
+
+`restore` defaults to `dryRun: true`, and that default is the design. A restore
+overwrites live data with older data at the moment nobody is thinking clearly,
+so an accidental call validates and a real one requires saying so. Rows insert
+with `ON CONFLICT DO NOTHING` in declared dependency order — a restore that
+clobbers rows newer than the backup turns a partial loss into a total one.
+
+Point-in-time recovery reconstructs to the nearest backup at or before the
+target and **says so in the response**. Second-accurate recovery needs WAL
+archiving at the database; claiming otherwise would be the kind of promise
+discovered to be false during an incident.
+
+## Security
+
+TOTP is implemented rather than imported: the algorithm is thirty lines of HMAC
+and a counter, and a wrong implementation of "is this code valid" is a hole
+rather than a bug. Verification accepts one step of drift either side — a second
+factor that rejects a correct code because a phone is four seconds fast gets
+switched off by the people it protects. Recovery codes are stored hashed and
+consumed on use; one that survived being used would be a standing bypass.
+Disabling the factor requires the factor, so a stolen session cannot remove the
+control it would otherwise meet.
+
+Rate limiting counts in Redis, so N instances enforce one budget rather than N.
+It fails *closed on identity* — anonymous callers get a tighter budget than
+authenticated ones, and an API key gets its own rather than sharing the
+organization's — and *open on infrastructure*: when Redis is unreachable the
+request proceeds, because a limiter that takes the API down when the cache
+blinks has converted a degraded dependency into an outage. `CacheService.increment`
+returns `null` rather than a number on failure precisely so the caller can tell
+"the count is 1" from "there is no shared counter".
+
+Secret rotation runs with an **overlap window**. Old material keeps verifying
+while callers pick up the new. A rotation that invalidates everything the instant
+it runs is one nobody performs twice.
+
+Production refuses to start with `origin: true` and no configured origins.
+Reflecting any origin is a wildcard wearing a disguise: it turns every
+authenticated browser session into an API key for any site the user visits.
+
+## Billing, and why it is optional
+
+An organization with no subscription is **unlicensed, not restricted**.
+`entitlements` falls back to a permissive default, so a deployment that never
+touches billing behaves exactly as it did before Phase 8 — gating is something
+an operator turns on, not something they must turn off. A *cancelled or expired*
+subscription is restricted, because that is a decision someone made.
+
+No payment processor is wired in. Nothing here talks to Stripe; `externalRef` is
+where a processor's identifier goes when one is connected. Charging money is an
+integration, and integrating it should not require rewriting how the amount is
+worked out.
+
+Usage is **read, never written**. AI spend already lands in `UsageDaily` during
+execution; billing sums what execution recorded rather than keeping a second
+counter, because two counters eventually disagree and the one the customer sees
+is the one they dispute. Every invoice line carries the numbers it came from —
+seat count, rate, tokens used, tokens included — so a customer can reconstruct
+the total rather than being asked to trust it.
+
+## Three RLS shapes
+
+Phase 7 needed two. Phase 8 adds a third:
+
+- **Tenant tables** — subscriptions, invoices, sessions, allowlists, compliance
+  reports. The contract every phase used: no organization context, no rows.
+- **Catalogue** — `plans`. Readable by all, writable by no constrained client.
+- **Operator tables** — instances, backups, restores, alerts, rotations,
+  releases, readiness reviews, MFA enrolments. RLS enabled and **no policy
+  created**, which in Postgres denies every row to every constrained role. These
+  describe the platform rather than a tenant and carry backup locations,
+  checksums and key identifiers. The absence of a policy *is* the policy.
+
+Verified under a constrained `prismx_tenant` session: operator tables return
+zero rows and reject writes, the plan catalogue is readable but not writable,
+tenant tables answer for one organization.
+
+## Containers and the pipeline
+
+A multi-stage `Dockerfile` — the runtime ships without the compiler, its
+transitive dependencies or their advisories. Unprivileged user, `dumb-init` so
+SIGTERM actually reaches Node and the shutdown hook runs, and a healthcheck
+wired to *liveness* rather than readiness.
+
+`docker-compose.prod.yml` runs two instances behind nginx by default — the
+smallest topology that exercises leader election, shared rate limiting and
+stateless routing, so problems that only appear at N > 1 appear there rather
+than in production. Migrations are their own service that runs to completion
+before any instance starts: N instances racing to apply the same migration is
+not a race worth having.
+
+The pipeline gates on lint, types, schema formatting, **migration ordering**,
+unit tests, dependency advisories, committed-secret scanning, a fresh-database
+migration, an idempotency re-run, all eight validation suites against live
+Postgres and Redis, and an image build. Deployment requires a reviewer on a
+protected environment — the pipeline proves the build is sound; a person decides
+whether now is the moment.
+
+Four runbooks in `docs/runbooks/`: deployment, recovery, incident response and
+scaling. Procedures that live only in someone's head are unavailable exactly
+when that person is asleep.
+
+## Testing
+
+```bash
+npm test                        # 518 unit tests, 18 suites
+node test/phase1-validation.js  # 57 checks
+node test/phase2-validation.js  # 58 checks
+node test/phase3-validation.js  # 74 checks
+node test/phase4-validation.js  # 112 checks
+node test/phase5-validation.js  # 86 checks
+node test/phase6-validation.js  # 86 checks
+node test/phase7-validation.js  # 84 checks
+node test/phase8-validation.js  # 96 checks
+```
+
+Phase 8's suite covers all ten required checks, including the parts that are
+easy to assert and hard to prove: it starts a real second instance and checks
+that exactly one leader emerges; it takes a real backup, verifies it, restores
+it dry and then for real; it computes a TOTP and confirms enrolment with it,
+then reuses a recovery code and checks it is refused; it exhausts a rate limit
+and reads the `Retry-After`; and it reconstructs an invoice total from its lines.
+
+Latest run: **96/96 Phase 8, 84/84 Phase 7, 86/86 Phase 6, 86/86 Phase 5,
+112/112 Phase 4, 74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 518/518 unit
+tests** — 653 end-to-end checks. 381 documented API operations across 325 paths;
+84 tables RLS-protected; 19 migrations verified from an empty database.
+
+## What Phase 8 deliberately does not do
+
+- **No `pg_dump`.** The backup is a logical export through the application's own
+  connection: portable, testable in CI, restorable table by table. A physical
+  snapshot with WAL archiving is the right answer at scale, and the code says
+  which one it is rather than implying the stronger guarantee.
+- **No second-accurate recovery.** See above. The limit is in the response.
+- **No payment processor.** Amounts are computed and recorded; charging is an
+  integration.
+- **No Kubernetes manifests.** Compose plus nginx is the reference topology.
+  What the platform needed was to *be* deployable — stateless, leader-elected,
+  probe-answering, twelve-factor — and that is orchestrator-agnostic.
+- **No log aggregation backend.** Structured logs with correlation ids go to
+  stdout, which is where a container platform expects them. Shipping them is the
+  platform's job, not the application's.

@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import { recordApiOperationCount } from './production/readiness.service';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
@@ -14,15 +15,63 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: false, rawBody: true });
   const config = app.get(ConfigService);
 
+  const environment = String(config.get('app.environment') ?? process.env.NODE_ENV ?? 'development');
+  const isProduction = environment === 'production';
+
   const apiPrefix = config.get<string>('apiPrefix', 'api/v1');
   app.setGlobalPrefix(apiPrefix);
 
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // Behind a load balancer the client address arrives in a header. Trusting
+  // the proxy is what makes rate limiting and IP restrictions see the caller
+  // rather than the balancer — and it is opt-in, because trusting it when
+  // nothing terminates in front lets any caller spoof their own address.
+  if (config.get<boolean>('app.trustProxy') ?? process.env.TRUST_PROXY === 'true') {
+    app.getHttpAdapter().getInstance().set?.('trust proxy', 1);
+  }
+
+  app.use(
+    helmet({
+      // The API serves JSON, not documents, so a content policy buys nothing
+      // here — but the Swagger UI it also serves needs inline styles.
+      contentSecurityPolicy: false,
+      // Told to browsers only when TLS actually terminates in front; sending
+      // HSTS from a plaintext deployment locks users out of it.
+      hsts: isProduction ? { maxAge: 31_536_000, includeSubDomains: true, preload: false } : false,
+      referrerPolicy: { policy: 'no-referrer' },
+      frameguard: { action: 'deny' },
+      noSniff: true,
+    }),
+  );
+
+  // `origin: true` reflects whatever origin asks, which in production is a
+  // wildcard wearing a disguise: every authenticated browser session becomes
+  // an API key for any site the user visits. Production must name its origins.
+  const configuredOrigins = String(
+    config.get<string>('app.corsOrigins') ?? process.env.CORS_ORIGINS ?? '',
+  )
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (isProduction && !configuredOrigins.length) {
+    throw new Error(
+      'CORS_ORIGINS must list the permitted origins in production. ' +
+        'Reflecting any origin would expose every authenticated session.',
+    );
+  }
+
   app.enableCors({
-    origin: true,
+    origin: configuredOrigins.length ? configuredOrigins : true,
     credentials: true,
     // The organization selector must survive CORS preflight.
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Organization-Id', 'X-Request-Id'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Organization-Id',
+      'X-Request-Id',
+      'X-Api-Key',
+    ],
+    exposedHeaders: ['X-Request-Id', 'X-Instance-Id', 'X-RateLimit-Remaining', 'Retry-After'],
   });
 
   app.useGlobalPipes(
@@ -92,6 +141,20 @@ async function bootstrap(): Promise<void> {
       swaggerOptions: { persistAuthorization: true, tagsSorter: 'alpha' },
       customSiteTitle: 'PRISM-X API',
     });
+
+    // The readiness review asks how much of the API is documented. Counting
+    // here, from the document that is actually served, keeps the answer
+    // truthful — re-deriving it later could produce a different number.
+    recordApiOperationCount(
+      Object.values(document.paths ?? {}).reduce(
+        (total, path) =>
+          total +
+          Object.keys(path).filter((method) =>
+            ['get', 'post', 'put', 'patch', 'delete'].includes(method),
+          ).length,
+        0,
+      ),
+    );
   }
 
   const port = config.get<number>('port', 3000);

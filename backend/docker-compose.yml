@@ -1,0 +1,38 @@
+# ============================================================
+# PRISM-X — local development
+#
+# Postgres and Redis only. The backend runs on the host so that a code change
+# is visible without a rebuild; `docker-compose.prod.yml` is where the backend
+# itself is containerised.
+# ============================================================
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-prismx}
+    ports: ['5432:5432']
+    volumes: ['prismx-postgres:/var/lib/postgresql/data']
+    healthcheck:
+      # Compose waits on this before starting anything that depends on it,
+      # which is what stops the backend racing the database on a cold start.
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres}']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports: ['6379:6379']
+    volumes: ['prismx-redis:/data']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  prismx-postgres:
+  prismx-redis:

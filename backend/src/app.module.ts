@@ -39,6 +39,7 @@ import { LearningModule } from './learning/learning.module';
 // Phase 6 — evolution
 import { EvolutionModule } from './evolution/evolution.module';
 import { PlatformModule } from './platform/platform.module';
+import { ProductionModule } from './production/production.module';
 
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
@@ -97,6 +98,10 @@ import { RequestContextMiddleware } from './shared/context/request-context.middl
     // nothing below it imports the platform, so an extension can never require
     // a change to the engine it extends.
     PlatformModule,
+
+    // Phase 8 runs the platform: instances, observability, recovery, billing
+    // and administration. It imports the domain; the domain never imports it.
+    ProductionModule,
   ],
   providers: [
     // Order matters: authentication runs before permission checks.

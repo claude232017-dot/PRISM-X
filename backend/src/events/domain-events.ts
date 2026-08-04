@@ -214,6 +214,29 @@ export const DomainEvent = {
   GovernanceReviewOpened: 'governance.review_opened',
   GovernanceReviewDecided: 'governance.review_decided',
   DeveloperAppCreated: 'developer.app_created',
+
+  // Phase 8 — production operations
+  InstanceRegistered: 'ops.instance_registered',
+  LeadershipChanged: 'ops.leadership_changed',
+  BackupCompleted: 'ops.backup_completed',
+  BackupFailed: 'ops.backup_failed',
+  BackupVerified: 'ops.backup_verified',
+  BackupRestored: 'ops.backup_restored',
+  AlertFired: 'ops.alert_fired',
+  AlertResolved: 'ops.alert_resolved',
+  SecretRotated: 'ops.secret_rotated',
+  ReleaseStarted: 'ops.release_started',
+  ReleaseSucceeded: 'ops.release_succeeded',
+  ReleaseRolledBack: 'ops.release_rolled_back',
+  ReadinessReviewed: 'ops.readiness_reviewed',
+  SubscriptionChanged: 'billing.subscription_changed',
+  InvoiceIssued: 'billing.invoice_issued',
+  UsageLimitReached: 'billing.usage_limit_reached',
+  MfaEnrolled: 'security.mfa_enrolled',
+  MfaDisabled: 'security.mfa_disabled',
+  SessionRevoked: 'security.session_revoked',
+  AccessDeniedByIp: 'security.access_denied_by_ip',
+  ComplianceReportGenerated: 'compliance.report_generated',
 } as const;
 
 export type DomainEventName = (typeof DomainEvent)[keyof typeof DomainEvent];

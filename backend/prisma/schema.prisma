@@ -108,6 +108,11 @@ model Organization {
   developerApiUsage      DeveloperApiUsage[]
   /// Publisher identities this organization owns.
   publishers             Publisher[]
+  subscription           Subscription?
+  invoices               Invoice[]
+  userSessions           UserSession[]
+  ipAllowEntries         IpAllowEntry[]
+  complianceReports      ComplianceReport[]
 
   @@index([deletedAt])
   @@map("organizations")
@@ -3316,4 +3321,524 @@ model DeveloperApiUsage {
   @@unique([organizationId, appId, apiKeyId, day, endpoint])
   @@index([organizationId, day])
   @@map("developer_api_usage")
+}
+
+// ============================================================
+// Phase 8 — Production & Enterprise Operating System
+//
+// Three scopes appear here, and the distinction is the point:
+//
+//   Tenant tables — subscriptions, invoices, sessions, allowlists, compliance
+//   reports. The usual contract: RLS keyed on the acting organization.
+//
+//   Catalogue — `plans`. Readable by everyone, writable by nobody through a
+//   constrained client. A customer must be able to see what they can buy.
+//
+//   Operator tables — instances, backups, restores, alerts, rotations,
+//   deployments, readiness reviews. These describe the platform, not a
+//   tenant, and no tenant client has any business reading them. They get RLS
+//   enabled with *no* policies at all, which denies every constrained session
+//   by default. The backend's own trusted connection is the only way in.
+// ============================================================
+
+enum DeploymentEnvironment {
+  DEVELOPMENT
+  TEST
+  STAGING
+  PRODUCTION
+}
+
+enum InstanceStatus {
+  STARTING
+  HEALTHY
+  DRAINING
+  /// Missed its heartbeat window. Work it held is reclaimable.
+  UNREACHABLE
+  STOPPED
+}
+
+enum BackupKind {
+  DATABASE
+  STORAGE
+  CONFIGURATION
+}
+
+enum BackupStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  /// Read back and checked against its own checksum.
+  VERIFIED
+  /// Read back and found not to match. Worse than no backup, so it is loud.
+  CORRUPT
+  EXPIRED
+}
+
+enum RestoreMode {
+  FULL
+  POINT_IN_TIME
+  /// Reads and validates without writing anything.
+  VERIFY_ONLY
+}
+
+enum RestoreStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum BillingInterval {
+  MONTHLY
+  ANNUAL
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+enum MfaMethod {
+  TOTP
+  RECOVERY_CODE
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  FIRING
+  RESOLVED
+  ACKNOWLEDGED
+}
+
+enum RotationScope {
+  CREDENTIAL_KEY
+  API_KEY
+  WEBHOOK_SECRET
+  NODE_KEY
+}
+
+enum RotationStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  /// Old and new material both accepted while callers migrate.
+  OVERLAPPING
+}
+
+enum ReleaseStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  ROLLED_BACK
+}
+
+enum ComplianceReportKind {
+  ACCESS_REVIEW
+  DATA_INVENTORY
+  AUDIT_SUMMARY
+  RETENTION
+  SECURITY_POSTURE
+}
+
+// ------------------------------------------------------------
+// Operator tables — platform state, invisible to tenant clients
+// ------------------------------------------------------------
+
+/// One row per running backend process.
+///
+/// The leader lease lives here rather than only in Redis so that "who is
+/// running the schedules" survives a cache flush and is answerable from the
+/// same place as everything else about an instance.
+model Instance {
+  id              String                @id @default(cuid())
+  /// Stable per process. Regenerated on restart — a restarted process is a
+  /// new instance, because anything it held is gone.
+  instanceId      String                @unique
+  hostname        String
+  environment     DeploymentEnvironment @default(DEVELOPMENT)
+  version         String                @default("0.0.0")
+  status          InstanceStatus        @default(STARTING)
+  pid             Int?
+  startedAt       DateTime              @default(now())
+  lastHeartbeat   DateTime              @default(now())
+  /// Sampled at heartbeat. Enough to spot a sick instance, not a profiler.
+  cpuPercent      Float                 @default(0)
+  memoryMb        Float                 @default(0)
+  activeRequests  Int                   @default(0)
+  handledRequests BigInt                @default(0)
+  /// Held by at most one instance. Scheduled work runs only for the holder.
+  leaderUntil     DateTime?
+  stoppedAt       DateTime?
+  updatedAt       DateTime              @updatedAt
+
+  @@index([status, lastHeartbeat])
+  @@index([leaderUntil])
+  @@map("instances")
+}
+
+/// A stored backup.
+model Backup {
+  id                 String                @id @default(cuid())
+  kind               BackupKind
+  status             BackupStatus          @default(RUNNING)
+  environment        DeploymentEnvironment @default(DEVELOPMENT)
+  /// Where the artefact lives, through the storage driver.
+  location           String                @default("")
+  sizeBytes          Int                   @default(0)
+  /// sha256 of the plaintext, recorded before encryption so verification
+  /// checks the data rather than the ciphertext.
+  checksum           String                @default("")
+  encrypted          Boolean               @default(false)
+  /// Sealed data key. Never the key itself.
+  keyMaterial        Json                  @default("{}")
+  /// Tables and row counts captured, for a restore to check against.
+  manifest           Json                  @default("{}")
+  startedAt          DateTime              @default(now())
+  finishedAt         DateTime?
+  durationMs         Int?
+  error              String?
+  verifiedAt         DateTime?
+  verificationDetail String?
+  /// Deleted after this. A backup with no retention is a storage bill.
+  retentionUntil     DateTime?
+  createdById        String?
+
+  restores RestoreRun[]
+
+  @@index([kind, status, startedAt])
+  @@index([retentionUntil])
+  @@map("backups")
+}
+
+/// An attempt to read a backup back, whether or not it wrote anything.
+model RestoreRun {
+  id             String        @id @default(cuid())
+  backupId       String
+  mode           RestoreMode   @default(VERIFY_ONLY)
+  status         RestoreStatus @default(RUNNING)
+  /// For POINT_IN_TIME: the moment being restored to.
+  targetTime     DateTime?
+  /// True when the restore validated everything and wrote nothing.
+  dryRun         Boolean       @default(true)
+  tablesRestored Int           @default(0)
+  rowsRestored   Int           @default(0)
+  startedAt      DateTime      @default(now())
+  finishedAt     DateTime?
+  durationMs     Int?
+  error          String?
+  detail         Json          @default("{}")
+  runById        String?
+
+  backup Backup @relation(fields: [backupId], references: [id], onDelete: Cascade)
+
+  @@index([backupId, startedAt])
+  @@map("restore_runs")
+}
+
+/// A monitoring rule. Platform-level: these watch infrastructure, not tenants.
+model AlertRule {
+  id          String        @id @default(cuid())
+  key         String        @unique
+  name        String
+  description String?
+  /// Metric name as exposed by the metrics registry.
+  metric      String
+  /// `gt`, `gte`, `lt`, `lte`.
+  comparison  String        @default("gt")
+  threshold   Float
+  /// How long the condition must hold before firing.
+  forSeconds  Int           @default(60)
+  severity    AlertSeverity @default(WARNING)
+  enabled     Boolean       @default(true)
+  /// Notification channels to reach when this fires.
+  channels    String[]      @default([])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  events AlertEvent[]
+
+  @@index([enabled, severity])
+  @@map("alert_rules")
+}
+
+model AlertEvent {
+  id               String        @id @default(cuid())
+  ruleId           String
+  ruleKey          String
+  severity         AlertSeverity
+  status           AlertStatus   @default(FIRING)
+  /// The measurement that crossed the line, and the line.
+  value            Float
+  threshold        Float
+  detail           String?
+  firedAt          DateTime      @default(now())
+  resolvedAt       DateTime?
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+
+  rule AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([status, firedAt])
+  @@index([ruleKey, firedAt])
+  @@map("alert_events")
+}
+
+/// A secret rotation, recorded so "when did we last rotate" is answerable.
+model SecretRotation {
+  id            String         @id @default(cuid())
+  scope         RotationScope
+  status        RotationStatus @default(RUNNING)
+  /// Identifier of the material now in use.
+  newKeyId      String         @default("")
+  previousKeyId String         @default("")
+  itemsRotated  Int            @default(0)
+  itemsFailed   Int            @default(0)
+  /// While set, both old and new material verify — the migration window.
+  overlapUntil  DateTime?
+  startedAt     DateTime       @default(now())
+  finishedAt    DateTime?
+  error         String?
+  actorId       String?
+
+  @@index([scope, startedAt])
+  @@map("secret_rotations")
+}
+
+/// A deployment, as recorded by the pipeline.
+model Release {
+  id                String                @id @default(cuid())
+  environment       DeploymentEnvironment
+  version           String
+  commitSha         String                @default("")
+  status            ReleaseStatus         @default(PENDING)
+  /// The version this replaced, so a rollback knows where to go.
+  previousVersion   String?
+  /// Gate results: lint, typecheck, unit, integration, migration, security.
+  checks            Json                  @default("[]")
+  migrationsApplied Int                   @default(0)
+  startedAt         DateTime              @default(now())
+  finishedAt        DateTime?
+  durationMs        Int?
+  error             String?
+  /// Set on a rollback, pointing at what it undid.
+  rollbackOfId      String?
+  actorId           String?
+
+  @@index([environment, startedAt])
+  @@index([status])
+  @@map("releases")
+}
+
+/// A recorded production readiness review.
+model ReadinessReview {
+  id           String                @id @default(cuid())
+  environment  DeploymentEnvironment
+  /// Fingerprint of the readiness bar the review ran against.
+  version      String
+  ready        Boolean               @default(false)
+  score        Float                 @default(0)
+  summary      Json                  @default("{}")
+  /// Every verdict, kept whole — a summary that loses the failures is a slogan.
+  verdicts     Json                  @default("[]")
+  blockers     Int                   @default(0)
+  reviewedById String?
+  createdAt    DateTime              @default(now())
+
+  @@index([environment, createdAt])
+  @@map("readiness_reviews")
+}
+
+// ------------------------------------------------------------
+// Billing — catalogue plus tenant subscriptions
+// ------------------------------------------------------------
+
+/// A subscription plan. Global catalogue: publicly readable, operator-written.
+model Plan {
+  key                     String          @id
+  name                    String
+  description             String?
+  priceCents              Int             @default(0)
+  currency                String          @default("usd")
+  interval                BillingInterval @default(MONTHLY)
+  seatsIncluded           Int             @default(1)
+  /// Additional seats beyond `seatsIncluded`, per interval.
+  seatPriceCents          Int             @default(0)
+  /// Feature keys this plan unlocks. Gating reads this list.
+  features                String[]        @default([])
+  /// Hard ceilings: missions, workers, nodes, storage, AI spend.
+  limits                  Json            @default("{}")
+  trialDays               Int             @default(0)
+  /// Cents charged per 1,000 AI tokens beyond what the plan includes.
+  aiOveragePerKTokenCents Float           @default(0)
+  includedKTokens         Int             @default(0)
+  isPublic                Boolean         @default(true)
+  active                  Boolean         @default(true)
+  sortOrder               Int             @default(0)
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([active, sortOrder])
+  @@map("plans")
+}
+
+/// One organization's subscription. At most one live at a time.
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String             @unique
+  planKey            String
+  status             SubscriptionStatus @default(TRIALING)
+  /// Seats purchased. Members beyond this are refused, not silently billed.
+  seats              Int                @default(1)
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean            @default(false)
+  cancelledAt        DateTime?
+  /// Identifier at whichever payment processor is wired up, when one is.
+  externalRef        String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [planKey], references: [key])
+  invoices     Invoice[]
+
+  @@index([organizationId])
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  organizationId String
+  subscriptionId String?
+  /// Human-facing, sequential per organization.
+  number         String
+  status         InvoiceStatus @default(DRAFT)
+  currency       String        @default("usd")
+  periodStart    DateTime
+  periodEnd      DateTime
+  /// Plan and seat charges.
+  subtotalCents  Int           @default(0)
+  /// Metered AI usage beyond what the plan includes.
+  usageCents     Int           @default(0)
+  totalCents     Int           @default(0)
+  /// One entry per charge, with the numbers it was derived from.
+  lines          Json          @default("[]")
+  issuedAt       DateTime?
+  dueAt          DateTime?
+  paidAt         DateTime?
+  voidedAt       DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, number])
+  @@index([organizationId, periodStart])
+  @@index([status])
+  @@map("invoices")
+}
+
+// ------------------------------------------------------------
+// Security — sessions, second factors, network restrictions
+// ------------------------------------------------------------
+
+/// An authenticated session, so one can be ended without ending all of them.
+model UserSession {
+  id             String    @id @default(cuid())
+  organizationId String
+  userId         String
+  /// sha256 of the issued token. The token itself is never stored.
+  tokenHash      String    @unique
+  ip             String?
+  userAgent      String?
+  /// True once a second factor has been presented for this session.
+  mfaSatisfied   Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  revokedReason  String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, userId])
+  @@index([expiresAt])
+  @@map("user_sessions")
+}
+
+/// A user's second factor. Global, because a user is global.
+model MfaEnrollment {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  method        MfaMethod @default(TOTP)
+  /// Sealed shared secret. Never returned after enrolment.
+  secret        Json      @default("{}")
+  /// sha256 of each single-use recovery code. Consumed codes are removed.
+  recoveryCodes String[]  @default([])
+  confirmedAt   DateTime?
+  lastUsedAt    DateTime?
+  disabledAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("mfa_enrollments")
+}
+
+/// A network restriction. Empty for an organization means no restriction.
+model IpAllowEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  /// IPv4 CIDR, or a single address.
+  cidr           String
+  label          String?
+  enabled        Boolean  @default(true)
+  createdById    String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, cidr])
+  @@index([organizationId, enabled])
+  @@map("ip_allow_entries")
+}
+
+/// A generated compliance report, kept so an auditor sees what was reported.
+model ComplianceReport {
+  id             String               @id @default(cuid())
+  organizationId String
+  kind           ComplianceReportKind
+  periodStart    DateTime
+  periodEnd      DateTime
+  /// The report body. Kept whole so it can be re-read, not re-derived.
+  findings       Json                 @default("{}")
+  /// Counts that make a list of reports scannable without opening each one.
+  summary        Json                 @default("{}")
+  generatedById  String?
+  createdAt      DateTime             @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, kind, createdAt])
+  @@map("compliance_reports")
 }

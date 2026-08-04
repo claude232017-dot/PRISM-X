@@ -8,6 +8,7 @@ import { DISTRIBUTED_REPOSITORIES } from './repositories/distributed.repositorie
 import { LEARNING_REPOSITORIES } from './repositories/learning.repositories';
 import { EVOLUTION_REPOSITORIES } from './repositories/evolution.repositories';
 import { PLATFORM_REPOSITORIES } from './repositories/platform.repositories';
+import { PRODUCTION_REPOSITORIES } from './repositories/production.repositories';
 
 const REPOSITORIES = [
   ...TENANT_REPOSITORIES,
@@ -18,6 +19,7 @@ const REPOSITORIES = [
   ...LEARNING_REPOSITORIES,
   ...EVOLUTION_REPOSITORIES,
   ...PLATFORM_REPOSITORIES,
+  ...PRODUCTION_REPOSITORIES,
 ];
 
 /**
