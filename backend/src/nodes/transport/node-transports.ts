@@ -402,10 +402,41 @@ export class NodeTransportRegistry {
     return this.transports.get(NodeTransportRegistry.transportKeyFor(node))!;
   }
 
+  /**
+   * Whether standing in for a remote machine is permitted at all.
+   *
+   * Off in production, and not overridable there. The simulated transport is
+   * selected by a node's `metadata` — which is tenant-supplied — and it runs
+   * the dispatch *in the control plane's own process*. That is exactly right
+   * for a test and exactly wrong for a live deployment: a tenant could mark a
+   * node simulated and have work they believe is running on their own machine
+   * execute here instead, on the control plane's event loop, with the control
+   * plane's reach. Tenant input must never be able to choose which side of an
+   * isolation boundary code runs on.
+   *
+   * So the environment decides, and production decides no.
+   */
+  static simulationPermitted(
+    environment = process.env.NODE_ENV ?? 'development',
+  ): boolean {
+    if (environment === 'production') return false;
+    // Anywhere else it is opt-out rather than opt-in, so the distributed test
+    // suites keep working without every developer setting a variable.
+    return process.env.ALLOW_SIMULATED_NODES !== 'false';
+  }
+
   static transportKeyFor(node: Node): string {
     if (node.isLocal) return 'local';
     const metadata = (node.metadata ?? {}) as Record<string, unknown>;
-    if (metadata.simulate !== undefined || metadata.simulated === true) return 'simulated';
+    const asksForSimulation =
+      metadata.simulate !== undefined || metadata.simulated === true;
+
+    // A node that asked to be simulated where simulation is not permitted is
+    // treated as the real remote machine it claims to be. It will fail to be
+    // reached, which is the safe outcome: the work does not silently run here.
+    if (asksForSimulation && NodeTransportRegistry.simulationPermitted()) {
+      return 'simulated';
+    }
     return 'http';
   }
 }

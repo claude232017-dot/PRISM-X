@@ -5,11 +5,13 @@ import type {
   ExtensionModule,
   HostEvent,
   IExtensionLoader,
+  LoaderIsolation,
   MigrationContext,
   ToolInvocation,
   WorkerInvocation,
 } from './sdk';
 import type { ExtensionManifest, ToolContribution } from './manifest';
+import { declareIsolation } from '../shared/isolation-registry';
 
 /**
  * The in-process extension loader.
@@ -37,7 +39,37 @@ import type { ExtensionManifest, ToolContribution } from './manifest';
 @Injectable()
 export class LocalExtensionLoader implements IExtensionLoader {
   readonly kind = 'in-process';
+
+  /**
+   * Declared so the platform cannot imply protection it does not provide.
+   *
+   * This loader executes no publisher code, which is why `level: 'none'` is
+   * the honest answer rather than an embarrassing one: there is nothing to
+   * contain. The moment a loader *does* execute somebody else's code, that
+   * combination — publisher code with no isolation — is what the readiness
+   * review is looking for.
+   */
+  readonly isolation: LoaderIsolation = {
+    level: 'none',
+    executesPublisherCode: false,
+    contains: [
+      'The capability sandbox still guards every host method, whichever loader is in use.',
+      'No publisher code is executed, so there is no untrusted code to contain.',
+    ],
+    doesNotContain: [
+      'Nothing. A module that ran here would share the host event loop and heap.',
+    ],
+  };
   private readonly logger = new Logger(LocalExtensionLoader.name);
+
+  /** Announces this loader's containment once it is the one actually bound. */
+  declare(): void {
+    declareIsolation({
+      loader: this.kind,
+      level: this.isolation.level,
+      executesPublisherCode: this.isolation.executesPublisherCode,
+    });
+  }
 
   async load(manifest: ExtensionManifest): Promise<ExtensionModule> {
     this.logger.debug(`Loading ${manifest.slug}@${manifest.version} in-process`);

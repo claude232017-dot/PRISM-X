@@ -129,6 +129,19 @@ export interface ReadinessEvidence {
     securityHeadersActive: boolean;
     /** Dependency advisories at high or critical severity. */
     vulnerableDependencies: number | null;
+    /**
+     * How extension code is isolated, as the active loader declares it.
+     *
+     * Reported rather than assumed. The capability sandbox guards the host API
+     * whichever loader is bound, but only the loader knows whether it executes
+     * somebody else's code and what it does about it — and the dangerous
+     * combination is publisher code with no isolation.
+     */
+    extensionIsolation: {
+      loader: string;
+      level: 'none' | 'thread' | 'process';
+      executesPublisherCode: boolean;
+    } | null;
   };
 
   observability: {
@@ -361,6 +374,41 @@ const CHECKS: ReadinessCheck[] = [
       e.security.rateLimitingActive
         ? { outcome: 'PASS', detail: 'Per-principal limits active' }
         : productionOnly(e, true, 'No rate limiting in effect'),
+  },
+  {
+    id: 'EXTENSION_ISOLATION',
+    dimension: 'SECURITY',
+    statement: 'Code supplied by a publisher runs where it cannot take the host down.',
+    rationale:
+      'Extensions are the one place the platform runs code it did not write. ' +
+      'The capability sandbox decides what an extension may *ask the host* for; ' +
+      'it says nothing about what the extension can do to the process it runs ' +
+      'in. A loader that executes publisher code on the host event loop turns ' +
+      'one bad `while (true)` into an outage.',
+    severity: 'BLOCKER',
+    evaluate: (e) => {
+      const isolation = e.security.extensionIsolation;
+      if (!isolation) {
+        // A loader that will not declare what it isolates cannot be graded,
+        // and grading it as a pass would be the wrong way to be wrong.
+        return { outcome: 'UNKNOWN', detail: 'The active loader declares no isolation' };
+      }
+      if (!isolation.executesPublisherCode) {
+        return {
+          outcome: 'PASS',
+          detail: `${isolation.loader} executes no publisher code`,
+        };
+      }
+      return isolation.level === 'none'
+        ? {
+            outcome: 'FAIL',
+            detail: `${isolation.loader} runs publisher code with no isolation`,
+          }
+        : {
+            outcome: 'PASS',
+            detail: `${isolation.loader} runs publisher code with ${isolation.level} isolation`,
+          };
+    },
   },
   {
     id: 'SECURITY_HEADERS',

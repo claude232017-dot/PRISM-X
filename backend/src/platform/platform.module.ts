@@ -14,6 +14,7 @@ import { GovernanceService } from './governance.service';
 import { DeveloperPortalService } from './developer-portal.service';
 import { LocalExtensionLoader } from './local-extension-loader';
 import { EXTENSION_LOADER } from './sdk';
+import { WorkerThreadExtensionLoader } from './worker-thread-extension-loader';
 import {
   CapabilityController,
   ContributionController,
@@ -42,9 +43,24 @@ import {
  *  - `ContributionService.onInvoke` lets contributions be executed by the
  *    runtime without the contribution registry depending on it.
  *
- * `EXTENSION_LOADER` is the seam for how extension code is resolved. PRISM-X
- * binds it to the deterministic in-process loader; an isolate, a container or
- * a remote runtime is a different binding here and no change anywhere else.
+ * `EXTENSION_LOADER` is the seam for how extension code is resolved, and there
+ * are now two implementations of it — which is what makes the seam a claim
+ * about the architecture rather than a promise about it.
+ *
+ * `EXTENSION_ISOLATION` chooses:
+ *
+ *  - `none`   — the in-process loader. Executes no publisher code; the module
+ *               is derived from the manifest and runs on the host's own event
+ *               loop. The default, because it is what a deployment with no
+ *               third-party extensions actually needs.
+ *  - `thread` — a `worker_threads` isolate per extension, with heap and stack
+ *               limits and a per-call deadline enforced by terminating the
+ *               thread. Genuinely executes code, and genuinely contains a
+ *               runaway one.
+ *
+ * The distinction is reported by the readiness review rather than left to a
+ * reader of this comment, because "extensions are sandboxed" is a claim an
+ * operator has to be able to check from the running system.
  */
 @Module({
   imports: [
@@ -74,7 +90,22 @@ import {
     GovernanceService,
     DeveloperPortalService,
     LocalExtensionLoader,
-    { provide: EXTENSION_LOADER, useExisting: LocalExtensionLoader },
+    WorkerThreadExtensionLoader,
+    {
+      provide: EXTENSION_LOADER,
+      inject: [LocalExtensionLoader, WorkerThreadExtensionLoader],
+      useFactory: (
+        local: LocalExtensionLoader,
+        isolated: WorkerThreadExtensionLoader,
+      ) => {
+        const selected =
+          process.env.EXTENSION_ISOLATION === 'thread' ? isolated : local;
+        // Only the bound loader declares itself, so the readiness review
+        // reports what is actually in use rather than what is merely present.
+        selected.declare();
+        return selected;
+      },
+    },
   ],
   exports: [ExtensionRuntimeService, ContributionService, SandboxService, DeveloperPortalService],
 })

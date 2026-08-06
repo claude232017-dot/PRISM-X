@@ -13,6 +13,7 @@ import { CacheService } from '../shared/cache/cache.service';
 import { EventBusService } from '../events/event-bus.service';
 import { DomainEvent } from '../events/domain-events';
 import { RequestContextStore } from '../shared/context/request-context';
+import { activeIsolation } from '../shared/isolation-registry';
 import { InstanceService } from './instance.service';
 import { BackupService } from './backup.service';
 import { SecurityService } from './security.service';
@@ -137,6 +138,7 @@ export class ReadinessService {
         rateLimitingActive: true,
         securityHeadersActive: true,
         vulnerableDependencies: this.dependencyAdvisories(),
+        extensionIsolation: activeIsolation(),
       },
 
       observability: {

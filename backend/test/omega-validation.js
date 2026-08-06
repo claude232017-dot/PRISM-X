@@ -342,6 +342,39 @@ const ACCOUNT = {
   );
 
   // ================================================================
+  console.log('\n--- J. Isolation seams are real and reported ---');
+
+  const readinessForIsolation = await api('GET', '/ops/readiness?record=false', t());
+  const isolationVerdict = (readinessForIsolation?.verdicts ?? []).find(
+    (v) => v.id === 'EXTENSION_ISOLATION',
+  );
+  check(
+    'the review reports how extension code is isolated',
+    Boolean(isolationVerdict),
+    `${isolationVerdict?.outcome} — ${isolationVerdict?.detail}`,
+  );
+  check(
+    'publisher code with no isolation would be a blocker, not a warning',
+    isolationVerdict?.severity === 'BLOCKER',
+    isolationVerdict?.severity,
+  );
+  check(
+    'the active loader is named rather than described in the abstract',
+    /in-process|worker-thread|process/.test(isolationVerdict?.detail ?? ''),
+    isolationVerdict?.detail,
+  );
+
+  // A node whose tenant-supplied metadata asks to be simulated must not get
+  // its work executed inside the control plane. In development simulation is
+  // permitted; what matters is that the decision is the environment's.
+  const nodes = await api('GET', '/nodes', t());
+  check(
+    'the node surface answers, so transport selection is exercisable',
+    Array.isArray(nodes?.data ?? nodes),
+    `${(nodes?.data ?? nodes ?? []).length} node(s)`,
+  );
+
+  // ================================================================
   console.log('\n--- I. Row-level security is engaged, not merely present ---');
 
   try {

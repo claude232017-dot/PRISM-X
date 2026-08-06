@@ -41,6 +41,11 @@ const healthy = (overrides: Partial<ReadinessEvidence> = {}): ReadinessEvidence 
     rateLimitingActive: true,
     securityHeadersActive: true,
     vulnerableDependencies: 0,
+    extensionIsolation: {
+      loader: 'worker-thread',
+      level: 'thread' as const,
+      executesPublisherCode: true,
+    },
   },
   observability: {
     metricsExposed: true,
@@ -262,5 +267,46 @@ describe('individual checks', () => {
         'CONFIG_FROM_ENVIRONMENT',
       ),
     ).toBe('FAIL');
+  });
+});
+
+describe('extension isolation', () => {
+  const evidenceWith = (
+    extensionIsolation: ReadinessEvidence['security']['extensionIsolation'],
+  ): ReadinessEvidence => ({
+    ...healthy(),
+    security: { ...healthy().security, extensionIsolation },
+  });
+
+  const verdictFor = (evidence: ReadinessEvidence) =>
+    review(evidence).verdicts.find((v) => v.id === 'EXTENSION_ISOLATION');
+
+  it('passes a loader that executes no publisher code', () => {
+    const verdict = verdictFor(
+      evidenceWith({ loader: 'in-process', level: 'none', executesPublisherCode: false }),
+    );
+    expect(verdict?.outcome).toBe('PASS');
+  });
+
+  it('fails publisher code running with no isolation', () => {
+    // The one combination that is genuinely dangerous, and the reason the
+    // check exists: somebody binds a code-executing loader and leaves the
+    // isolation level where it was.
+    const verdict = verdictFor(
+      evidenceWith({ loader: 'in-process', level: 'none', executesPublisherCode: true }),
+    );
+    expect(verdict?.outcome).toBe('FAIL');
+    expect(verdict?.severity).toBe('BLOCKER');
+  });
+
+  it('passes publisher code in a thread isolate', () => {
+    const verdict = verdictFor(
+      evidenceWith({ loader: 'worker-thread', level: 'thread', executesPublisherCode: true }),
+    );
+    expect(verdict?.outcome).toBe('PASS');
+  });
+
+  it('abstains rather than passing when no loader declares itself', () => {
+    expect(verdictFor(evidenceWith(null))?.outcome).toBe('UNKNOWN');
   });
 });

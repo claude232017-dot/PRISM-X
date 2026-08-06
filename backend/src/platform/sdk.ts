@@ -220,8 +220,46 @@ export interface LoadedExtension {
  * remote runtime is a second implementation of this interface, not a change to
  * anything above it.
  */
+/**
+ * What a loader actually isolates.
+ *
+ * Declared rather than assumed, because "extensions are sandboxed" is a claim
+ * the platform makes and a loader either backs or does not. The capability
+ * sandbox guards the *host API* — which methods an extension may call — and it
+ * does that whichever loader is in use. It says nothing about what the
+ * extension's own code can do to the process it runs in, and conflating the two
+ * is how a system ends up believing it is protected against something it has
+ * never contained.
+ *
+ * `none`    — the module runs on the host's event loop. An infinite loop stops
+ *             the server. Adequate only where no third-party code is executed.
+ * `thread`  — a `worker_threads` isolate with heap and stack limits, killable
+ *             mid-call. Contains runaway CPU and memory, and a crash. Does *not*
+ *             contain a determined escape: a worker shares the process and can
+ *             reach the filesystem and the environment.
+ * `process` — a separate OS process. Adds kernel-enforced memory separation and
+ *             the ability to drop privileges.
+ */
+export type IsolationLevel = 'none' | 'thread' | 'process';
+
+export interface LoaderIsolation {
+  readonly level: IsolationLevel;
+  /** True when this loader runs code supplied by a publisher. */
+  readonly executesPublisherCode: boolean;
+  /** What is contained, in plain terms, for the readiness report. */
+  readonly contains: string[];
+  /** What is explicitly *not* contained. Never left empty by omission. */
+  readonly doesNotContain: string[];
+}
+
 export interface IExtensionLoader {
   readonly kind: string;
+  /**
+   * Required. A loader that will not say what it isolates cannot be reasoned
+   * about, and the readiness review treats a missing declaration as a failure
+   * rather than as a pass.
+   */
+  readonly isolation: LoaderIsolation;
   load(manifest: ExtensionManifest): Promise<ExtensionModule>;
   unload?(slug: string): Promise<void>;
 }

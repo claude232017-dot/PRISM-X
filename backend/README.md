@@ -116,6 +116,56 @@ any slow dependency into connection-pool exhaustion. Buying database-enforced
 scoping at that price would be a worse trade than the build-time proof that the
 application layer is complete.
 
+### Extension isolation is declared, chosen, and reported
+
+Extensions are the one place the platform runs code it did not write, and the
+capability sandbox is often mistaken for protection against that. It is not: the
+sandbox decides which *host methods* an extension may call. It says nothing
+about what the extension's own code can do to the process it runs in, and
+conflating the two is how a system ends up believing it is protected against
+something it has never contained.
+
+So a loader declares what it isolates, `EXTENSION_ISOLATION` chooses one, and
+the readiness review reports the answer:
+
+| `EXTENSION_ISOLATION` | Loader | Executes publisher code | Contains |
+|---|---|---|---|
+| `none` (default) | in-process | No — the module is derived from the manifest | Nothing to contain |
+| `thread` | worker-thread | Yes | Runaway CPU, runaway heap, crashes, ambient reach |
+
+The thread loader gives each extension a `worker_threads` isolate with V8 heap
+and stack limits, evaluates its body in a `vm` context holding exactly one
+binding, and enforces a per-call deadline by *terminating* the thread — a
+timeout that leaves the offender burning a core is not a timeout. Host calls
+cross back by message and are answered on the main thread, so the capability
+check stays on the host's side of the wall rather than inside the thing being
+checked.
+
+What it does not contain, stated because a sandbox described in marketing terms
+is worse than no sandbox: a worker thread shares the process, `vm` is not a
+security boundary, and the filesystem and environment remain reachable from the
+worker's own module scope. Containing a hostile publisher needs a separate
+process with dropped privileges or a real isolate runtime. The loader declares
+`level: 'thread'` and `doesNotContain`, and `EXTENSION_ISOLATION` is a BLOCKER
+check: publisher code paired with `level: 'none'` fails the review, and a loader
+that declares nothing reports UNKNOWN rather than passing.
+
+The containment claims are tested rather than asserted —
+`worker-thread-extension-loader.spec.ts` asks an extension to spin forever, to
+reach for `require`, and to throw, and checks that the host stays responsive
+throughout. The whole Phase 7 extension lifecycle (84 checks) passes against
+either loader, which is what makes the seam a property of the architecture
+rather than a claim about it.
+
+**Simulated nodes are not selectable in production.** The distributed transport
+is chosen from a node's `metadata`, which is tenant-supplied, and the simulated
+transport runs the dispatch *in the control plane's process*. That is right for
+a test and wrong for a deployment: tenant input must never decide which side of
+an isolation boundary code runs on. `NodeTransportRegistry.simulationPermitted`
+returns false under `NODE_ENV=production` regardless of configuration, and a
+node asking to be simulated there is treated as the real remote machine it
+claims to be — it fails to be reached, which is the safe outcome.
+
 ### The RequestContext is middleware, not an interceptor
 
 `AsyncLocalStorage` must be entered before guards run and stay open through the
