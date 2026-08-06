@@ -20,7 +20,11 @@ export interface AppConfig {
     url: string;
     anonKey: string;
     serviceRoleKey: string;
-    jwtSecret: string;
+    // No `jwtSecret`. It was here, and nothing ever read it: tokens are
+    // verified by asking Supabase (`admin.auth.getUser`), which also catches
+    // revoked sessions and deleted users that a local signature check would
+    // happily accept. A config field nothing consumes is a variable people
+    // are asked to set for no reason, so it is gone rather than tolerated.
   };
   storage: { driver: StorageDriver; bucket: string; localPath: string };
   redis: { host: string; port: number; password?: string; queuePrefix: string };
@@ -53,7 +57,6 @@ export default (): AppConfig => ({
     url: process.env.SUPABASE_URL ?? '',
     anonKey: process.env.SUPABASE_ANON_KEY ?? '',
     serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
-    jwtSecret: process.env.SUPABASE_JWT_SECRET ?? '',
   },
   storage: {
     driver: (process.env.STORAGE_DRIVER as StorageDriver) ?? 'local',
