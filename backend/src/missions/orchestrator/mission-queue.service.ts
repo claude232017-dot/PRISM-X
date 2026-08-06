@@ -3,11 +3,13 @@ import {
   Injectable,
   Logger,
   OnModuleInit,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { MissionStatus } from '@prisma/client';
 import {
   MissionJobData,
   QueueService,
+  QueueUnavailableError,
 } from '../../queues/queues.module';
 import { MissionRepository } from '../../database/repositories/tenant.repositories';
 import { RequestContextStore } from '../../shared/context/request-context';
@@ -93,12 +95,23 @@ export class MissionQueueService implements OnModuleInit {
     }
 
     const context = RequestContextStore.get();
-    const job = await this.queues.enqueueMission({
-      organizationId: mission.organizationId,
-      missionId,
-      actorId: context?.userId,
-      intent,
-    });
+    let job: { jobId?: string | null; queue: string };
+    try {
+      job = await this.queues.enqueueMission({
+        organizationId: mission.organizationId,
+        missionId,
+        actorId: context?.userId,
+        intent,
+      });
+    } catch (error) {
+      if (!(error instanceof QueueUnavailableError)) throw error;
+      // 503, not 500: nothing is wrong with the request or the mission. The
+      // dependency that executes it is down, and a client that retries later
+      // will succeed. Saying so is the difference between an operator
+      // checking Redis and an operator reading the mission code.
+      this.logger.error(`Cannot accept mission ${missionId}: ${error.message}`);
+      throw new ServiceUnavailableException(error.message);
+    }
 
     const wait = Math.min(Math.max(options.waitSeconds ?? 0, 0), MAX_WAIT_SECONDS);
     if (wait > 0 && job.jobId) {

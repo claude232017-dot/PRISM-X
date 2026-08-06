@@ -29,6 +29,57 @@ export interface MissionJobData {
 /** Registered by the missions module; see `onMissionJob`. */
 export type MissionJobHandler = (data: MissionJobData) => Promise<unknown>;
 
+interface RedisTarget {
+  host: string;
+  port: number;
+  password?: string;
+}
+
+/**
+ * Producer-side connection options.
+ *
+ * The defaults are the problem this replaces. ioredis retries forever and
+ * parks commands in an offline queue while it does, so with Redis unreachable
+ * `queue.add(...)` never resolves *and never rejects* — the HTTP request that
+ * called it hangs until the client gives up, holding a handler the whole time.
+ * Measured: `POST /missions/:id/execute` returned nothing after 45 seconds.
+ *
+ * A queue that is down should fail immediately and loudly. `enableOfflineQueue:
+ * false` makes a command reject the moment there is no connection instead of
+ * being buffered, and the bounded retry strategy stops the reconnect loop from
+ * running forever. This mirrors `CacheService`, which already degrades cleanly
+ * for exactly this reason.
+ */
+type ProducerConnection = RedisTarget & {
+  maxRetriesPerRequest: number;
+  enableOfflineQueue: false;
+  connectTimeout: number;
+  retryStrategy: (times: number) => number | null;
+};
+
+/**
+ * Worker-side connection options.
+ *
+ * BullMQ requires `maxRetriesPerRequest: null` on a Worker connection — it
+ * issues blocking commands (`BRPOPLPUSH`) that must not be given up on — and
+ * throws at construction if given anything else. So the worker keeps the
+ * retrying connection and the producer does not. With Redis down the worker
+ * simply consumes nothing, which is harmless; the failure that matters is the
+ * producer's, and that one now fails fast.
+ */
+type WorkerConnection = RedisTarget & { maxRetriesPerRequest: null };
+
+/** Raised when the queue is unreachable, so callers can answer 503. */
+export class QueueUnavailableError extends Error {
+  constructor(cause: string) {
+    super(
+      `The job queue is unavailable (${cause}). Mission execution is queued, ` +
+        'so it cannot run until Redis is reachable. Check REDIS_HOST/REDIS_PORT.',
+    );
+    this.name = 'QueueUnavailableError';
+  }
+}
+
 /**
  * BullMQ wiring.
  *
@@ -49,7 +100,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly queues = new Map<string, Queue>();
   private readonly workers: BullWorker[] = [];
   private readonly queueEvents = new Map<string, QueueEvents>();
-  private connection!: { host: string; port: number; password?: string };
+  private connection!: ProducerConnection;
+  private workerConnection!: WorkerConnection;
   private prefix!: string;
 
   /**
@@ -82,7 +134,13 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       password?: string;
       queuePrefix: string;
     };
-    this.connection = { host: redis.host, port: redis.port, password: redis.password };
+    const target: RedisTarget = {
+      host: redis.host,
+      port: redis.port,
+      password: redis.password,
+    };
+    this.connection = QueueService.producerConnection(target);
+    this.workerConnection = QueueService.workerConnection(target);
     this.prefix = redis.queuePrefix;
 
     for (const name of [
@@ -152,7 +210,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
         return this.missionHandler(job.data);
       },
       {
-        connection: this.connection,
+        connection: this.workerConnection,
         prefix: this.prefix,
         concurrency: QueueService.missionConcurrency(),
         // A mission can legitimately run for minutes. Without a raised lock
@@ -168,6 +226,27 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.workers.push(worker);
+  }
+
+  /**
+   * Connection options for enqueueing. Static and pure so the property that
+   * matters — that a producer command cannot wait forever — is testable
+   * without standing up Redis.
+   */
+  static producerConnection(target: RedisTarget): ProducerConnection {
+    return {
+      ...target,
+      maxRetriesPerRequest: 1,
+      // The line that turns a hang into an error.
+      enableOfflineQueue: false,
+      connectTimeout: 5_000,
+      retryStrategy: (times) => (times > 5 ? null : Math.min(times * 200, 2_000)),
+    };
+  }
+
+  /** Connection options for consuming. BullMQ demands the null here. */
+  static workerConnection(target: RedisTarget): WorkerConnection {
+    return { ...target, maxRetriesPerRequest: null };
   }
 
   /** Concurrent missions per instance. Raise with the provider quota. */
@@ -196,16 +275,22 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     options?: { delay?: number; priority?: number; jobId?: string },
   ) {
     const intent = data.intent ?? 'run';
-    const job = await this.queue(QUEUE_MISSION_EXECUTION).add(
-      'execute-mission',
-      { ...data, intent },
-      // Keyed on the mission alone, not on the intent: running and resuming
-      // the same mission concurrently is never what anybody meant, and two
-      // orchestrators walking one task graph is how a task runs twice.
-      // A hyphen rather than a colon — BullMQ reserves `:` in custom job ids.
-      { jobId: options?.jobId ?? `mission-${data.missionId}`, ...options },
-    );
-    return { jobId: job.id, queue: QUEUE_MISSION_EXECUTION };
+    try {
+      const job = await this.queue(QUEUE_MISSION_EXECUTION).add(
+        'execute-mission',
+        { ...data, intent },
+        // Keyed on the mission alone, not on the intent: running and resuming
+        // the same mission concurrently is never what anybody meant, and two
+        // orchestrators walking one task graph is how a task runs twice.
+        // A hyphen rather than a colon — BullMQ reserves `:` in custom job ids.
+        { jobId: options?.jobId ?? `mission-${data.missionId}`, ...options },
+      );
+      return { jobId: job.id, queue: QUEUE_MISSION_EXECUTION };
+    } catch (error) {
+      // Translated at the boundary so the caller answers 503 with something
+      // actionable, rather than 500 with an ioredis stack trace.
+      throw new QueueUnavailableError((error as Error).message);
+    }
   }
 
   /**

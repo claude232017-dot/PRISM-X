@@ -21,7 +21,17 @@ export function validateEnv(raw: Record<string, unknown>): Record<string, unknow
   }
 
   if (authDriver === 'supabase') {
-    ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_JWT_SECRET'].forEach(required);
+    // ANON_KEY belongs here even though it reads like an optional extra:
+    // `SupabaseAuthProvider` calls `getOrThrow('supabase.anonKey')` in its
+    // constructor, so a deploy without it dies at boot regardless. Listing it
+    // is the difference between one message naming every missing variable and
+    // a Nest dependency error naming one.
+    [
+      'SUPABASE_URL',
+      'SUPABASE_ANON_KEY',
+      'SUPABASE_SERVICE_ROLE_KEY',
+      'SUPABASE_JWT_SECRET',
+    ].forEach(required);
   } else {
     const secret = String(raw.JWT_SECRET ?? '');
     if (secret.length < 32) errors.push('JWT_SECRET must be at least 32 characters');
