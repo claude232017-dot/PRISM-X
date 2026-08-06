@@ -375,6 +375,110 @@ const ACCOUNT = {
   );
 
   // ================================================================
+  console.log('\n--- SSRF. Tenant-supplied URLs cannot reach the inside ---');
+
+  // The whole attack, end to end: a tenant creates a webhook pointed at the
+  // cloud metadata service and triggers an event. The delivery must be refused
+  // by the egress guard rather than returning the platform's IAM credentials.
+  const exfil = await api('POST', '/webhook-endpoints', {
+    ...t(),
+    body: {
+      name: `metadata exfil ${unique}`,
+      url: 'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+      events: ['worker.created'],
+    },
+  });
+  check('a webhook endpoint may still be created', Boolean(exfil?.id), exfil?.id);
+
+  await api('POST', '/workers', {
+    ...t(),
+    body: { name: `SSRF trigger ${unique}`, role: 'tester' },
+  });
+  await sleep(1_500);
+
+  // Read from the table rather than the API: the endpoint exposes aggregate
+  // statistics, and what has to be asserted here is the *reason* a specific
+  // delivery failed. "It failed" is not the claim — plenty of things fail.
+  let attempt = { status: '', error: '' };
+  try {
+    const row = psql(
+      `SELECT status || '|' || COALESCE(left(error, 200), '')
+         FROM webhook_deliveries d
+         JOIN webhook_endpoints e ON e.id = d."endpointId"
+        WHERE e.id = '${exfil?.id}'
+        ORDER BY d."createdAt" DESC LIMIT 1`,
+    );
+    const [status, ...rest] = row.split('|');
+    attempt = { status, error: rest.join('|') };
+  } catch (error) {
+    attempt = { status: 'unreadable', error: String(error.message).slice(0, 100) };
+  }
+
+  check(
+    'the delivery to the metadata service failed rather than succeeded',
+    attempt.status === 'FAILED' || attempt.status === 'EXHAUSTED',
+    `status ${attempt.status}`,
+  );
+  check(
+    'it failed because the guard refused the address, not by accident',
+    /Refused to reach|cloud-metadata/i.test(attempt.error),
+    attempt.error.slice(0, 120),
+  );
+
+  // The same attack through a workflow step, which is the other direct path.
+  const probeFlow = await api('POST', '/workflows', {
+    ...t(),
+    body: {
+      name: `ssrf probe ${unique}`,
+      steps: [
+        {
+          id: 'grab',
+          type: 'http',
+          config: { url: 'http://169.254.169.254/latest/meta-data/', method: 'GET' },
+        },
+      ],
+    },
+  });
+  await api('POST', `/workflows/${probeFlow?.id}/publish`, t());
+  const probeRun = await api('POST', `/workflows/${probeFlow?.id}/run`, {
+    ...t(),
+    body: { input: {} },
+  });
+  check(
+    'a workflow http step cannot reach the metadata service either',
+    probeRun?.status === 'FAILED' &&
+      /Refused to reach|cloud-metadata/i.test(String(probeRun?.error ?? '')),
+    String(probeRun?.error ?? '').slice(0, 120),
+  );
+
+  // Loopback is the other half: reaching Postgres or the admin API from a
+  // tenant-authored step would be as bad as reaching the metadata service.
+  const loopbackFlow = await api('POST', '/workflows', {
+    ...t(),
+    body: {
+      name: `ssrf loopback ${unique}`,
+      steps: [
+        {
+          id: 'grab',
+          type: 'http',
+          config: { url: 'http://127.0.0.1:5432/', method: 'GET' },
+        },
+      ],
+    },
+  });
+  await api('POST', `/workflows/${loopbackFlow?.id}/publish`, t());
+  const loopbackRun = await api('POST', `/workflows/${loopbackFlow?.id}/run`, {
+    ...t(),
+    body: { input: {} },
+  });
+  check(
+    'a workflow http step cannot reach loopback',
+    loopbackRun?.status === 'FAILED' &&
+      /Refused to reach/i.test(String(loopbackRun?.error ?? '')),
+    String(loopbackRun?.error ?? '').slice(0, 120),
+  );
+
+  // ================================================================
   console.log('\n--- I. Row-level security is engaged, not merely present ---');
 
   try {

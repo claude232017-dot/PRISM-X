@@ -16,6 +16,7 @@ import {
 } from '../../missions/orchestrator/mission-queue.service';
 import type { MissionRunResult } from '../../missions/orchestrator/mission-orchestrator.service';
 import { resolveTemplate } from '../../integrations/connectors/http-connector';
+import { OutboundHttpService } from '../../shared/http/outbound-http.service';
 
 /**
  * Runs steps inside PRISM-X itself: workers, integrations, missions, HTTP.
@@ -37,6 +38,7 @@ export class InternalExecutionAdapter implements IExecutionAdapter {
     private readonly missions: MissionsService,
     private readonly orchestrator: MissionOrchestrator,
     private readonly missionQueue: MissionQueueService,
+    private readonly outbound: OutboundHttpService,
   ) {}
 
   async execute(step: WorkflowStep, ctx: AdapterExecutionContext): Promise<AdapterResult> {
@@ -162,21 +164,24 @@ export class InternalExecutionAdapter implements IExecutionAdapter {
     const url = String(config.url ?? '');
     if (!url) throw new WorkflowStepError('An http step needs `url`');
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 30_000));
-
     try {
-      const response = await fetch(url, {
+      // `url` comes straight out of a workflow step a tenant authored, so it
+      // is the most directly attacker-controlled destination in the codebase.
+      // The egress guard resolves it, refuses private and metadata addresses,
+      // pins the socket to the address it approved, and revalidates redirects.
+      const response = await this.outbound.request({
+        url,
         method: String(config.method ?? 'POST'),
         headers: {
           'content-type': 'application/json',
           ...((config.headers as Record<string, string>) ?? {}),
         },
         body: config.body === undefined ? undefined : JSON.stringify(config.body),
-        signal: controller.signal,
+        timeoutMs: Number(config.timeoutMs ?? 30_000),
       });
 
-      const text = await response.text();
+      const text = response.body;
+      const ok = response.status >= 200 && response.status < 300;
       let parsed: unknown;
       try {
         parsed = text ? JSON.parse(text) : {};
@@ -185,9 +190,9 @@ export class InternalExecutionAdapter implements IExecutionAdapter {
       }
 
       return {
-        ok: response.ok,
+        ok,
         output: { status: response.status, body: parsed },
-        error: response.ok ? undefined : `HTTP ${response.status}`,
+        error: ok ? undefined : `HTTP ${response.status}`,
       };
     } catch (error) {
       throw new WorkflowStepError(
@@ -195,8 +200,6 @@ export class InternalExecutionAdapter implements IExecutionAdapter {
         // Network-level failures are worth another attempt.
         true,
       );
-    } finally {
-      clearTimeout(timer);
     }
   }
 
@@ -220,6 +223,8 @@ abstract class WebhookRuntimeAdapter implements IExecutionAdapter {
 
   protected readonly logger = new Logger(this.constructor.name);
 
+  constructor(protected readonly outbound: OutboundHttpService) {}
+
   async execute(step: WorkflowStep, ctx: AdapterExecutionContext): Promise<AdapterResult> {
     const config = resolveTemplate(step.config, {
       ...ctx.input,
@@ -235,11 +240,11 @@ abstract class WebhookRuntimeAdapter implements IExecutionAdapter {
       );
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Number(config.timeoutMs ?? 60_000));
-
     try {
-      const response = await fetch(url, {
+      // Same reasoning as the `http` step: a tenant-configured destination,
+      // fetched from inside the platform's network.
+      const response = await this.outbound.request({
+        url,
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -256,10 +261,11 @@ abstract class WebhookRuntimeAdapter implements IExecutionAdapter {
           input: config.payload ?? config.input ?? ctx.input,
           context: ctx.context,
         }),
-        signal: controller.signal,
+        timeoutMs: Number(config.timeoutMs ?? 60_000),
       });
 
-      const text = await response.text();
+      const text = response.body;
+      const ok = response.status >= 200 && response.status < 300;
       let parsed: Record<string, unknown>;
       try {
         parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
@@ -267,7 +273,7 @@ abstract class WebhookRuntimeAdapter implements IExecutionAdapter {
         parsed = { raw: text };
       }
 
-      if (!response.ok) {
+      if (!ok) {
         return {
           ok: false,
           error: `${this.displayName} returned ${response.status}: ${text.slice(0, 200)}`,
@@ -286,8 +292,6 @@ abstract class WebhookRuntimeAdapter implements IExecutionAdapter {
         `${this.displayName} call failed: ${(error as Error).message}`,
         true,
       );
-    } finally {
-      clearTimeout(timer);
     }
   }
 

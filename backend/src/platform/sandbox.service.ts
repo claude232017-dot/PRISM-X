@@ -27,6 +27,8 @@ import { CapabilityDeniedError, SandboxLimitError } from './sdk';
 import type { HostApi } from './sdk';
 import { BoundedMap } from '../shared/bounded-map';
 import { declareProcessState } from '../shared/process-state';
+import { validateUrl } from '../shared/http/egress-guard';
+import { OutboundHttpService } from '../shared/http/outbound-http.service';
 
 /**
  * The sandbox: the one place extension code can reach the platform, and the
@@ -71,20 +73,10 @@ export interface SandboxBinding {
 
 type Handler = (binding: SandboxBinding, args: Record<string, unknown>) => Promise<unknown>;
 
-/** Hosts we refuse to let an extension reach, whatever it claims it needs. */
-const BLOCKED_HOSTS = [
-  'localhost',
-  '127.0.0.1',
-  '0.0.0.0',
-  '::1',
-  // The cloud instance metadata endpoint. Reaching it from inside a tenant's
-  // extension would hand out the platform's own credentials.
-  '169.254.169.254',
-  'metadata.google.internal',
-];
-
-const PRIVATE_IPV4 =
-  /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+// The host and address blocklists that used to live here now live in
+// `shared/http/egress-guard.ts`, so every tenant-controlled destination in the
+// platform is judged by one list rather than by whichever copy its module
+// happened to have.
 
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_PREVIEW_CHARS = 1000;
@@ -133,6 +125,7 @@ export class SandboxService implements OnModuleInit {
     private readonly contributions: ExtensionContributionRepository,
     private readonly hostCalls: ExtensionHostCallRepository,
     private readonly cache: CacheService,
+    private readonly outbound: OutboundHttpService,
   ) {
     this.handlers = this.buildHandlers();
   }
@@ -691,60 +684,48 @@ export class SandboxService implements OnModuleInit {
     }
 
     const method = typeof args.method === 'string' ? args.method.toUpperCase() : 'GET';
-    const response = await fetch(target.toString(), {
+    const response = await this.outbound.request({
+      url: target.toString(),
       method,
       headers,
       ...(method === 'GET' || method === 'HEAD'
         ? {}
         : { body: typeof args.body === 'string' ? args.body : undefined }),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(binding.limits.timeoutMs),
+      timeoutMs: binding.limits.timeoutMs,
+      // An extension gets no redirects at all. It asked for a specific URL and
+      // a 3xx is information, not an instruction — following one on behalf of
+      // third-party code is a decision the extension should make itself, with
+      // a second call that goes through this same gate.
+      maxRedirects: 0,
+      maxResponseBytes: MAX_RESPONSE_BYTES,
     });
 
-    const text = await response.text();
     const responseHeaders: Record<string, string> = {};
-    response.headers.forEach((value, name) => {
+    for (const [name, value] of Object.entries(response.headers)) {
       // Cookies are the one header an extension has no business reading: they
       // are the caller's session, not the extension's data.
       if (name.toLowerCase() !== 'set-cookie') responseHeaders[name.toLowerCase()] = value;
-    });
+    }
 
     return {
       status: response.status,
       headers: responseHeaders,
-      body: text.length > MAX_RESPONSE_BYTES ? text.slice(0, MAX_RESPONSE_BYTES) : text,
+      body: response.body,
     };
   }
 
   /**
-   * Validates an egress target.
+   * Validates an egress target's shape.
    *
-   * This blocks the literal forms of server-side request forgery: loopback,
-   * link-local, RFC1918 and the cloud metadata endpoint. It does not resolve
-   * DNS, so a hostname that resolves to a private address still gets through —
-   * defending against that belongs at the egress proxy, where the resolved
-   * address is actually known, and pretending otherwise here would be worse
-   * than saying so.
+   * A first pass only. This used to be the whole defence, and it could not
+   * stop a hostname that *resolves* to a private address — the comment here
+   * said so, and said the real check belonged at an egress proxy. It now
+   * belongs to `OutboundHttpService`, which resolves the name, checks every
+   * resolved address, and pins the connection to the one it approved. This
+   * function survives so a malformed URL is rejected with an extension-shaped
+   * error before any of that work happens.
    */
   private static parseTarget(url: string): URL {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new Error(`"${url}" is not a valid URL`);
-    }
-
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new Error(`Only http and https are permitted, not "${parsed.protocol}"`);
-    }
-
-    const host = parsed.hostname.toLowerCase();
-    if (BLOCKED_HOSTS.includes(host) || host.endsWith('.localhost')) {
-      throw new Error(`"${host}" is not a permitted destination`);
-    }
-    if (PRIVATE_IPV4.test(host)) {
-      throw new Error(`"${host}" is a private address and is not a permitted destination`);
-    }
-    return parsed;
+    return validateUrl(url).url;
   }
 }

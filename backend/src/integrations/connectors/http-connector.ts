@@ -184,11 +184,16 @@ export class HttpConnector implements IConnector {
     );
     const url = path.startsWith('http') ? path : `${baseUrl}${path}`;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
     try {
-      const response = await fetch(url, {
+      // `baseUrl` is tenant configuration, so this is a request the platform
+      // makes from inside its own network to an address a customer chose. It
+      // goes through the egress guard, which resolves the name, refuses
+      // private and metadata addresses, pins the socket to the address it
+      // approved, and revalidates every redirect. The auth header below is one
+      // of the reasons that matters — an unguarded redirect would hand the
+      // tenant's own credential to whoever the `Location` names.
+      const response = await this.config.http.request({
+        url,
         method,
         headers: {
           'content-type': 'application/json',
@@ -196,11 +201,12 @@ export class HttpConnector implements IConnector {
           ...((this.config.options.headers as Record<string, string>) ?? {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
+        timeoutMs,
       });
 
-      const text = await response.text();
-      if (!response.ok) {
+      const text = response.body;
+      const ok = response.status >= 200 && response.status < 300;
+      if (!ok) {
         throw new ConnectorError(
           `${this.spec.displayName} returned ${response.status}: ${text.slice(0, 300)}`,
           // 429 and 5xx are transient; other 4xx will fail identically on retry.
@@ -224,8 +230,6 @@ export class HttpConnector implements IConnector {
         `${this.spec.displayName} request failed: ${(error as Error).message}`,
         true,
       );
-    } finally {
-      clearTimeout(timer);
     }
   }
 }

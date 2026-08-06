@@ -9,6 +9,7 @@ import {
 import { EventBusService } from '../events/event-bus.service';
 import { DomainEvent, DomainEventEnvelope } from '../events/domain-events';
 import { RequestContextStore } from '../shared/context/request-context';
+import { OutboundHttpService } from '../shared/http/outbound-http.service';
 
 /**
  * Outbound webhooks.
@@ -34,6 +35,7 @@ export class WebhookDispatcher implements OnModuleInit {
     private readonly deliveries: WebhookDeliveryRepository,
     private readonly deadLetters: DeadLetterRepository,
     private readonly events: EventBusService,
+    private readonly outbound: OutboundHttpService,
   ) {}
 
   onModuleInit(): void {
@@ -97,11 +99,15 @@ export class WebhookDispatcher implements OnModuleInit {
     const signature = WebhookDispatcher.sign(endpoint.secret, timestamp, body);
     const attempt = delivery.attempts + 1;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), WebhookDispatcher.TIMEOUT_MS);
-
     try {
-      const response = await fetch(endpoint.url, {
+      // Through the egress guard, never `fetch`. `endpoint.url` is written by
+      // the tenant, and a delivery is the platform making a request from
+      // inside its own network to an address a customer chose — the textbook
+      // shape of server-side request forgery. The guard resolves the name,
+      // refuses private and metadata addresses, pins the connection to the
+      // address it approved, and re-checks every redirect.
+      const response = await this.outbound.request({
+        url: endpoint.url,
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -113,12 +119,18 @@ export class WebhookDispatcher implements OnModuleInit {
           'x-prismx-signature': signature,
         },
         body,
-        signal: controller.signal,
+        timeoutMs: WebhookDispatcher.TIMEOUT_MS,
+        // A receiver is entitled to redirect once; the guard revalidates the
+        // destination, and the signature headers are dropped if the hop
+        // crosses origins.
+        maxRedirects: 2,
+        maxResponseBytes: 64 * 1024,
       });
 
-      const text = await response.text();
+      const text = response.body;
+      const ok = response.status >= 200 && response.status < 300;
 
-      if (response.ok) {
+      if (ok) {
         await this.deliveries.update(deliveryId, {
           status: 'DELIVERED',
           attempts: attempt,
@@ -158,8 +170,6 @@ export class WebhookDispatcher implements OnModuleInit {
         undefined,
       );
       return false;
-    } finally {
-      clearTimeout(timer);
     }
   }
 

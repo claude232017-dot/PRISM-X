@@ -15,6 +15,15 @@ import type { IntegrationCategory } from '@prisma/client';
  */
 export interface ConnectorConfig {
   integrationId: string;
+  /**
+   * The sanctioned egress client.
+   *
+   * Supplied by `IntegrationManager` rather than constructed, because a
+   * connector talks to a URL the tenant configured and must not be able to
+   * reach `fetch`. Passing it through the config is what lets a connector be
+   * built by a plain factory function and still be unable to bypass the guard.
+   */
+  http: OutboundHttpClient;
   /** Decrypted secret. Never logged, never returned by the API. */
   secret?: string;
   /** Non-secret settings from `integration.config`. */
@@ -75,6 +84,24 @@ export interface IConnector {
 
   /** Cheap liveness probe. Must not throw. */
   healthCheck(): Promise<ConnectorHealth>;
+}
+
+/**
+ * The slice of `OutboundHttpService` a connector may use.
+ *
+ * A structural type rather than the class, so the contract file does not
+ * depend on the shared HTTP module and a test can pass a stub.
+ */
+export interface OutboundHttpClient {
+  request(input: {
+    url: string;
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string | Buffer;
+    timeoutMs?: number;
+    maxRedirects?: number;
+    maxResponseBytes?: number;
+  }): Promise<{ status: number; headers: Record<string, string>; body: string }>;
 }
 
 export interface ConnectorFactory {

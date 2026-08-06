@@ -46,12 +46,17 @@ import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
 import { AuditInterceptor } from './shared/interceptors/audit.interceptor';
 import { RequestContextMiddleware } from './shared/context/request-context.middleware';
+import { HttpEgressModule } from './shared/http/http.module';
 
 @Module({
   imports: [
     // Infrastructure
     AppConfigModule,
     SharedModule,
+    // Global. Every tenant-supplied URL is fetched through this module's
+    // guard, and `egress-architecture.spec.ts` fails the build on a direct
+    // `fetch` outside it.
+    HttpEgressModule,
     DatabaseModule,
     EventsModule,
     AuthModule,

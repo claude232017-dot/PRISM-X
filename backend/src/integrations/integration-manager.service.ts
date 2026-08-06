@@ -16,6 +16,7 @@ import { CryptoService } from '../shared/crypto/crypto.service';
 import { CacheService } from '../shared/cache/cache.service';
 import { EventBusService } from '../events/event-bus.service';
 import { DomainEvent } from '../events/domain-events';
+import { OutboundHttpService } from '../shared/http/outbound-http.service';
 
 export interface IntegrationCallResult extends ConnectorResult {
   integrationId: string;
@@ -49,6 +50,7 @@ export class IntegrationManager implements OnModuleInit {
     private readonly crypto: CryptoService,
     private readonly cache: CacheService,
     private readonly events: EventBusService,
+    private readonly outbound: OutboundHttpService,
   ) {}
 
   onModuleInit(): void {
@@ -111,6 +113,7 @@ export class IntegrationManager implements OnModuleInit {
 
     return factory.create({
       integrationId: integration.id,
+      http: this.outbound,
       secret,
       options: (integration.config ?? {}) as Record<string, unknown>,
       permissions: integration.permissions,

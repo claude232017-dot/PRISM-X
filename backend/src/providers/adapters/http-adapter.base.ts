@@ -10,6 +10,7 @@ import {
   ProviderRuntimeConfig,
 } from '../contracts/intelligence-provider.interface';
 import type { ProviderKind } from '@prisma/client';
+import { egress } from '../../shared/http/outbound-http.service';
 
 /**
  * Raised when a vendor call fails. Carries whether a retry is worthwhile, so
@@ -84,20 +85,28 @@ export abstract class HttpIntelligenceAdapter implements IIntelligenceProvider {
     headers: Record<string, string>,
     timeoutMs = 120_000,
   ): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
     try {
-      const response = await fetch(url, {
+      // `baseUrl` is provider configuration a tenant can edit, so this URL is
+      // tenant-controlled even though the adapter looks like platform code —
+      // and the request carries the tenant's decrypted API key. Without the
+      // guard, a CUSTOM provider pointed at the metadata endpoint would fetch
+      // the platform's own cloud credentials and hand back the response.
+      const response = await egress().request({
+        url,
         method: 'POST',
         headers: { 'content-type': 'application/json', ...headers },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        timeoutMs,
+        // Model APIs do not redirect; following one would only ever move a
+        // credential somewhere it was not addressed to.
+        maxRedirects: 0,
+        maxResponseBytes: 8 * 1024 * 1024,
       });
 
-      const text = await response.text();
+      const text = response.body;
+      const ok = response.status >= 200 && response.status < 300;
 
-      if (!response.ok) {
+      if (!ok) {
         throw new ProviderCallError(
           `${this.kind} returned ${response.status}: ${text.slice(0, 400)}`,
           response.status,
@@ -108,12 +117,20 @@ export abstract class HttpIntelligenceAdapter implements IIntelligenceProvider {
       return text ? (JSON.parse(text) as T) : ({} as T);
     } catch (error) {
       if (error instanceof ProviderCallError) throw error;
-      if ((error as Error).name === 'AbortError') {
+      if (
+        (error as Error).name === 'AbortError' ||
+        /timed out/i.test((error as Error).message)
+      ) {
         throw new ProviderCallError(
           `${this.kind} timed out after ${timeoutMs}ms`,
           undefined,
           true,
         );
+      }
+      // A destination the egress guard refused is a configuration error, not
+      // a transient one — retrying a blocked address just blocks again.
+      if ((error as Error).name === 'EgressBlockedError') {
+        throw new ProviderCallError((error as Error).message, undefined, false);
       }
       // Network-level failures (DNS, connection reset) are worth retrying.
       throw new ProviderCallError(
@@ -121,8 +138,6 @@ export abstract class HttpIntelligenceAdapter implements IIntelligenceProvider {
         undefined,
         true,
       );
-    } finally {
-      clearTimeout(timer);
     }
   }
 
