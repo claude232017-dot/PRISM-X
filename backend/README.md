@@ -83,7 +83,38 @@ services. `prismx_tenant` is the least-privilege role that models those callers.
 
 Both layers are covered by the validation suite, including the negative cases:
 no context → zero rows; cross-tenant read → 404; cross-tenant insert → policy
-violation.
+violation. The Omega suite proves the database layer against every tenant table
+rather than a sample: all 65 tables carrying `organizationId` have RLS enabled
+*and* a policy, and `prismx_tenant` is verified `NOBYPASSRLS` before anything
+else is asserted — a test run as a role that bypasses RLS proves nothing.
+
+**Where the application layer is exact, and where it is not.** A repository may
+step outside `BaseRepository` and query Prisma directly. Sometimes that is
+right: authenticating an API key has no tenant yet, a liveness sweep is about
+the whole fleet, and federation is *defined* as reaching another organization's
+rows. The problem was never that these existed — it was that they looked
+identical to oversights. Each one now carries `@Unscoped('reason')`, and
+`src/database/tenancy.spec.ts` fails the build if a query on a tenant table
+neither scopes itself nor declares why it doesn't. The live register is served
+at `GET /admin/access` under `isolation.crossTenantQueries`, so "where can this
+system read across customers" is answerable from the running platform.
+
+**Where RLS is actually engaged by the backend.** The service-role connection is
+trusted across tenants, so most requests are protected by the application layer
+alone. `PrismaService.withTenant` pins the session variable the policies read,
+and the buffered event and audit writes go through it: those flushes are already
+grouped by organization, are pure database work with no external I/O, and run
+off the request path, so the transaction is short and nothing waits on it. There
+the second layer is load-bearing rather than merely present — a batch carrying a
+row for the wrong tenant is rejected by `WITH CHECK` rather than discovered
+later.
+
+Requests are deliberately *not* wrapped in `withTenant`. Doing so would hold an
+interactive transaction open for the life of each request; against a pool of ten
+connections that caps an instance at roughly fifty concurrent requests and turns
+any slow dependency into connection-pool exhaustion. Buying database-enforced
+scoping at that price would be a worse trade than the build-time proof that the
+application layer is complete.
 
 ### The RequestContext is middleware, not an interceptor
 

@@ -8,7 +8,57 @@
  * declared but never deletes anything, or a queue that accepts jobs nothing
  * consumes, would pass a source-level check and fail here.
  */
+const { execSync } = require('node:child_process');
+const path = require('node:path');
+const fs = require('node:fs');
+
 const BASE = process.env.API_BASE ?? 'http://127.0.0.1:3000/api/v1';
+
+/**
+ * Runs SQL as the constrained tenant role.
+ *
+ * `prismx_tenant` is NOBYPASSRLS, so what it can see is what the policies
+ * permit — which is the only way to test row-level security. Asking the owner
+ * role would prove nothing: the owner bypasses RLS by default, so every query
+ * would succeed whether the policies were right, wrong, or absent.
+ */
+function databaseUrl() {
+  const fromEnv = process.env.DATABASE_URL;
+  if (fromEnv) return fromEnv;
+  const envFile = path.join(__dirname, '..', '.env');
+  if (!fs.existsSync(envFile)) return null;
+  const match = /^DATABASE_URL=(.*)$/m.exec(fs.readFileSync(envFile, 'utf8'));
+  return match ? match[1].trim().replace(/^["']|["']$/g, '') : null;
+}
+
+function psql(sql) {
+  const url = databaseUrl();
+  if (!url) throw new Error('DATABASE_URL is not set');
+  const parsed = new URL(url);
+  const env = {
+    ...process.env,
+    PGPASSWORD: decodeURIComponent(parsed.password || ''),
+  };
+  const args = [
+    '-h', parsed.hostname,
+    '-p', parsed.port || '5432',
+    '-U', decodeURIComponent(parsed.username || 'postgres'),
+    '-d', parsed.pathname.replace(/^\//, ''),
+    // Collapsed to one line: the SQL is passed as a single shell argument, and
+    // an embedded newline arrives at psql as a literal backslash-n.
+    '-tAc', JSON.stringify(sql.replace(/\s+/g, ' ').trim()),
+  ].join(' ');
+  const out = execSync(`psql ${args}`, {
+    env,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  // psql prints a line per statement, so a script that has to `SET ROLE` and
+  // `set_config` before its query emits those tags first. The answer is the
+  // last non-empty line.
+  const lines = out.split('\n').map((line) => line.trim()).filter(Boolean);
+  return lines.length ? lines[lines.length - 1] : '';
+}
 
 let passed = 0;
 let failed = 0;
@@ -66,7 +116,20 @@ const ACCOUNT = {
   // ================================================================
   console.log('--- A. The connection pool is declared, not inherited ---');
 
-  const deep = await api('GET', '/ops/health/deep');
+  // The deep probe is rate limited on purpose — it is for people, not
+  // orchestrators — and running the phase suites back to back can exhaust that
+  // budget. Retried rather than skipped: a check that quietly passes when it
+  // could not gather evidence is the thing this whole phase exists to remove.
+  let deep = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const response = await api('GET', '/ops/health/deep', { raw: true });
+    if (response.status !== 429) {
+      deep = await response.json();
+      break;
+    }
+    const retryAfter = Number(response.headers.get('retry-after'));
+    await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 20_000);
+  }
   const pool = deep?.database?.pool;
   check('the deep probe reports the configured pool', Number.isFinite(pool?.configuredLimit), `limit ${pool?.configuredLimit}`);
   check(
@@ -277,6 +340,124 @@ const ACCOUNT = {
     latency?.outcome !== 'UNKNOWN' && /\d/.test(latency?.detail ?? ''),
     `${latency?.outcome} — ${latency?.detail}`,
   );
+
+  // ================================================================
+  console.log('\n--- I. Row-level security is engaged, not merely present ---');
+
+  try {
+    // Coverage first. A table added in a later phase whose RLS migration
+    // sorted before the migration creating it would be silently unprotected,
+    // and every check below would still pass because it samples known tables.
+    const unprotected = psql(`
+      SELECT COALESCE(string_agg(c.table_name, ', '), '')
+        FROM information_schema.columns c
+        JOIN pg_tables t ON t.tablename = c.table_name AND t.schemaname = 'public'
+       WHERE c.table_schema = 'public'
+         AND c.column_name = 'organizationId'
+         AND NOT t.rowsecurity`);
+    check('every table carrying organizationId has RLS enabled', unprotected === '', unprotected || 'none');
+
+    const policyless = psql(`
+      SELECT COALESCE(string_agg(t.tablename, ', '), '')
+        FROM pg_tables t
+       WHERE t.schemaname = 'public'
+         AND t.rowsecurity
+         AND EXISTS (
+           SELECT 1 FROM information_schema.columns c
+            WHERE c.table_schema = 'public' AND c.table_name = t.tablename
+              AND c.column_name = 'organizationId')
+         AND NOT EXISTS (
+           SELECT 1 FROM pg_policies p
+            WHERE p.schemaname = 'public' AND p.tablename = t.tablename)`);
+    check(
+      'every tenant table with RLS also has a policy',
+      policyless === '',
+      policyless || 'none',
+    );
+
+    const tenantTables = Number(
+      psql(`SELECT count(DISTINCT table_name) FROM information_schema.columns
+             WHERE table_schema = 'public' AND column_name = 'organizationId'`),
+    );
+    check('the protected surface is the whole tenant schema', tenantTables >= 60, `${tenantTables} tenant table(s)`);
+
+    // The role has to actually be constrained, or none of this means anything.
+    const bypasses = psql(`SELECT rolbypassrls FROM pg_roles WHERE rolname = 'prismx_tenant'`);
+    check('the tenant role cannot bypass row-level security', bypasses === 'f', `rolbypassrls=${bypasses}`);
+
+    // A session with no organization set must see nothing — failing closed is
+    // the property that matters, because an unset variable is what a bug looks
+    // like from the database's side.
+    const blind = psql(
+      `SET ROLE prismx_tenant; SELECT count(*) FROM missions;`,
+    );
+    check('a tenant session with no organization set sees no rows', blind === '0', `saw ${blind}`);
+
+    // Read the org this suite has been writing to, then read it back through
+    // a constrained session pinned to a *different* organization.
+    const ownOrg = psql(
+      `SELECT id FROM organizations WHERE name = ${JSON.stringify(ACCOUNT.organizationName).replace(/"/g, "'")} LIMIT 1`,
+    );
+    const otherOrg = psql(`SELECT id FROM organizations WHERE id <> '${ownOrg}' LIMIT 1`);
+
+    if (ownOrg && otherOrg) {
+      const mine = psql(
+        `SET ROLE prismx_tenant; SELECT set_config('app.current_organization_id','${ownOrg}',false);` +
+          ` SELECT count(*) FROM missions;`,
+      );
+      const theirs = psql(
+        `SET ROLE prismx_tenant; SELECT set_config('app.current_organization_id','${otherOrg}',false);` +
+          ` SELECT count(*) FROM missions WHERE "organizationId" = '${ownOrg}';`,
+      );
+      check('a tenant session sees its own rows', Number(mine) >= 1, `${mine} mission(s)`);
+      check(
+        'a tenant session cannot read another organization even by naming it',
+        theirs === '0',
+        `saw ${theirs}`,
+      );
+
+      // The events table is written by the append buffer under withTenant, so
+      // this also proves the buffered write path lands in the right tenant.
+      const bufferedEvents = psql(
+        `SET ROLE prismx_tenant; SELECT set_config('app.current_organization_id','${ownOrg}',false);` +
+          ` SELECT count(*) FROM events;`,
+      );
+      check(
+        'batched event writes landed under the tenant that produced them',
+        Number(bufferedEvents) >= 1,
+        `${bufferedEvents} event(s)`,
+      );
+
+      let insertBlocked = false;
+      try {
+        psql(
+          `BEGIN; SET ROLE prismx_tenant;` +
+            ` SELECT set_config('app.current_organization_id','${ownOrg}',true);` +
+            ` INSERT INTO missions (id,"organizationId",title,objective) ` +
+            ` VALUES ('omega-rls-probe','${otherOrg}','probe','probe'); ROLLBACK;`,
+        );
+      } catch {
+        insertBlocked = true;
+      }
+      check('a cross-tenant INSERT is rejected by WITH CHECK', insertBlocked);
+    } else {
+      check('two organizations exist to compare', false, `own=${ownOrg} other=${otherOrg}`);
+    }
+
+    // Operator tables carry no organizationId and are protected differently:
+    // RLS on with no policies at all, which denies everything to a constrained
+    // role. There is no tenant that "owns" an instance row.
+    let operatorBlocked = false;
+    try {
+      const seen = psql(`SET ROLE prismx_tenant; SELECT count(*) FROM instances;`);
+      operatorBlocked = seen === '0';
+    } catch {
+      operatorBlocked = true;
+    }
+    check('operator tables are unreachable from a tenant session', operatorBlocked);
+  } catch (error) {
+    check('RLS checks executed', false, String(error.message).slice(0, 140));
+  }
 
   console.log(`\n${'='.repeat(66)}`);
   console.log(`${passed}/${passed + failed} checks passed`);

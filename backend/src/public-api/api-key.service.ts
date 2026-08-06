@@ -110,7 +110,9 @@ export class ApiKeyService implements OnModuleInit {
 
     const cached = await this.cache.get<ResolvedApiKey>(`apikey:${keyHash}`);
     if (cached) {
-      void this.keys.recordUse(cached.apiKeyId).catch(() => undefined);
+      void this.keys
+        .recordUse(cached.apiKeyId, cached.organizationId)
+        .catch(() => undefined);
       return cached;
     }
 
@@ -129,7 +131,7 @@ export class ApiKeyService implements OnModuleInit {
     };
 
     await this.cache.set(`apikey:${keyHash}`, resolved, ApiKeyService.CACHE_TTL);
-    await this.keys.recordUse(record.id);
+    await this.keys.recordUse(record.id, record.organizationId);
     return resolved;
   }
 

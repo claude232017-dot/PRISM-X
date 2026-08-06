@@ -262,14 +262,30 @@ export class EventRepository
     });
   }
 
+  /**
+   * Writes one tenant's buffered events.
+   *
+   * Performed inside `withTenant`, which pins the Postgres session variable the
+   * row-level security policies read. This is one of the few places where that
+   * is free: the buffer has already grouped rows by organization, the work is
+   * pure database with no external I/O, and it is off the request path — so the
+   * transaction is short and nothing waits on it.
+   *
+   * That matters because it makes the second isolation layer *load-bearing*
+   * here rather than merely present: if this batch ever carried a row for the
+   * wrong organization, the policy's WITH CHECK would reject the insert instead
+   * of the platform discovering it later.
+   */
   private async writeBatch(
     organizationId: string,
     rows: Array<Record<string, unknown>>,
   ): Promise<void> {
-    await this.prisma.event.createMany({
-      data: rows.map((row) => ({ ...row, organizationId })) as never,
-      skipDuplicates: true,
-    });
+    await this.prisma.withTenant(organizationId, (tx) =>
+      tx.event.createMany({
+        data: rows.map((row) => ({ ...row, organizationId })) as never,
+        skipDuplicates: true,
+      }),
+    );
   }
 
   /** Forces buffered rows out. Called before any read of this table. */
@@ -334,14 +350,17 @@ export class AuditLogRepository
     await this.buffer.add(this.organizationId, { ...data, createdAt: new Date() });
   }
 
+  /** Written under `withTenant`, for the reasons given on the event buffer. */
   private async writeBatch(
     organizationId: string,
     rows: Array<Record<string, unknown>>,
   ): Promise<void> {
-    await this.prisma.auditLog.createMany({
-      data: rows.map((row) => ({ ...row, organizationId })) as never,
-      skipDuplicates: true,
-    });
+    await this.prisma.withTenant(organizationId, (tx) =>
+      tx.auditLog.createMany({
+        data: rows.map((row) => ({ ...row, organizationId })) as never,
+        skipDuplicates: true,
+      }),
+    );
   }
 
   flush(): Promise<void> {

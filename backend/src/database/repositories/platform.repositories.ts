@@ -18,6 +18,7 @@ import type {
 import { BaseRepository } from './base.repository';
 import { PrismaService } from '../prisma.service';
 import { RequestContextStore } from '../../shared/context/request-context';
+import { Unscoped } from '../tenancy';
 
 /**
  * Phase 7 repositories.
@@ -545,6 +546,11 @@ export class MarketplaceListingRepository extends CatalogueRepository {
    * review has to subtract it, and an aggregate maintained by deltas drifts
    * the first time one of those deltas is missed.
    */
+  @Unscoped(
+    'A public listing\'s rating is the aggregate of reviews from every ' +
+      'organization. Scoping it to one tenant would compute a rating only ' +
+      'that tenant can see, which is not what a marketplace rating is.',
+  )
   async recomputeRating(listingId: string): Promise<void> {
     const rows = await this.prisma.marketplaceReview.findMany({
       where: { listingId, hiddenAt: null },

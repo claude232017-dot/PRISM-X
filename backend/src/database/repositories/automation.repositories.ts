@@ -259,9 +259,17 @@ export class ApiKeyRepository extends BaseRepository<ApiKey> {
     });
   }
 
-  async recordUse(id: string): Promise<void> {
-    await this.prisma.apiKey.update({
-      where: { id },
+  /**
+   * Records that a key was used.
+   *
+   * Takes the organization as well as the id, even though the id is unique
+   * and came from an authenticated lookup. `updateMany` with both means a
+   * mismatched pair updates nothing instead of touching another tenant's row —
+   * the cost is nil and it removes a blind write-by-id from the codebase.
+   */
+  async recordUse(id: string, organizationId: string): Promise<void> {
+    await this.prisma.apiKey.updateMany({
+      where: { id, organizationId },
       data: { lastUsedAt: new Date(), requestCount: { increment: 1 } },
     });
   }

@@ -18,6 +18,7 @@ import type {
 } from '@prisma/client';
 import { BaseRepository } from './base.repository';
 import { PrismaService } from '../prisma.service';
+import { Unscoped } from '../tenancy';
 
 /**
  * Phase 8 repositories.
@@ -61,6 +62,10 @@ export class SubscriptionRepository extends BaseRepository<Subscription> {
    * Deliberately unscoped: billing runs on a schedule for everyone at once,
    * and a tenant-scoped query would bill only whoever happened to be logged in.
    */
+  @Unscoped(
+    'Billing runs on a schedule for every organization at once. A ' +
+      'tenant-scoped query would renew only whoever happened to be logged in.',
+  )
   dueForRenewal(now = new Date()): Promise<Subscription[]> {
     return this.prisma.subscription.findMany({
       where: {
@@ -133,11 +138,19 @@ export class UserSessionRepository extends BaseRepository<UserSession> {
     return count;
   }
 
-  touch(id: string): Promise<unknown> {
-    return this.prisma.userSession.update({
-      where: { id },
+  /**
+   * Marks a session as recently seen.
+   *
+   * Scoped by organization as well as id. The id came from an authenticated
+   * lookup, so a mismatch should be impossible — which is exactly why it costs
+   * nothing to make it harmless if it ever happens.
+   */
+  async touch(id: string, organizationId: string): Promise<number> {
+    const { count } = await this.prisma.userSession.updateMany({
+      where: { id, organizationId },
       data: { lastSeenAt: new Date() },
     });
+    return count;
   }
 }
 

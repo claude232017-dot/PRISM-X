@@ -235,11 +235,15 @@ export class InstanceService implements OnModuleInit, OnApplicationShutdown {
       .getByPrefix<InstanceMetrics>(InstanceService.METRICS_PREFIX)
       .catch(() => [] as InstanceMetrics[]);
 
-    const contributions = published.length
-      ? published
-      : [this.metrics.contribution(this.instanceId)];
+    // This instance's own figures are read live rather than taken from what it
+    // last published. The published copy is up to one heartbeat stale, and the
+    // instance answering the question is the one it is cheapest to be exact
+    // about — a freshly started process would otherwise report a fleet with
+    // almost no traffic in it and the review would abstain for lack of samples.
+    const live = this.metrics.contribution(this.instanceId);
+    const others = published.filter((entry) => entry.instanceId !== this.instanceId);
 
-    return MetricsService.merge(contributions);
+    return MetricsService.merge([live, ...others]);
   }
 
   // ------------------------------------------------------------- reporting

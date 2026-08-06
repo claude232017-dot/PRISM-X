@@ -12,6 +12,7 @@ import type {
 } from '@prisma/client';
 import { BaseRepository } from './base.repository';
 import { PrismaService } from '../prisma.service';
+import { Unscoped } from '../tenancy';
 
 /**
  * Phase 4 repositories.
@@ -494,6 +495,11 @@ export class FederationGrantRepository extends BaseRepository<FederationGrant> {
     });
   }
 
+  @Unscoped(
+    'A federation grant belongs to two organizations at once. The counter is ' +
+      'adjusted by whichever side is executing, and pinning it to one column ' +
+      'would make the count wrong for the other.',
+  )
   async adjustActive(id: string, delta: number): Promise<void> {
     await this.prisma.federationGrant.updateMany({
       where: { id },
@@ -502,6 +508,10 @@ export class FederationGrantRepository extends BaseRepository<FederationGrant> {
   }
 
   /** A grant addressed *to* the caller. Used for the accept step. */
+  @Unscoped(
+    'The recipient of a grant is not its owner, so the row is by definition ' +
+      'outside the caller\'s tenant. `peerOrganizationId` is the scope.',
+  )
   findByIdUnscopedForPeer(
     id: string,
     peerOrganizationId: string,
@@ -511,6 +521,10 @@ export class FederationGrantRepository extends BaseRepository<FederationGrant> {
     });
   }
 
+  @Unscoped(
+    'Accepting a grant is an act by the peer organization on a row owned by ' +
+      'the issuer. The predicate is scoped to the accepting peer instead.',
+  )
   async acceptAsPeer(id: string, peerOrganizationId: string): Promise<FederationGrant> {
     await this.prisma.federationGrant.updateMany({
       where: { id, peerOrganizationId, status: 'PENDING' },
@@ -534,6 +548,10 @@ export class FederationGrantRepository extends BaseRepository<FederationGrant> {
     });
   }
 
+  @Unscoped(
+    'Either party may revoke, so the row cannot be pinned to one side. ' +
+      'Authorisation is `findEitherSide`, which the caller must pass first.',
+  )
   async revokeEitherSide(id: string, revokedById: string): Promise<FederationGrant> {
     await this.prisma.federationGrant.updateMany({
       where: { id },

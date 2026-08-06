@@ -19,6 +19,7 @@ import { EvolutionPolicyRepository } from '../database/repositories/evolution.re
 import { EventBusService } from '../events/event-bus.service';
 import { DomainEvent } from '../events/domain-events';
 import { RequestContextStore } from '../shared/context/request-context';
+import { unscopedDeclarations } from '../database/tenancy';
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS } from '../auth/permissions';
 import type { PermissionKey } from '../auth/permissions';
 import { SecurityService } from './security.service';
@@ -192,6 +193,26 @@ export class AdminService {
         tracksCatalogue: permissions.length === ALL_PERMISSIONS.length,
       })),
       configuredRoles: roles.map((role: { key: string; name: string }) => ({ key: role.key, name: role.name })),
+
+      /**
+       * Tenant isolation, as it is actually enforced.
+       *
+       * `crossTenantQueries` is the complete list of repository methods that
+       * deliberately query outside tenant scope, each with the reason it is
+       * allowed to. An auditor asking "where can this system read across
+       * customers" gets the answer from the running platform rather than from
+       * somebody's grep, and the architecture test fails the build if a new one
+       * appears without a declaration.
+       */
+      isolation: {
+        applicationScoping:
+          'BaseRepository merges organizationId into every query and throws without a tenant.',
+        databaseScoping:
+          'Row-level security on every table carrying organizationId, keyed on ' +
+          'app.current_organization_id, enforced against a NOBYPASSRLS role.',
+        crossTenantQueries: unscopedDeclarations(),
+        crossTenantQueryCount: unscopedDeclarations().length,
+      },
     };
   }
 
