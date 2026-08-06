@@ -4,34 +4,63 @@ import { join, relative } from 'node:path';
 const SRC = join(__dirname, '..', '..');
 
 /**
- * Files permitted to call `fetch` directly.
+ * The invariant this file enforces:
  *
- * Deliberately short, and every entry is a decision rather than an exemption:
+ * > No tenant-controlled network destination may bypass a centralized,
+ * > security-reviewed outbound network policy.
  *
- *  - `outbound-http.service.ts` does not call `fetch` at all — it uses
- *    `node:http` — but it is the module the rule exists to protect and is
- *    listed so that a future change there does not trip the check.
- *  - `node-transports.ts` is exempt with a *known residual risk*, stated here
- *    rather than hidden. `node.endpointUrl` is set at registration by an
- *    organization administrator (`node:register`), so it is tenant-controlled —
- *    but a self-hosted node legitimately lives at a private address inside a
- *    VPC, and routing this through the guard would refuse every real node. The
- *    exposure is narrower than the paths that were fixed: the transport POSTs
- *    a signed body to a fixed `/api/v1/nodes/agent/execute` path and surfaces
- *    at most 400 characters of the response in a failure message, so it is a
- *    slow, POST-only read of services that answer POST. The right control is a
- *    registration-time policy — an operator-configured CIDR allowlist plus an
- *    absolute refusal of metadata addresses — not this guard. Tracked, not
- *    closed.
- *  - The suites under `test/` are outside `src/` and are not scanned.
+ * Note what it is *not*: "do not call `fetch`". A rule about a function name is
+ * satisfied by installing `undici`. The rule is about the destination — if a
+ * tenant can influence where a connection goes, the decision to open it is made
+ * by a named policy in `egress-policies.ts` and the socket is opened by
+ * `OutboundHttpService`. The pattern list below is how that rule is *detected*
+ * in a static check; it is not the rule itself, which is why it covers `axios`,
+ * `got` and `node-fetch` even though none of them are installed. The check is
+ * there for the day one of them is.
  *
- * Anything else that needs to make an HTTP request to a URL the platform did
- * not choose injects `OutboundHttpService`.
+ * ## There is exactly one entry, and it is not an exemption
+ *
+ * `outbound-http.service.ts` does not call `fetch` at all — it uses
+ * `node:http`, because pinning a socket to a pre-approved address requires the
+ * `lookup` hook that `fetch` does not expose. It is listed because it is the
+ * module the rule exists to protect, so a future change inside it does not trip
+ * the check on itself.
+ *
+ * ## Why `node-transports.ts` is *not* listed
+ *
+ * An earlier version of this file exempted it, with the residual risk written
+ * out honestly: `node.endpointUrl` is tenant-influenced (an organization
+ * administrator sets it at registration), but a self-hosted PRISM-X node
+ * legitimately lives at `10.0.4.7`, and a guard that refuses RFC1918 refuses
+ * every real node.
+ *
+ * That exemption was the wrong shape. It made the node transport a *second*
+ * implementation of egress — which is precisely the condition that produced the
+ * original vulnerability, where `SandboxService` held a correct blocklist that
+ * nobody else reused. So the transport was migrated instead: it calls
+ * `OutboundHttpService` like everything else, and passes
+ * `internalNodeTransport()` as its policy. One code path, two policies:
+ *
+ *  - `TENANT_PUBLIC` — webhooks, workflow steps, connectors, extension
+ *    `host.fetch`, provider `baseUrl`. Public internet only.
+ *  - `INTERNAL_NODE_TRANSPORT` — dispatch to a registered node. Permits the
+ *    operator's `NODE_ENDPOINT_ALLOWED_CIDRS` and the ports a node agent
+ *    listens on, and nothing else. Empty in production until configured, so a
+ *    deployment must declare its node network before it can dispatch to it.
+ *
+ * Neither policy can reach cloud metadata, link-local, multicast, broadcast or
+ * the unspecified address: `ALWAYS_DENIED` is consulted before any policy
+ * allowance, and `egress-policies.spec.ts` asserts that property against every
+ * registered policy rather than against the ones somebody remembered.
+ *
+ * A future internal transport does the same thing — a new policy in
+ * `egress-policies.ts`, automatically covered by that spec — rather than a new
+ * line in `ALLOWED`. Adding a line here should feel like the wrong move,
+ * because it usually is.
+ *
+ * The suites under `test/` are outside `src/` and are not scanned.
  */
-const ALLOWED = new Set<string>([
-  'shared/http/outbound-http.service.ts',
-  'nodes/transport/node-transports.ts',
-]);
+const ALLOWED = new Set<string>(['shared/http/outbound-http.service.ts']);
 
 /**
  * Call shapes that reach the network without going through the guard.
@@ -142,6 +171,32 @@ describe('outbound HTTP is centralised', () => {
       }
     `);
     expect(FORBIDDEN.some(({ pattern }) => pattern.test(sample))).toBe(false);
+  });
+
+  /**
+   * The absence of `fetch` is not the property we want.
+   *
+   * A transport could satisfy every pattern above by writing its own socket
+   * code, and the check would stay green while the invariant was broken. So the
+   * internal transport is asserted *positively*: it goes through the shared
+   * service, and it names a policy when it does.
+   */
+  it('sends node dispatch through the guard under a named policy', () => {
+    const source = readFileSync(
+      join(SRC, 'nodes', 'transport', 'node-transports.ts'),
+      'utf8',
+    );
+    expect(source).toContain('this.outbound.request(');
+    expect(source).toContain('policy: internalNodeTransport()');
+    // Following a redirect would carry the request signature to a destination
+    // it was not addressed to.
+    expect(source).toContain('maxRedirects: 0');
+  });
+
+  it('validates a node endpoint when it is registered, not only when used', () => {
+    const source = readFileSync(join(SRC, 'nodes', 'node.service.ts'), 'utf8');
+    expect(source).toContain('assertEndpointPermitted');
+    expect(source).toContain('internalNodeTransport(env)');
   });
 
   it('does not mistake a method named fetch on an object for the global', () => {

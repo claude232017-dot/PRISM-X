@@ -149,7 +149,7 @@ const ACCOUNT = {
       name: 'GPU Box',
       slug: `gpu-${unique}`,
       type: 'DEDICATED_AI_SERVER',
-      endpointUrl: 'http://127.0.0.1:9101',
+      endpointUrl: 'http://127.0.0.1:8080',
       region: 'eu-west',
       labels: ['gpu', 'inference'],
       maxConcurrency: 6,
@@ -181,7 +181,7 @@ const ACCOUNT = {
       name: 'Edge Pi',
       slug: `edge-${unique}`,
       type: 'EDGE_DEVICE',
-      endpointUrl: 'http://127.0.0.1:9102',
+      endpointUrl: 'http://127.0.0.1:8443',
       region: 'eu-west',
       labels: ['edge'],
       maxConcurrency: 1,
@@ -199,7 +199,7 @@ const ACCOUNT = {
       name: 'Unverified VPS',
       slug: `vps-${unique}`,
       type: 'CLOUD_VPS',
-      endpointUrl: 'http://127.0.0.1:9103',
+      endpointUrl: 'http://127.0.0.1:3100',
       metadata: { simulate: {} },
     },
   });
@@ -223,9 +223,58 @@ const ACCOUNT = {
   const duplicate = await api('POST', '/nodes', {
     ...t(),
     raw: true,
-    body: { name: 'GPU Box again', slug: `gpu-${unique}`, endpointUrl: 'http://127.0.0.1:9199' },
+    body: { name: 'GPU Box again', slug: `gpu-${unique}`, endpointUrl: 'http://127.0.0.1:8080' },
   });
   check('slugs are unique per organization', duplicate.status === 409, `status ${duplicate.status}`);
+
+  // The internal node transport policy, enforced where an administrator can
+  // see it rather than only at dispatch. A node endpoint is a
+  // tenant-influenced outbound destination, so the invariant covers it: it is
+  // subject to a narrower policy, not exempt from review.
+  const metadataNode = await api('POST', '/nodes', {
+    ...t(),
+    raw: true,
+    body: {
+      name: 'Metadata',
+      slug: `metadata-${unique}`,
+      endpointUrl: 'http://169.254.169.254/',
+    },
+  });
+  check(
+    'a node endpoint naming the cloud metadata service is refused at registration',
+    metadataNode.status === 400,
+    `status ${metadataNode.status}`,
+  );
+
+  const databaseNode = await api('POST', '/nodes', {
+    ...t(),
+    raw: true,
+    body: {
+      name: 'Database',
+      slug: `database-${unique}`,
+      endpointUrl: 'http://127.0.0.1:5432/',
+    },
+  });
+  check(
+    'a node endpoint pointed at a database port is refused at registration',
+    databaseNode.status === 400,
+    `status ${databaseNode.status}`,
+  );
+
+  const credentialNode = await api('POST', '/nodes', {
+    ...t(),
+    raw: true,
+    body: {
+      name: 'Laundered',
+      slug: `laundered-${unique}`,
+      endpointUrl: 'http://user:secret@127.0.0.1:8080/',
+    },
+  });
+  check(
+    'a node endpoint carrying embedded credentials is refused at registration',
+    credentialNode.status === 400,
+    `status ${credentialNode.status}`,
+  );
 
   const beat = await api('POST', `/nodes/${gpuNode.node.id}/heartbeat`, {
     ...t(),
@@ -767,7 +816,7 @@ const ACCOUNT = {
       name: 'Flaky Node',
       slug: `flaky-${unique}`,
       type: 'CLOUD_VPS',
-      endpointUrl: 'http://127.0.0.1:9104',
+      endpointUrl: 'http://127.0.0.1:8080',
       trusted: true,
       maxConcurrency: 4,
       resources: { cpuCores: 8, memoryMb: 16384 },
@@ -1171,7 +1220,7 @@ const ACCOUNT = {
       name: 'Scale-out Node',
       slug: `scale-${unique}`,
       type: 'HOME_SERVER',
-      endpointUrl: 'http://127.0.0.1:9105',
+      endpointUrl: 'http://127.0.0.1:8443',
       trusted: true,
       maxConcurrency: 10,
       costPerHourUsd: 0.1,

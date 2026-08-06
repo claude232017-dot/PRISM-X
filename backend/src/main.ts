@@ -5,10 +5,25 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { recordApiOperationCount } from './production/readiness.service';
+import { verifyEgressPolicies } from './shared/http/egress-policies';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
+
+  // Before anything is listening: every registered outbound policy is checked
+  // against the destinations no policy may reach.
+  //
+  // What this catches is a *code* regression — someone reordering the checks
+  // in `permits()` so an allowlist is consulted before the deny floor, or
+  // shrinking `ALWAYS_DENIED`. A misconfigured allowlist does not reach here,
+  // because it cannot: an entry naming 169.254.0.0/16 is already inert by
+  // construction. Both failure modes are covered, at the layer each belongs
+  // to, and this is the one worth dying for — an unhandled throw is the
+  // intended outcome, since a process that cannot enforce its egress policy
+  // has no safe degraded mode.
+  verifyEgressPolicies();
+
   // `rawBody` keeps the exact request bytes alongside the parsed body.
   // Node-to-node signatures cover those bytes, and re-serializing a parsed
   // object would change key order or spacing and fail a valid signature.

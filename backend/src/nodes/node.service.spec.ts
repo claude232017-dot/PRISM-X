@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Node, NodeStatus } from '@prisma/client';
 import { NodeService } from './node.service';
 import { NodeSecurityService } from './node-security.service';
@@ -260,5 +261,108 @@ describe('node request signing', () => {
     expect(fingerprint).toHaveLength(16);
     expect(secret).not.toContain(fingerprint);
     expect(NodeSecurityService.fingerprint(secret)).toBe(fingerprint);
+  });
+});
+
+/**
+ * Registration-time enforcement of the internal node transport policy.
+ *
+ * The dispatch path already enforces this — `HttpNodeTransport` passes the same
+ * policy to `OutboundHttpService` on every request — so these tests are about
+ * *when* an operator finds out, not about whether the guard holds. A node
+ * registered at an address the transport will refuse is a node that silently
+ * never receives work, and the administrator who typed it is long gone by the
+ * time anyone notices.
+ */
+describe('node endpoint registration policy', () => {
+  const permitted = (url: string, env: NodeJS.ProcessEnv) =>
+    NodeService.assertEndpointPermitted(url, env);
+
+  const development = { NODE_ENV: 'development' } as NodeJS.ProcessEnv;
+  const production = { NODE_ENV: 'production' } as NodeJS.ProcessEnv;
+  const declared = {
+    NODE_ENV: 'production',
+    NODE_ENDPOINT_ALLOWED_CIDRS: '10.20.0.0/16',
+  } as NodeJS.ProcessEnv;
+
+  it('refuses the cloud metadata service under every configuration', () => {
+    for (const env of [development, production, declared]) {
+      expect(() => permitted('http://169.254.169.254/latest/meta-data/', env)).toThrow(
+        BadRequestException,
+      );
+    }
+    // Including when an operator has tried to allow it explicitly.
+    expect(() =>
+      permitted('http://169.254.169.254/', {
+        NODE_ENV: 'production',
+        NODE_ENDPOINT_ALLOWED_CIDRS: '169.254.0.0/16',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(BadRequestException);
+  });
+
+  it('refuses a metadata hostname', () => {
+    expect(() => permitted('http://metadata.google.internal/', development)).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('refuses a private endpoint in production until the network is declared', () => {
+    expect(() => permitted('http://10.20.4.7:8080/', production)).toThrow(
+      BadRequestException,
+    );
+    expect(() => permitted('http://10.20.4.7:8080/', declared)).not.toThrow();
+  });
+
+  it('refuses an address outside the declared network', () => {
+    expect(() => permitted('http://10.30.4.7:8080/', declared)).toThrow(
+      BadRequestException,
+    );
+    expect(() => permitted('http://192.168.1.10:8080/', declared)).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('refuses a port that is not a node agent', () => {
+    // The classic pivot: register a "node" pointing at the database.
+    expect(() => permitted('http://10.20.0.5:5432/', declared)).toThrow(
+      BadRequestException,
+    );
+    expect(() => permitted('http://10.20.0.5:6379/', declared)).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('refuses a scheme that is not HTTP', () => {
+    for (const url of ['file:///etc/passwd', 'gopher://10.20.0.5/', 'ftp://10.20.0.5/']) {
+      expect(() => permitted(url, declared)).toThrow(BadRequestException);
+    }
+  });
+
+  it('refuses credentials embedded in the endpoint', () => {
+    expect(() => permitted('http://user:pass@10.20.4.7:8080/', declared)).toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('accepts a public endpoint, and a loopback one outside production', () => {
+    expect(() => permitted('https://node.example.com/', production)).not.toThrow();
+    expect(() => permitted('http://127.0.0.1:3100/', development)).not.toThrow();
+  });
+
+  it('accepts an internal hostname once a network is declared', () => {
+    // The hostname is not resolved here — the address that matters is the one
+    // it resolves to at dispatch, which is what the guard pins. This asserts
+    // only that a name of this shape is not rejected out of hand.
+    expect(() => permitted('https://gpu.example.internal/', declared)).not.toThrow();
+  });
+
+  it('reports a refusal as a client error naming the variable to set', () => {
+    try {
+      permitted('http://10.20.4.7:8080/', production);
+      throw new Error('expected a rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toContain('NODE_ENDPOINT_ALLOWED_CIDRS');
+    }
   });
 });

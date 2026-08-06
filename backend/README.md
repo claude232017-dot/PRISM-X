@@ -1629,11 +1629,11 @@ the signal that it is doing something other than what its listing said. The
 audit preview redacts anything that looks like a secret rather than truncating
 it, because a truncated token is still a leaked prefix.
 
-Outbound HTTP blocks loopback, link-local, RFC1918 and the cloud metadata
-endpoint. It does not resolve DNS, so a hostname pointing at a private address
-still gets through — that defence belongs at the egress proxy, where the
-resolved address is actually known, and the code says so rather than implying
-otherwise.
+Outbound HTTP goes through `OutboundHttpService`, which resolves the name and
+judges the *resolved address* — so a hostname pointing at a private address no
+longer gets through. See "Outbound egress" below for the whole of it; the
+sandbox no longer carries its own blocklist, which is what let the first one
+rot while four other call sites went unprotected.
 
 `can_use_credentials` is narrower than "read secrets": the host injects the
 credential into the outbound request after the extension has composed it, on a
@@ -1802,9 +1802,8 @@ unit tests.**
   from the manifest. Isolation primitives — an isolate, a container, a
   seccomp profile — are a loader implementation, and shipping the enforcement
   layer first is the right order.
-- **No DNS-level SSRF defence.** Literal private addresses are blocked; a
-  hostname resolving to one is not. That check belongs where the resolved
-  address is known.
+- ~~**No DNS-level SSRF defence.**~~ Superseded. The resolved address is now
+  what decides, and the socket is pinned to it — see "Outbound egress".
 - **No OAuth.** API keys authenticate the public API. OAuth is a Phase 8
   concern alongside the rest of the production surface.
 - **No cross-organization capability inference.** An extension trusted in one
@@ -2057,10 +2056,10 @@ it dry and then for real; it computes a TOTP and confirms enrolment with it,
 then reuses a recovery code and checks it is refused; it exhausts a rate limit
 and reads the `Retry-After`; and it reconstructs an invoice total from its lines.
 
-Latest run: **96/96 Phase 8, 84/84 Phase 7, 86/86 Phase 6, 86/86 Phase 5,
-112/112 Phase 4, 74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 518/518 unit
-tests** — 653 end-to-end checks. 381 documented API operations across 325 paths;
-84 tables RLS-protected; 19 migrations verified from an empty database.
+Latest run: **51/51 Omega, 97/97 Phase 8, 84/84 Phase 7, 86/86 Phase 6, 86/86
+Phase 5, 115/115 Phase 4, 74/74 Phase 3, 58/58 Phase 2, 57/57 Phase 1, 652/652
+unit tests** — 708 end-to-end checks. 381 documented API operations across 325
+paths; 84 tables RLS-protected; 20 migrations verified from an empty database.
 
 ## What Phase 8 deliberately does not do
 
@@ -2077,3 +2076,148 @@ tests** — 653 end-to-end checks. 381 documented API operations across 325 path
 - **No log aggregation backend.** Structured logs with correlation ids go to
   stdout, which is where a container platform expects them. Shipping them is the
   platform's job, not the application's.
+
+---
+
+# Outbound egress
+
+## The invariant
+
+> No tenant-controlled network destination may bypass a centralized,
+> security-reviewed outbound network policy.
+
+Note what it is not. It is not "do not call `fetch`" — a rule about a function
+name is satisfied by installing `undici`, and the next SSRF arrives through an
+SDK or a `net.connect` in something nobody thought of as HTTP. The rule is about
+the *destination*: if a tenant can influence where a connection goes, the
+decision to open it is made by a named policy in `shared/http/egress-policies.ts`,
+and the socket is opened by `OutboundHttpService` and nothing else.
+
+This replaced a blocklist that lived inside `SandboxService`. That blocklist was
+correct. It was also the only one, and four other call sites — the webhook
+dispatcher, two workflow adapters and the HTTP connector — each called `fetch`
+directly with a tenant-supplied URL. The vulnerability was not a missing check;
+it was a check that was not reusable, so nobody reused it.
+
+## How the guard works
+
+`shared/http/egress-guard.ts` is pure: a string in, a verdict out, no I/O. That
+is deliberate — the decision about *what is forbidden* is the part that must be
+exhaustively testable, and a function that also opens sockets is one whose edge
+cases get tested with mocks instead of with values.
+
+`OutboundHttpService` performs the I/O around it, in this order:
+
+1. **Validate the URL.** Scheme, embedded credentials, hostname, any IP literal,
+   then port. The address is judged before the port so the error names the worst
+   thing about the request — `http://127.0.0.1:3000` refused for "port 3000"
+   would be true and would bury the lede.
+2. **Resolve, and check every answer.** Not the first — a name with an A record
+   for a public address and a second for `127.0.0.1` would otherwise be a coin
+   flip, and an attacker who controls the zone flips it as often as they like.
+3. **Pin the socket to the address that was approved.** The request is issued
+   through `node:http` with a `lookup` hook that returns the vetted address
+   rather than resolving again. This is the DNS rebinding defence, and it is why
+   the service does not use `fetch`: between "check the address" and "open the
+   connection" there is normally a second resolution the attacker can answer
+   differently. Here there is no second resolution.
+4. **Follow redirects manually.** `redirect: 'manual'`, every hop re-validated
+   and re-pinned from scratch, credentials stripped on a cross-origin hop. A
+   `302` to `http://169.254.169.254/` is refused at the hop, not after it.
+5. **Cap the response.** Bytes are counted as they arrive and the body is
+   truncated, so a hostile endpoint cannot answer with an unbounded stream.
+
+## Two policies, one code path
+
+A self-hosted PRISM-X node legitimately lives at `10.0.4.7`, and a guard that
+refuses RFC1918 refuses every real node. The first version of this fix handled
+that by exempting the node transport from the guard, with the residual risk
+written out honestly.
+
+That was the wrong shape. An exemption made the node transport a *second*
+implementation of egress — precisely the condition that produced the original
+vulnerability. So there is no code exemption. There are two policies:
+
+| Policy | Used by | Permits |
+| --- | --- | --- |
+| `TENANT_PUBLIC` | webhook dispatcher, workflow `http` step, n8n/Make adapters, HTTP connectors, extension `host.fetch`, provider `baseUrl` | public internet only; every private range refused, with no allowlist to appeal to |
+| `INTERNAL_NODE_TRANSPORT` | dispatch to a registered node | `NODE_ENDPOINT_ALLOWED_CIDRS`, on `NODE_ENDPOINT_ALLOWED_PORTS`, and nothing else |
+
+Both run through the same resolver, the same classifier, the same pinning and
+the same redirect handling. What differs is one allowlist. The node transport is
+subject to review rather than exempt from it, which is the distinction the
+invariant is actually about.
+
+## What no policy can do
+
+`ALWAYS_DENIED` — cloud metadata, link-local, multicast, broadcast, the
+unspecified address, anything unroutable — is consulted *before* any policy
+allowance. An operator who writes `169.254.0.0/16` or `0.0.0.0/0` into the node
+allowlist gets a configuration entry that does nothing, not a metadata
+exfiltration path.
+
+`egress-policies.spec.ts` asserts that property by iterating the policy
+register, so a third policy added later is covered on the day it is added by
+someone who never read the file. `verifyEgressPolicies()` runs the same
+assertion at boot, before anything is listening.
+
+The two failure modes are handled at different layers, and it is worth being
+precise about which is which. A *configuration* mistake — an operator
+allowlisting the metadata range — is made inert: the guard ignores it and the
+process starts normally, because the deny floor is consulted first and there is
+nothing to fail on. A *code* regression — reordering the checks in `permits()`
+so the allowlist wins, or shrinking `ALWAYS_DENIED` — is what the boot check
+catches, and it kills the process. Neither is left to be discovered by a
+scanner, but only one of them is a startup failure.
+
+Address classification reports the *narrowest* matching range rather than the
+first one listed. That is not cosmetic — `255.255.255.255` sits inside
+`240.0.0.0/4`, `broadcast` is in `ALWAYS_DENIED` and `reserved` is not, so
+first-match ordering would have let a wide allowlist reach an address that must
+be unreachable under every policy.
+
+## Node endpoints are validated twice
+
+At registration, because an administrator who pastes an address outside the
+declared network should learn in the response to their own request rather than
+from a node that silently never receives work. And at dispatch, because an
+endpoint that was valid when it was registered must not stay reachable after the
+allowlist narrows. `NODE_ENDPOINT_ALLOWED_CIDRS` is empty in production until an
+operator sets it: fail-closed, because the alternative is a default that permits
+all of RFC1918 on every install.
+
+Registration judges the URL's shape and any IP literal. A hostname is not
+resolved there — a synchronous request handler is the wrong place for a
+tenant-triggered DNS lookup, and the answer would be worthless anyway, since the
+address that matters is the one the name resolves to at dispatch, which is what
+the guard pins.
+
+## Destinations that are not tenant-controlled
+
+Postgres (`DATABASE_URL`), Redis (`config.get('redis')`), and Supabase auth and
+storage (`config.getOrThrow('supabase.url')`) open sockets that no tenant can
+influence: every one comes from operator configuration read at boot. They are
+outside the invariant because the invariant is about tenant-controlled
+destinations, and stating that is the point — an exemption nobody wrote down is
+indistinguishable from an oversight.
+
+There are no HTTP client libraries in `package.json`. No `axios`, `got`,
+`undici`, `node-fetch`, `superagent`, `request` or `ky`. The static check
+watches for all of them anyway; it is there for the day one is added.
+
+## The static check
+
+`egress-architecture.spec.ts` fails the build on a direct network call outside
+the guard. It matches call *shapes* rather than mentions: an interface may
+declare a `fetch` method (the SDK's host surface does), and
+`this.config.http.request(...)` is the guard being used correctly. A check that
+flagged either would be switched off within a week, so it flags neither.
+
+It also asserts the positive: that the node transport goes through
+`OutboundHttpService`, names a policy when it does, and refuses redirects; and
+that node registration validates the endpoint. The absence of `fetch` is not the
+property worth having — a transport could satisfy every pattern by writing its
+own socket code — so the property is checked directly.
+
+Every check in the file has a companion test proving it can fail. A check that
+has never been shown to fail is not a check.

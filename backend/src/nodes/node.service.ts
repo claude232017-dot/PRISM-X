@@ -20,6 +20,8 @@ import { ToolRegistry } from '../tools/tool-registry.service';
 import { EventBusService } from '../events/event-bus.service';
 import { DomainEvent } from '../events/domain-events';
 import { RequestContextStore } from '../shared/context/request-context';
+import { EgressBlockedError, validateUrl } from '../shared/http/egress-guard';
+import { internalNodeTransport } from '../shared/http/egress-policies';
 import { NodeSecurityService, IssuedNodeSecret } from './node-security.service';
 import { CapabilityReport, HeartbeatReport, NodeResources } from './node.contract';
 
@@ -192,6 +194,8 @@ export class NodeService implements OnModuleInit {
         'A remote node needs an endpointUrl the control plane can reach it on',
       );
     }
+
+    if (input.endpointUrl) NodeService.assertEndpointPermitted(input.endpointUrl);
 
     const resources = input.resources ?? {};
     const node = await this.nodes.create({
@@ -619,6 +623,43 @@ export class NodeService implements OnModuleInit {
       if (held) return NodeStatus.QUARANTINED;
     }
     return health < NodeService.DEGRADED_THRESHOLD ? NodeStatus.DEGRADED : NodeStatus.ONLINE;
+  }
+
+  /**
+   * Refuses a node endpoint the transport would refuse to dispatch to.
+   *
+   * The registration half of the `INTERNAL_NODE_TRANSPORT` policy. Dispatch
+   * already enforces it — `HttpNodeTransport` passes the same policy to
+   * `OutboundHttpService` on every call — so this check adds no security the
+   * runtime lacks. What it adds is *timing*: an administrator who pastes
+   * `http://169.254.169.254/` or an address outside the operator's declared
+   * network learns immediately, in the response to their own request, instead
+   * of registering a node that silently never receives work.
+   *
+   * Only the URL's shape and any IP *literal* are judged here. A hostname is
+   * not resolved: registration is a synchronous request handler, DNS at this
+   * point would be a tenant-triggered lookup with no timeout budget, and the
+   * answer would be worthless anyway — the address that matters is the one the
+   * name resolves to at dispatch, which is what the guard pins.
+   *
+   * Registration is the only path that writes `endpointUrl`; there is no
+   * update path to also cover. If one is ever added it calls this too.
+   */
+  static assertEndpointPermitted(
+    endpointUrl: string,
+    env: NodeJS.ProcessEnv = process.env,
+  ): void {
+    try {
+      validateUrl(endpointUrl, internalNodeTransport(env));
+    } catch (error) {
+      if (!(error instanceof EgressBlockedError)) throw error;
+      throw new BadRequestException(
+        `endpointUrl is not reachable under this deployment's node network ` +
+          `policy — ${error.message}. Nodes at private addresses require ` +
+          'NODE_ENDPOINT_ALLOWED_CIDRS to name the network they run on; no ' +
+          'configuration permits a metadata or link-local address.',
+      );
+    }
   }
 
   static slugify(value: string): string {

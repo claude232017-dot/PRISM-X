@@ -10,6 +10,8 @@ import {
 import { TaskHandlerRegistry } from '../task-handler.registry';
 import { NodeSecurityService } from '../node-security.service';
 import { NodeService } from '../node.service';
+import { OutboundHttpService } from '../../shared/http/outbound-http.service';
+import { internalNodeTransport } from '../../shared/http/egress-policies';
 
 /**
  * The node is this process.
@@ -105,7 +107,10 @@ export class HttpNodeTransport implements INodeTransport {
   readonly key = 'http';
   private readonly logger = new Logger(HttpNodeTransport.name);
 
-  constructor(private readonly security: NodeSecurityService) {}
+  constructor(
+    private readonly security: NodeSecurityService,
+    private readonly outbound: OutboundHttpService,
+  ) {}
 
   async dispatch(node: Node, dispatch: NodeDispatch): Promise<NodeDispatchResult> {
     const startedAt = Date.now();
@@ -130,11 +135,16 @@ export class HttpNodeTransport implements INodeTransport {
         timeoutMs: dispatch.timeoutMs,
       });
 
-      const response = await this.signedFetch(node, '/nodes/agent/execute', body, dispatch.timeoutMs);
+      const response = await this.signedRequest(
+        node,
+        '/nodes/agent/execute',
+        body,
+        dispatch.timeoutMs,
+      );
       const durationMs = Date.now() - startedAt;
 
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
+      if (response.status < 200 || response.status >= 300) {
+        const text = response.body;
         return {
           taskId: dispatch.taskId,
           status: 'FAILED',
@@ -147,7 +157,7 @@ export class HttpNodeTransport implements INodeTransport {
         };
       }
 
-      const payload = (await response.json()) as {
+      const payload = JSON.parse(response.body || '{}') as {
         status?: string;
         result?: Record<string, unknown>;
         error?: string;
@@ -185,10 +195,12 @@ export class HttpNodeTransport implements INodeTransport {
     if (!node.endpointUrl) return { reachable: false, latencyMs: 0 };
 
     try {
-      const response = await this.signedFetch(node, '/nodes/agent/status', '{}', 10_000);
+      const response = await this.signedRequest(node, '/nodes/agent/status', '{}', 10_000);
       const latencyMs = Date.now() - startedAt;
-      if (!response.ok) return { reachable: false, latencyMs };
-      const report = (await response.json()) as HeartbeatReport;
+      if (response.status < 200 || response.status >= 300) {
+        return { reachable: false, latencyMs };
+      }
+      const report = JSON.parse(response.body || '{}') as HeartbeatReport;
       return { reachable: true, latencyMs, report };
     } catch {
       return { reachable: false, latencyMs: Date.now() - startedAt };
@@ -198,7 +210,7 @@ export class HttpNodeTransport implements INodeTransport {
   async cancel(node: Node, taskId: string): Promise<void> {
     if (!node.endpointUrl) return;
     try {
-      await this.signedFetch(node, '/nodes/agent/cancel', JSON.stringify({ taskId }), 5_000);
+      await this.signedRequest(node, '/nodes/agent/cancel', JSON.stringify({ taskId }), 5_000);
     } catch (error) {
       // Cancellation is advisory. The lease will expire regardless, so a
       // node that cannot be reached to be told to stop is already handled.
@@ -206,12 +218,33 @@ export class HttpNodeTransport implements INodeTransport {
     }
   }
 
-  private async signedFetch(
+  /**
+   * A signed request to a registered node, through the shared egress guard.
+   *
+   * This used to call `fetch` directly, exempted from the guard because a node
+   * legitimately lives at a private address and the guard refuses those. That
+   * reasoning was right about the requirement and wrong about the remedy: an
+   * exemption makes this a second implementation of egress, which is the exact
+   * condition that produced the original vulnerability.
+   *
+   * So it is not exempt. It runs on the same resolver, the same address
+   * classifier, the same connection pinning and the same redirect handling as
+   * a tenant webhook — under `internalNodeTransport()`, a policy that permits
+   * the operator's declared CIDR blocks and nothing else. `node.endpointUrl` is
+   * tenant-influenced (an organization administrator sets it at registration),
+   * so the invariant applies to it in full: a tenant-controlled destination
+   * subject to a named, reviewed policy rather than to no policy at all.
+   *
+   * Redirects are refused outright. A node agent answering 302 is either
+   * misconfigured or not a node agent, and following one would carry the
+   * request's signature somewhere it was not addressed.
+   */
+  private async signedRequest(
     node: Node,
     path: string,
     body: string,
     timeoutMs: number,
-  ): Promise<Response> {
+  ): Promise<{ status: number; body: string }> {
     if (!node.endpointUrl) {
       throw new Error(`Node ${node.slug} has no endpointUrl`);
     }
@@ -228,19 +261,17 @@ export class HttpNodeTransport implements INodeTransport {
       body,
     );
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Math.max(1_000, timeoutMs + 5_000));
+    const response = await this.outbound.request({
+      url: `${node.endpointUrl.replace(/\/$/, '')}/api/v1${path}`,
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body,
+      timeoutMs: Math.max(1_000, timeoutMs + 5_000),
+      maxRedirects: 0,
+      policy: internalNodeTransport(),
+    });
 
-    try {
-      return await fetch(`${node.endpointUrl.replace(/\/$/, '')}/api/v1${path}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...headers },
-        body,
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
+    return { status: response.status, body: response.body };
   }
 }
 

@@ -33,6 +33,14 @@ describe('classifyAddress', () => {
     it('names the metadata address specifically, so a log is actionable', () => {
       expect(classifyAddress('169.254.169.254').reason).toBe('cloud-metadata');
     });
+
+    it('reports the narrowest matching range when ranges overlap', () => {
+      // Not cosmetic. `broadcast` is in ALWAYS_DENIED and `reserved` is not,
+      // so labelling 255.255.255.255 by the enclosing 240.0.0.0/4 would let a
+      // policy allowlist reach an address no policy may reach.
+      expect(classifyAddress('255.255.255.255').reason).toBe('broadcast');
+      expect(classifyAddress('240.0.0.1').reason).toBe('reserved');
+    });
   });
 
   describe('IPv4 that is legitimately reachable', () => {
@@ -112,11 +120,14 @@ describe('validateUrl', () => {
   });
 
   it('refuses the cloud metadata hostnames', () => {
+    // Refused by name before any policy is consulted, so the message says
+    // "metadata host" rather than "local or metadata host" — these names are
+    // rejected under every policy, not merely under the default one.
     expect(() => validateUrl('http://metadata.google.internal/')).toThrow(
-      /local or metadata/,
+      /cloud metadata host/,
     );
-    expect(() => validateUrl('http://metadata/')).toThrow(/local or metadata/);
-    expect(() => validateUrl('http://instance-data/')).toThrow(/local or metadata/);
+    expect(() => validateUrl('http://metadata/')).toThrow(/cloud metadata host/);
+    expect(() => validateUrl('http://instance-data/')).toThrow(/cloud metadata host/);
   });
 
   it('refuses internal DNS suffixes', () => {

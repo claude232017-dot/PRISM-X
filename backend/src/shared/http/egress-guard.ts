@@ -109,16 +109,30 @@ function classifyIPv4(address: string): AddressVerdict {
     return { allowed: false, reason: 'unroutable', canonical: address, family: 0 };
   }
 
+  // The *narrowest* matching range wins, not the first one listed.
+  //
+  // The ranges overlap: 255.255.255.255/32 sits inside 240.0.0.0/4, and the
+  // first-match version of this loop labelled the broadcast address
+  // "reserved". That was not merely a cosmetic mislabel — `reserved` is not in
+  // `ALWAYS_DENIED` while `broadcast` is, so an allowlist naming 240.0.0.0/4
+  // (or 0.0.0.0/0) would have reached an address that must be unreachable
+  // under every policy. Specificity ordering makes the classification
+  // independent of the order this table happens to be written in.
+  let match: Range | null = null;
   for (const range of BLOCKED_IPV4) {
     // A /0 mask would shift by 32, which is a no-op in JS — handled explicitly.
     const mask = range.bits === 0 ? 0 : (0xffffffff << (32 - range.bits)) >>> 0;
-    if ((value & mask) === (range.base & mask)) {
-      // The metadata address is called out by name so an operator reading a
-      // log sees what was actually attempted rather than "link-local".
-      const reason: BlockReason =
-        address === '169.254.169.254' ? 'cloud-metadata' : range.reason;
-      return { allowed: false, reason, canonical: address, family: 4 };
+    if ((value & mask) === (range.base & mask) && (!match || range.bits > match.bits)) {
+      match = range;
     }
+  }
+
+  if (match) {
+    // The metadata address is called out by name so an operator reading a
+    // log sees what was actually attempted rather than "link-local".
+    const reason: BlockReason =
+      address === '169.254.169.254' ? 'cloud-metadata' : match.reason;
+    return { allowed: false, reason, canonical: address, family: 4 };
   }
   return { allowed: true, canonical: address, family: 4 };
 }
@@ -254,6 +268,20 @@ const BLOCKED_HOSTNAMES: readonly string[] = Object.freeze([
   'instance-data.ec2.internal',
 ]);
 
+/**
+ * Hostnames refused under *every* policy, including internal transports.
+ *
+ * A PRISM-X node is never called `metadata.google.internal`. Allowing a policy
+ * to reach these would defeat the point of having policies at all.
+ */
+const METADATA_HOSTNAMES: readonly string[] = Object.freeze([
+  'metadata',
+  'metadata.google.internal',
+  'metadata.goog',
+  'instance-data',
+  'instance-data.ec2.internal',
+]);
+
 /** Suffixes that only ever name something inside the deployment's network. */
 const BLOCKED_SUFFIXES: readonly string[] = Object.freeze([
   '.localhost',
@@ -285,17 +313,106 @@ export interface UrlVerdict {
 /** Ports we will connect to. Anything else is a service, not a web endpoint. */
 const DEFAULT_ALLOWED_PORTS: readonly number[] = Object.freeze([80, 443, 8080, 8443]);
 
+/**
+ * Reasons no policy may ever override.
+ *
+ * This is the floor of the whole design. A policy exists so a *legitimately*
+ * internal destination — a self-hosted PRISM-X node inside a VPC — can be
+ * reached without the guard refusing every real deployment. It does not exist
+ * to make the guard optional, and the difference between those two things is
+ * exactly this set.
+ *
+ * `link-local` is here because it contains 169.254.169.254, and every cloud's
+ * instance metadata service lives there. No allowlist entry, no configuration
+ * mistake and no future policy can re-enable it: `permits()` checks this set
+ * before it checks anything else.
+ */
+export const ALWAYS_DENIED: ReadonlySet<BlockReason> = Object.freeze(
+  new Set<BlockReason>([
+    'cloud-metadata',
+    'link-local',
+    'multicast',
+    'broadcast',
+    'unspecified',
+    'unroutable',
+  ]),
+);
+
 export interface EgressPolicy {
+  /** Human-readable name, used in errors and in the policy register. */
+  readonly name?: string;
   /** Ports permitted on the destination. */
   allowedPorts?: readonly number[];
   /**
-   * Allows loopback and private destinations.
+   * CIDR blocks whose addresses are permitted despite being private.
    *
-   * For tests and for the deliberate in-cluster caller only. Never set from
-   * tenant input, and never plumbed to a request parameter — a flag that a
-   * request can set is not a policy.
+   * The mechanism that lets an internal transport reach a node at 10.0.4.7
+   * while a tenant webhook to the same address stays refused. Entries are
+   * operator configuration, never tenant input, and an entry that names an
+   * `ALWAYS_DENIED` range has no effect — it cannot unblock what it is not
+   * permitted to unblock.
+   */
+  allowedCidrs?: readonly string[];
+  /**
+   * Blanket permission for private destinations.
+   *
+   * Tests only. `ALWAYS_DENIED` still applies, so even this cannot reach the
+   * metadata service.
    */
   allowPrivate?: boolean;
+}
+
+/** Parses `10.0.0.0/8` into a comparable range. Throws on nonsense. */
+export function parseCidr(entry: string): { base: number; bits: number } {
+  const [network, prefix] = entry.trim().split('/');
+  const base = toIPv4Number(network);
+  const bits = prefix === undefined ? 32 : Number(prefix);
+  if (base === null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
+    throw new Error(`"${entry}" is not an IPv4 CIDR block`);
+  }
+  return { base, bits };
+}
+
+/** True when `address` falls inside any of the supplied CIDR blocks. */
+export function withinCidrs(address: string, cidrs: readonly string[]): boolean {
+  const value = toIPv4Number(address);
+  if (value === null) return false;
+  for (const entry of cidrs) {
+    let range: { base: number; bits: number };
+    try {
+      range = parseCidr(entry);
+    } catch {
+      // A malformed entry permits nothing rather than everything. A typo in
+      // configuration must not widen access.
+      continue;
+    }
+    const mask = range.bits === 0 ? 0 : (0xffffffff << (32 - range.bits)) >>> 0;
+    if ((value & mask) === (range.base & mask)) return true;
+  }
+  return false;
+}
+
+/**
+ * The single decision point: may this address be reached under this policy?
+ *
+ * Order matters and is the security property. `ALWAYS_DENIED` is consulted
+ * first, so no amount of policy can reach the metadata service; only then is
+ * the policy's allowance considered.
+ */
+export function permits(
+  verdict: AddressVerdict,
+  policy: EgressPolicy = {},
+): { allowed: boolean; reason?: BlockReason } {
+  if (verdict.allowed) return { allowed: true };
+
+  const reason = verdict.reason ?? 'unroutable';
+  if (ALWAYS_DENIED.has(reason)) return { allowed: false, reason };
+
+  if (policy.allowPrivate) return { allowed: true };
+  if (policy.allowedCidrs?.length && withinCidrs(verdict.canonical, policy.allowedCidrs)) {
+    return { allowed: true };
+  }
+  return { allowed: false, reason };
 }
 
 /**
@@ -333,7 +450,14 @@ export function validateUrl(raw: string, policy: EgressPolicy = {}): UrlVerdict 
   // The destination is judged before the port, so an operator reading the
   // error sees the worst thing about the request. `http://127.0.0.1:3000`
   // refused for "port 3000" would be true and would bury the lede.
-  if (!policy.allowPrivate) {
+  // Metadata hostnames are refused under every policy — they name the one
+  // destination no deployment ever legitimately reaches.
+  if (METADATA_HOSTNAMES.includes(hostname)) {
+    throw new EgressBlockedError(hostname, 'it names a cloud metadata host');
+  }
+
+  const relaxed = policy.allowPrivate || (policy.allowedCidrs?.length ?? 0) > 0;
+  if (!relaxed) {
     if (BLOCKED_HOSTNAMES.includes(hostname)) {
       throw new EgressBlockedError(hostname, 'it names a local or metadata host');
     }
@@ -345,10 +469,10 @@ export function validateUrl(raw: string, policy: EgressPolicy = {}): UrlVerdict 
   }
 
   const literalAddress = isIP(hostname) ? hostname : null;
-  if (literalAddress && !policy.allowPrivate) {
-    const verdict = classifyAddress(literalAddress);
-    if (!verdict.allowed) {
-      throw new EgressBlockedError(literalAddress, `it is a ${verdict.reason} address`);
+  if (literalAddress) {
+    const decision = permits(classifyAddress(literalAddress), policy);
+    if (!decision.allowed) {
+      throw new EgressBlockedError(literalAddress, `it is a ${decision.reason} address`);
     }
   }
 
@@ -376,14 +500,14 @@ export function assertResolvedAddresses(
   if (!addresses.length) {
     throw new EgressBlockedError(hostname, 'it did not resolve to any address');
   }
-  if (policy.allowPrivate) return;
 
   for (const address of addresses) {
     const verdict = classifyAddress(address);
-    if (!verdict.allowed) {
+    const decision = permits(verdict, policy);
+    if (!decision.allowed) {
       throw new EgressBlockedError(
         hostname,
-        `it resolves to ${verdict.canonical}, which is a ${verdict.reason} address`,
+        `it resolves to ${verdict.canonical}, which is a ${decision.reason} address`,
       );
     }
   }
