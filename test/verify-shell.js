@@ -76,6 +76,13 @@ const WIDTHS = [
             return b.width > 0 && b.right > r.right + 1;
           }).length;
         })(),
+        // Metric tiles: two-up on a phone, four-up on a laptop. Four tiles
+        // stacked single-column filled an entire 375px screen.
+        kpiCols: (() => {
+          const row = document.querySelector('.kpi-row');
+          if (!row) return null;
+          return getComputedStyle(row).gridTemplateColumns.split(' ').length;
+        })(),
         tabLabels: Array.from(document.querySelectorAll('#tabbar .tab-btn'))
           .map((b) => b.lastElementChild.textContent.trim()),
         fabOverlapsTabbar: (() => {
@@ -120,6 +127,10 @@ const WIDTHS = [
     await page.screenshot({ path: `${OUT}/shot-${size.name}.png`, fullPage: false });
 
     const bad = [];
+    const wantCols = size.w >= 1100 ? 4 : 2;
+    if (r.kpiCols !== null && r.kpiCols !== wantCols) {
+      bad.push(`metric grid has ${r.kpiCols} columns, expected ${wantCols}`);
+    }
     if (r.hScroll) bad.push(`horizontal scroll (${r.scrollW} > ${r.innerW})`);
     if (r.railLinks !== 20) bad.push(`rail has ${r.railLinks} links, expected 20`);
     if (size.w < 768) {
