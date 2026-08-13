@@ -21,38 +21,74 @@
       <span class="brand-name">PRISM<span class="gold">-X</span></span>
       <span class="brand-sub">GOD CORE</span>
     </a>
-    <button id="nav-toggle" class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="nav">
-      <span class="nav-toggle-bars" aria-hidden="true"></span>
-    </button>
-    <nav id="nav">
-      <a class="nav-link" data-view="dashboard" href="#/dashboard">Dashboard</a>
-      <a class="nav-link" data-view="forge" href="#/forge">Forge Clone</a>
-      <a class="nav-link" data-view="queue" href="#/queue">Queue <span id="queue-badge" class="q-badge" hidden></span></a>
-      <a class="nav-link" data-view="ghosts" href="#/ghosts">Ghosts</a>
-      <a class="nav-link" data-view="shells" href="#/shells">Shells</a>
-      <a class="nav-link" data-view="matrix" href="#/matrix">Matrix</a>
-      <a class="nav-link" data-view="bridge" href="#/bridge">Bridge</a>
-      <a class="nav-link" data-view="intelligence" href="#/intelligence">Intelligence</a>
-      <a class="nav-link" data-view="runtime" href="#/runtime">Runtime</a>
-      <a class="nav-link" data-view="integrations" href="#/integrations">Integrations</a>
-      <a class="nav-link" data-view="knowledge" href="#/knowledge">Knowledge</a>
-      <a class="nav-link" data-view="missions" href="#/missions">Missions</a>
-      <a class="nav-link" data-view="evolution" href="#/evolution">Evolution</a>
-      <a class="nav-link" data-view="enterprise" href="#/enterprise">Enterprise</a>
-      <a class="nav-link" data-view="extensions" href="#/extensions">Extensions</a>
-      <a class="nav-link" data-view="network" href="#/network">Network</a>
-      <a class="nav-link" data-view="production" href="#/production">Production</a>
-      <a class="nav-link" data-view="memory" href="#/memory">System Memory</a>
-      <a class="nav-link" data-view="academy" href="#/academy">📚 Academy</a>
-      <a class="nav-link" data-view="settings" href="#/settings">Settings</a>
-    </nav>
     <div class="topbar-right">
       <span id="brain-version" class="brain-tag">BRAIN v1</span>
       <span id="engine-pill" class="engine-pill local">◉ LOCAL CORTEX</span>
     </div>
   </header>
 
-  <main id="view"></main>
+  <!-- Navigation is the rail from 768px up and the bottom tab bar below it.
+       Both drive the same 20 anchors, so `.nav-link` stays on every link and
+       app.js keeps its existing active-state handling untouched. Each link
+       carries a glyph: between 768 and 1099 the rail is a 60px strip with the
+       labels hidden, and a strip with neither label nor glyph is a column of
+       blank rows. -->
+  <div class="shell">
+    <nav id="nav" class="rail" aria-label="Primary">
+      <div class="rail-scroll">
+
+        <div class="rail-group">
+          <p class="rail-group-label">COMMAND</p>
+          <a class="rail-link nav-link" data-view="dashboard" href="#/dashboard" title="Dashboard"><i class="rail-ico" aria-hidden="true">◈</i><span>Dashboard</span></a>
+          <a class="rail-link nav-link" data-view="missions" href="#/missions" title="Missions"><i class="rail-ico" aria-hidden="true">◎</i><span>Missions</span></a>
+          <a class="rail-link nav-link" data-view="queue" href="#/queue" title="Queue"><i class="rail-ico" aria-hidden="true">▤</i><span>Queue</span><span id="queue-badge" class="q-badge" hidden></span></a>
+        </div>
+
+        <div class="rail-group">
+          <p class="rail-group-label">AGENTS</p>
+          <a class="rail-link nav-link" data-view="forge" href="#/forge" title="Forge Clone"><i class="rail-ico" aria-hidden="true">✦</i><span>Forge Clone</span></a>
+          <a class="rail-link nav-link" data-view="ghosts" href="#/ghosts" title="Ghosts"><i class="rail-ico" aria-hidden="true">◑</i><span>Ghosts</span></a>
+          <a class="rail-link nav-link" data-view="shells" href="#/shells" title="Shells"><i class="rail-ico" aria-hidden="true">◍</i><span>Shells</span></a>
+          <a class="rail-link nav-link" data-view="matrix" href="#/matrix" title="Matrix"><i class="rail-ico" aria-hidden="true">▦</i><span>Matrix</span></a>
+        </div>
+
+        <div class="rail-group">
+          <p class="rail-group-label">INTELLIGENCE</p>
+          <a class="rail-link nav-link" data-view="intelligence" href="#/intelligence" title="Intelligence"><i class="rail-ico" aria-hidden="true">◉</i><span>Intelligence</span></a>
+          <a class="rail-link nav-link" data-view="knowledge" href="#/knowledge" title="Knowledge"><i class="rail-ico" aria-hidden="true">▩</i><span>Knowledge</span></a>
+          <a class="rail-link nav-link" data-view="memory" href="#/memory" title="System Memory"><i class="rail-ico" aria-hidden="true">▣</i><span>System Memory</span></a>
+          <a class="rail-link nav-link" data-view="evolution" href="#/evolution" title="Evolution"><i class="rail-ico" aria-hidden="true">↑</i><span>Evolution</span></a>
+        </div>
+
+        <div class="rail-group">
+          <p class="rail-group-label">INFRASTRUCTURE</p>
+          <a class="rail-link nav-link" data-view="runtime" href="#/runtime" title="Runtime"><i class="rail-ico" aria-hidden="true">▷</i><span>Runtime</span></a>
+          <a class="rail-link nav-link" data-view="network" href="#/network" title="Network"><i class="rail-ico" aria-hidden="true">⌗</i><span>Network</span></a>
+          <a class="rail-link nav-link" data-view="production" href="#/production" title="Production"><i class="rail-ico" aria-hidden="true">▲</i><span>Production</span></a>
+          <a class="rail-link nav-link" data-view="bridge" href="#/bridge" title="Bridge"><i class="rail-ico" aria-hidden="true">⇄</i><span>Bridge</span></a>
+          <a class="rail-link nav-link" data-view="integrations" href="#/integrations" title="Integrations"><i class="rail-ico" aria-hidden="true">⧉</i><span>Integrations</span></a>
+          <a class="rail-link nav-link" data-view="extensions" href="#/extensions" title="Extensions"><i class="rail-ico" aria-hidden="true">⊞</i><span>Extensions</span></a>
+        </div>
+
+        <div class="rail-group">
+          <p class="rail-group-label">PLATFORM</p>
+          <a class="rail-link nav-link" data-view="enterprise" href="#/enterprise" title="Enterprise"><i class="rail-ico" aria-hidden="true">⬢</i><span>Enterprise</span></a>
+          <a class="rail-link nav-link" data-view="academy" href="#/academy" title="Academy"><i class="rail-ico" aria-hidden="true">📚</i><span>Academy</span></a>
+          <a class="rail-link nav-link" data-view="settings" href="#/settings" title="Settings"><i class="rail-ico" aria-hidden="true">⚙</i><span>Settings</span></a>
+        </div>
+
+      </div>
+    </nav>
+
+    <main id="view"></main>
+  </div>
+
+  <!-- Bottom tab bar, ≤767px only. Five groups; tapping one opens a sheet
+       listing that group's destinations, so all 20 are two taps away. Built
+       by js/shell.js from the rail above, so the rail stays the single
+       source of truth for what exists and what it is called. -->
+  <nav id="tabbar" aria-label="Sections"></nav>
+  <div id="nav-sheet" hidden></div>
 
   <footer id="foot">
     <span>PRISM-X · a personal multi-agent intelligence system · all data stays in this browser</span>
@@ -81,6 +117,7 @@
   <script src="js/network.js"></script>
   <script src="js/omega.js"></script>
   <script src="js/academy.js"></script>
+  <script src="js/shell.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

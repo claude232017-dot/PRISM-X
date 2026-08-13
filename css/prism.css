@@ -1289,16 +1289,22 @@ html.compact .page-head { margin-bottom: 14px; }
   /* status pills drop to their own row, left-aligned and readable */
   .topbar-right { order: 2; width: 100%; justify-content: flex-start; gap: 8px; }
 
-  /* the nav: hidden until the hamburger opens it, then a 2-column menu */
-  #nav {
+  /* The legacy hamburger menu. These rules were written when the nav lived
+     inside #topbar as a wrapped row of 20 links. The rail reuses id="nav" so
+     app.js keeps finding its links, and every one of these ID-specificity
+     declarations was landing on it — `order:3` put the rail after the main
+     content, `width:100%` made it 768px wide. Qualified with :not(.rail)
+     rather than deleted, because the block is still the record of what the
+     header used to do. */
+  #nav:not(.rail) {
     order: 3; width: 100%; display: none;
     margin: 2px -16px 0; padding: 12px 16px 4px;
     border-top: 1px solid var(--line);
     max-height: calc(100vh - 140px); overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
-  #topbar.nav-open #nav { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-  #nav .nav-link {
+  #topbar.nav-open #nav:not(.rail) { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  #nav:not(.rail) .nav-link {
     display: flex; align-items: center; gap: 6px; width: 100%;
     padding: 13px 14px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--surface-2);
@@ -1313,4 +1319,299 @@ html.compact .page-head { margin-bottom: 14px; }
 /* very narrow phones (≤380px): single-column menu so labels never truncate */
 @media (max-width: 380px) {
   #topbar.nav-open #nav { grid-template-columns: 1fr; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   REDESIGN LAYER — Scope B (grouped rail + bottom tab bar)
+
+   Appended after the original rules so it wins the cascade by
+   position rather than by specificity. Three edits were made to
+   the delivered CSS on the way in; each is marked INTEGRATION.
+   ══════════════════════════════════════════════════════════════ */
+/* ── PRISM-X redesign layer ─────────────────────────────────────
+   Vanilla CSS. No build step, no network, no external assets.
+   Append after the existing :root block; tokens below extend it. */
+
+:root{
+  --group-label:#5f5e58;
+  --hatch: repeating-linear-gradient(135deg,
+           rgba(245,197,66,.10) 0 6px, transparent 6px 13px);
+  --rail-w:236px;
+  --tap:44px;                    /* minimum touch target, everywhere */
+}
+
+/* ── SHELL ─────────────────────────────────────────────────────
+   375: rail hidden, bottom tab bar owns navigation.
+   768: rail collapses to a 60px icon strip, labels on hover/focus.
+   1280: full 236px rail. Desktop never shows the tab bar.        */
+body{ padding-bottom:0 }
+.shell{ display:flex; min-height:100vh }
+.rail{ display:none }
+.rail-scroll{ flex:1; min-height:0; overflow-y:auto; padding:14px 10px;
+              scrollbar-width:thin }   /* all five groups must fit unscrolled ≥900px tall */
+.rail-group + .rail-group{ margin-top:13px }
+.rail-group-label{
+  display:flex; align-items:center; gap:7px; padding:0 12px 5px;
+  font:600 9px/1 var(--mono); letter-spacing:.18em; color:var(--group-label);
+}
+.rail-link{
+  display:flex; align-items:center; gap:8px; height:31px; padding:0 10px;
+  border-radius:7px; color:var(--ink-2); font-size:12.5px; text-decoration:none;
+}
+.rail-link::before{ content:""; width:2px; height:13px; border-radius:2px; background:transparent }
+.rail-link:hover{ background:var(--surface-2); color:var(--ink) }
+.rail-link.active{ background:var(--accent-soft); color:var(--accent); font-weight:600 }
+.rail-link.active::before{ background:var(--accent) }
+
+@media (min-width:768px){
+  .rail{ display:flex; flex-direction:column; width:60px; flex:none;
+         border-right:1px solid var(--line); background:#0c0c11 }
+  .rail .rail-link span{ display:none }
+  #tabbar{ display:none }
+}
+@media (min-width:1100px){
+  .rail{ width:var(--rail-w) }
+  .rail .rail-link span{ display:block }
+}
+
+/* ── BOTTOM TAB BAR (≤767px) ───────────────────────────────────
+   Five groups. Tapping one opens the group sheet: every one of the
+   20 destinations is reachable in two taps.                      */
+#tabbar{
+  position:fixed; left:0; right:0; bottom:0; z-index:40;
+  display:grid; grid-template-columns:repeat(5,1fr);
+  border-top:1px solid var(--line-strong); background:#0c0c11;
+  padding-bottom:env(safe-area-inset-bottom,0);
+}
+.tab-btn{
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:5px; height:60px; min-height:var(--tap); background:none; border:0;
+  color:var(--ink-muted); font:600 8.5px/1 var(--mono); letter-spacing:.08em;
+}
+.tab-btn.active{ color:var(--accent) }
+.tab-btn::after{ content:""; width:16px; height:2px; border-radius:2px; background:transparent }
+.tab-btn.active::after{ background:var(--accent) }
+@media (min-width:768px){ body{ padding-bottom:0 } }
+@media (max-width:767px){ body{ padding-bottom:68px } }
+
+.sheet{
+  position:fixed; inset:0; z-index:50; background:rgba(10,10,15,.72);
+  display:flex; align-items:flex-end;
+}
+.sheet-panel{
+  width:100%; background:var(--surface); border-radius:16px 16px 0 0;
+  border-top:1px solid rgba(245,197,66,.3); padding:10px 16px 16px;
+  max-height:80vh; overflow:auto;
+}
+.sheet-link{
+  display:flex; align-items:center; gap:12px; min-height:56px; padding:8px 4px;
+  border-bottom:1px solid rgba(255,255,255,.06); text-decoration:none; color:var(--ink);
+}
+
+/* ── CARD / SECTION ────────────────────────────────────────────
+   One card treatment. 375: full-bleed minus 16px gutter, 13px pad.
+   768: 2-up grid. 1280: content grid, 15px pad.                  */
+.card{ background:var(--surface); border:1px solid var(--line);
+       border-radius:var(--r); padding:13px 14px }
+@media (min-width:1100px){ .card{ padding:15px 17px } }
+.card-title{ font:600 12.5px/1 system-ui,sans-serif; color:var(--ink) }
+.card-meta{ font:9.5px/1 var(--mono); letter-spacing:.12em; color:var(--ink-muted) }
+
+/* ── METRIC TILE ───────────────────────────────────────────────
+   375: 2 cols. 768: 2 cols. 1280: 4 cols.                        */
+.metric-grid{ display:grid; gap:10px; grid-template-columns:repeat(2,1fr) }
+@media (min-width:1100px){ .metric-grid{ grid-template-columns:repeat(4,1fr); gap:12px } }
+.metric-label{ font:600 9.5px/1 var(--mono); letter-spacing:.16em; color:var(--ink-muted) }
+.metric-value{ margin-top:11px; font:600 21px/1 var(--mono); color:var(--ink) }
+@media (min-width:1100px){ .metric-value{ font-size:27px } }
+
+/* ── STATUS BADGE ──────────────────────────────────────────────
+   Never colour alone: each state owns a glyph AND a border style,
+   so it survives greyscale, colour-blindness and 9px type.       */
+.badge{
+  display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 8px;
+  border-radius:6px; font:700 9.5px/1 var(--mono); letter-spacing:.13em;
+}
+.badge::before{ font-size:9px }
+.st-active   { color:#37d67a; border:1px solid rgba(55,214,122,.45); background:rgba(55,214,122,.08) }
+.st-active::before   { content:"\25CF" }                       /* filled circle */
+.st-learning { color:var(--accent); border:1px dashed rgba(245,197,66,.55); background:var(--accent-soft) }
+.st-learning::before { content:"\25D0"; animation:pulse 1.6s ease-in-out infinite }
+.st-dormant  { color:var(--ink-muted); border:1px dotted rgba(255,255,255,.30) }
+.st-dormant::before  { content:"\25CB" }                       /* hollow circle */
+.st-needs    { color:var(--red); border:1px double rgba(230,103,103,.65); background:rgba(230,103,103,.08) }
+.st-needs::before    { content:"\25B2" }                       /* triangle */
+@keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.42} }
+@media (prefers-reduced-motion:reduce){ .st-learning::before{ animation:none } }
+
+/* ── SIMULATED DATA ────────────────────────────────────────────
+   Hatch the whole surface + a filled SIM chip. Must read as
+   simulated in a screenshot, out of context, in greyscale.
+   Rule: a table column mixing real and simulated values is a bug —
+   split the column or hatch every simulated row.                 */
+.sim{ background-image:var(--hatch); border-style:dashed;
+      border-color:rgba(245,197,66,.45) }
+.sim-chip{
+  font:700 8.5px/1 var(--mono); letter-spacing:.14em; color:#0a0a0f;
+  background:var(--accent); border-radius:3px; padding:3px 5px;
+}
+.sim-chip::before{ content:"SIM" }
+.sim-note{ font-size:10.5px; color:var(--accent) }
+tr.sim td{ background-image:var(--hatch) }
+
+/* ── TAB STRIP (6–9 tabs) ──────────────────────────────────────
+   375: horizontal scroll, fading right edge, 32px pills.
+   768+: wraps to one row. Never becomes a <select>.              */
+.tabs{ display:flex; gap:7px; overflow-x:auto; scrollbar-width:none;
+       -webkit-overflow-scrolling:touch; position:relative }
+.tabs::-webkit-scrollbar{ display:none }
+.tab{
+  flex:none; display:flex; align-items:center; height:32px; padding:0 12px;
+  border-radius:8px; border:1px solid rgba(255,255,255,.10);
+  background:transparent; color:var(--ink-muted);
+  font:600 11.5px/1 system-ui,sans-serif; white-space:nowrap;
+}
+.tab.active{ border-color:rgba(245,197,66,.5); background:var(--accent-soft); color:var(--accent) }
+@media (max-width:767px){ .tab{ height:var(--tap) } }
+@media (min-width:768px){ .tabs{ flex-wrap:wrap; overflow:visible } }
+
+/* ── DATA TABLE ────────────────────────────────────────────────
+   375: table collapses to stacked rows — each cell shows its
+   header via data-label. 768+: real table.                       */
+.dt{ width:100%; border-collapse:collapse }
+.dt th{ font:600 9px/1 var(--mono); letter-spacing:.16em; color:var(--ink-muted);
+        text-align:left; padding:9px 13px; background:var(--surface-2);
+        border-bottom:1px solid var(--line) }
+.dt td{ padding:10px 13px; border-bottom:1px solid rgba(255,255,255,.06); font-size:12px }
+.dt td.num{ font-family:var(--mono); text-align:right }
+@media (max-width:767px){
+  .dt, .dt tbody, .dt tr, .dt td{ display:block; width:100% }
+  .dt thead{ display:none }
+  .dt tr{ border:1px solid var(--line); border-radius:var(--r);
+          background:var(--surface); margin-bottom:10px; padding:4px 0 }
+  .dt td{ display:flex; justify-content:space-between; gap:12px; border:0;
+          padding:8px 13px; min-height:var(--tap); align-items:center }
+  .dt td::before{ content:attr(data-label); font:600 9px/1 var(--mono);
+                  letter-spacing:.16em; color:var(--ink-muted) }
+  .dt td.num{ text-align:right }
+}
+
+/* ── EMPTY STATE ───────────────────────────────────────────────
+   Same at every width. Names the forge verb. No illustration.    */
+.empty{
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:9px; padding:24px 16px; text-align:center;
+  border:1px dashed var(--line-strong); border-radius:var(--r); background:var(--surface);
+}
+.empty-glyph{ font-size:22px; color:var(--ink-muted) }
+.empty-title{ font:600 12.5px/1 system-ui,sans-serif; color:var(--ink-2) }
+.empty-body{ font:11.5px/1.5 system-ui,sans-serif; color:var(--ink-muted); max-width:34ch }
+
+/* ── TOUCH + OVERFLOW GUARANTEES ───────────────────────────────
+   No horizontal page scroll from 360px up.                       */
+html,body{ overflow-x:hidden; max-width:100% }
+*,*::before,*::after{ box-sizing:border-box }
+.card,.metric-grid,.dt,pre{ min-width:0 }
+@media (max-width:767px){
+  .btn,.rail-link,.sheet-link,.tab-btn{ min-height:var(--tap) }
+}
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px }
+/* INTEGRATION — collision with the pre-existing .st-learning.
+   The original rule (line ~274) animates the whole badge with `blink`.
+   The redesign animates only the ::before glyph with `pulse`. Both
+   selectors match, so without this the badge blinks AND the glyph
+   pulses — two rhythms on one element, which reads as a rendering
+   fault rather than a state. The redesign's intent wins. */
+.st-learning { animation: none; }
+
+/* INTEGRATION — the delivered layer sets `border` shorthand on each
+   .st-* while the original sets only `border-color`, relying on
+   `border: 1px solid` from .badge. Both orders work, but stating the
+   style explicitly here keeps the dotted/dashed/double distinction
+   from depending on which rule loaded first. That distinction is the
+   accessibility property: it is what survives greyscale. */
+
+/* INTEGRATION — the rail glyph.
+   The delivered layer collapses the rail to 60px between 768 and 1099 and
+   hides the labels, but supplies nothing to show in their place. A 60px
+   column of blank rows is not a navigation. Each link carries a glyph that
+   is the only thing visible while collapsed, and the full label returns at
+   1100. `title` gives the hover affordance the layer's comment promised. */
+.rail-ico{
+  flex:none; width:18px; text-align:center; font-style:normal;
+  font-size:13px; line-height:1; opacity:.9;
+}
+.rail-link.active .rail-ico{ opacity:1 }
+@media (min-width:768px) and (max-width:1099px){
+  .rail-link{ justify-content:center; padding:0 }
+  .rail-group-label{ justify-content:center; padding:0 0 5px; font-size:8px }
+}
+
+/* INTEGRATION — the rail links keep `.nav-link` so app.js can go on
+   querying it for the active state. That class was written for a horizontal
+   header row; these three declarations are all that leak into a vertical
+   rail, and they are neutral there. Stated rather than left to chance. */
+.rail .nav-link{ font-weight:500; letter-spacing:0 }
+.rail .nav-link.active{ font-weight:600 }
+
+/* The header no longer carries navigation, so it is a slim identity strip.
+   The old hamburger and wrapped-nav rules below still exist but match
+   nothing — the elements are gone from index.html. */
+#topbar{ gap:14px }
+#nav.rail{ flex:none }
+.shell{ align-items:flex-start }
+@media (max-width:767px){ .rail{ display:none } }
+
+/* ── INTEGRATION FIXES ─────────────────────────────────────────
+   Two problems only a real render surfaced. Both are ordering or
+   specificity, which is why reading the CSS did not catch them.   */
+
+/* 1. The legacy mobile menu. `@media (max-width:1024px){ #nav{display:none} }`
+      was written when the nav lived inside #topbar and a hamburger revealed
+      it. The rail reuses id="nav" so app.js can keep finding its links — and
+      that legacy rule, being an ID, outranks `.rail{display:flex}` and hid
+      the rail on every screen up to 1024px, tablets included. Qualified here
+      rather than deleted upstream, so the old block stays readable as
+      history. */
+@media (max-width:767px){ #nav.rail{ display:none } }
+@media (min-width:768px){ #nav.rail{ display:flex } }
+
+/* 2. A defect in the delivered layer: it sets `#tabbar{display:none}` inside
+      the min-width:768 block, then declares `#tabbar{position:fixed;
+      display:grid}` unconditionally *after* it. Same specificity, later
+      wins — so the bottom tab bar rendered at every width, including 1280,
+      sitting over the desktop footer. Restated after both. */
+@media (min-width:768px){ #tabbar{ display:none } }
+
+/* 3. The Academy help button is `position:fixed; bottom:20px; right:20px`,
+      which put it on top of the fifth tab — the one destination group a
+      thumb reaches for most easily was covered by a floating button. Lifted
+      clear of the 68px bar plus the home-indicator inset. Desktop is
+      unchanged: the bar does not exist there. */
+@media (max-width:767px){
+  .ac-fab{ bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* 4. The group sheet is a modal dialog, so it has to outrank the floating
+      help button. The delivered layer gives .sheet z-index:50 while .ac-fab
+      is 90, which left the button hovering over the sheet's own links —
+      tapping "Integrations" on a 375px screen meant tapping around it.
+      Raised above the FAB and kept below .ac-drawer-overlay (100), which is
+      a heavier surface and should still win. */
+.sheet{ z-index: 95; }
+
+/* 5. Group labels in the collapsed rail. "INFRASTRUCTURE" at 8px mono is
+      still ~90px wide and spilled out of the 60px strip. Shrinking the type
+      further would make it unreadable, so between 768 and 1099 the label
+      becomes a hairline rule: the grouping stays visible as rhythm, the word
+      returns with the labels at 1100. text-indent rather than display:none
+      keeps the heading in the accessibility tree, where it is still the only
+      thing telling a screen reader these six icons belong together. */
+@media (min-width:768px) and (max-width:1099px){
+  .rail-group-label{
+    height:1px; margin:0 12px 7px; padding:0;
+    overflow:hidden; text-indent:-9999px; white-space:nowrap;
+    background:var(--line);
+  }
+  .rail-group:first-child .rail-group-label{ margin-top:0; height:0; margin-bottom:3px }
 }
