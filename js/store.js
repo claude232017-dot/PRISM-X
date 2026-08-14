@@ -154,6 +154,16 @@ PRISM.store = (function () {
       mindset: input.mindset || "",
       skills: input.skills || "",
       learningSource: input.learningSource || "Use GOD CORE DNA",
+      /* Which GOD CORE DNA layers this clone inherits, as keys of state.dna.
+         Null on clones forged before the Forge grew per-layer toggles, and on
+         replicas of them; readers must treat null as "every layer", which is
+         what learningSource alone used to mean. */
+      dnaLayers: Array.isArray(input.dnaLayers) ? input.dnaLayers.slice() : null,
+      /* The clone this one was replicated from, so Evolution can draw real
+         lineage instead of inferring it from the "Mk.N" naming convention.
+         Null for a clone forged from scratch — and for replicas made before
+         this was recorded, which fall back to generation depth. */
+      parentId: input.parentId || null,
       provider: input.provider || "auto",
       createdAt: Date.now(),
       generation: input.generation || 1,
@@ -187,6 +197,8 @@ PRISM.store = (function () {
       role: src.role, tone: src.tone, target: src.target,
       mindset: src.mindset, skills: src.skills,
       learningSource: src.learningSource,
+      dnaLayers: src.dnaLayers,
+      parentId: src.id,
       provider: src.provider,
       generation: (src.generation || 1) + 1,
       memory: src.memory
@@ -321,6 +333,12 @@ PRISM.store = (function () {
       text: input.text,
       dueAt: input.dueAt,
       status: "queued",
+      /* Scheduling something is not the same as agreeing to publish it. A new
+         item lands needing an explicit OK; the Queue will not fire it until
+         it has one. Items scheduled before this gate existed have `approved`
+         undefined and are read as approved, so an existing queue is not
+         retroactively frozen. */
+      approved: false,
       createdAt: Date.now(),
       postedAt: null
     };
@@ -328,6 +346,17 @@ PRISM.store = (function () {
     logMemory("queue", `Scheduled for X: "${q.title}" — ${new Date(q.dueAt).toLocaleString()}.`);
     save();
     return q;
+  }
+
+  /* Undefined means "scheduled before the approval gate existed" — grandfathered. */
+  function isApproved(q) { return q.approved !== false; }
+
+  function approveQueueItem(queueId, approved) {
+    const q = state.queue.find(x => x.id === queueId);
+    if (!q) return;
+    q.approved = approved !== false;
+    logMemory("queue", `${q.approved ? "Approved" : "Approval withdrawn"}: "${q.title}".`);
+    save();
   }
 
   function markPosted(queueId) {
@@ -344,8 +373,15 @@ PRISM.store = (function () {
     save();
   }
 
+  /* Due *and* cleared to go. An unapproved item is not something the
+     dashboard should be nudging the operator to fire. */
   function dueQueue() {
-    return state.queue.filter(q => q.status === "queued" && q.dueAt <= Date.now());
+    return state.queue.filter(q => q.status === "queued" && q.dueAt <= Date.now() && isApproved(q));
+  }
+
+  /* Queued items still waiting on an explicit OK. */
+  function pendingApproval() {
+    return state.queue.filter(q => q.status === "queued" && !isApproved(q));
   }
 
   /* ---------------- system memory ---------------- */
@@ -503,6 +539,7 @@ PRISM.store = (function () {
     addTask, rateTask, setTaskFlag,
     addVaultItem, deleteVaultItem,
     addQueueItem, markPosted, deleteQueueItem, dueQueue,
+    isApproved, approveQueueItem, pendingApproval,
     logMemory, runAudit, confirmUpgrade, dismissUpgrade, auditDue,
     runWeeklyRepeats, trainDNA, completeOnboarding, seedDemoClones,
     setSettings, exportJSON, importJSON, reset

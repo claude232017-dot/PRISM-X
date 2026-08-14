@@ -376,14 +376,26 @@ PRISM.engine = (function () {
     })
   };
 
+  /* inheritsLayer — does this clone take the given GOD CORE DNA layer?
+     A clone forged before the Forge grew per-layer toggles has dnaLayers null,
+     which means every layer, so old clones keep generating exactly as before.
+     The Decision Framework is deliberately not consulted here: it binds every
+     intelligence and is applied further down, outside the learning-source
+     branch. */
+  function inheritsLayer(clone, key) {
+    if (clone.learningSource !== "Use GOD CORE DNA") return false;
+    if (!Array.isArray(clone.dnaLayers)) return true;
+    return clone.dnaLayers.indexOf(key) !== -1;
+  }
+
   /* ---------------- public: local generation ---------------- */
   function generateLocal(clone, task, dna) {
     const tone = D.TONES[clone.tone] || D.TONES["Direct"];
     const seed = hashStr([clone.id, task.type, task.topic, task.outcome, Date.now() >> 12].join("|"));
     const r = rng(seed);
 
-    const usesDNA = clone.learningSource === "Use GOD CORE DNA" && dna && dna.cta;
-    const cta = usesDNA && r() < 0.6 ? dna.cta : pick(r, tone.ctas);
+    const usesCTA = dna && dna.cta && inheritsLayer(clone, "cta");
+    const cta = usesCTA && r() < 0.6 ? dna.cta : pick(r, tone.ctas);
 
     const ctx = {
       topic: task.topic || "your offer",
@@ -409,7 +421,7 @@ PRISM.engine = (function () {
     }
     /* Decision Framework binds every clone, whatever its learning source */
     if (dna && dna.decision) notes.push(`Decision framework honored: ${firstLine(dna.decision)}`);
-    if (usesDNA && dna.mindset) notes.push(`GOD CORE DNA applied: ${firstLine(dna.mindset)}`);
+    if (dna && dna.mindset && inheritsLayer(clone, "mindset")) notes.push(`GOD CORE DNA applied: ${firstLine(dna.mindset)}`);
     if (clone.learningSource === "Train on Past Performance" && clone.memory.length) {
       notes.push(`Applied lesson: ${clone.memory[clone.memory.length - 1]}`);
     }
@@ -457,11 +469,18 @@ PRISM.engine = (function () {
       clone.skills ? `Skill/tool focus: ${clone.skills}.` : ""
     ];
     if (clone.learningSource === "Use GOD CORE DNA" && dna) {
-      lines.push(`GOD CORE DNA (inherit this from the operator):`);
-      if (dna.tone) lines.push(`- Operator voice: ${dna.tone}`);
-      if (dna.mindset) lines.push(`- Operator mindset: ${dna.mindset}`);
-      if (dna.logic) lines.push(`- Operator strategy: ${dna.logic}`);
-      if (dna.cta) lines.push(`- Signature CTA to prefer: ${dna.cta}`);
+      /* Only the layers this clone was forged to inherit. The Forge shows the
+         operator exactly this list, so what the prompt carries and what the
+         DNA panel claims cannot drift apart. */
+      const inherited = [];
+      if (dna.tone   && inheritsLayer(clone, "tone"))   inherited.push(`- Operator voice: ${dna.tone}`);
+      if (dna.mindset && inheritsLayer(clone, "mindset")) inherited.push(`- Operator mindset: ${dna.mindset}`);
+      if (dna.logic  && inheritsLayer(clone, "logic"))  inherited.push(`- Operator strategy: ${dna.logic}`);
+      if (dna.cta    && inheritsLayer(clone, "cta"))    inherited.push(`- Signature CTA to prefer: ${dna.cta}`);
+      if (inherited.length) {
+        lines.push(`GOD CORE DNA (inherit this from the operator):`);
+        inherited.forEach(l => lines.push(l));
+      }
     }
     if (clone.learningSource === "Train on Past Performance" && clone.memory.length) {
       lines.push(`Lessons learned from past performance (apply them):`);
@@ -768,7 +787,7 @@ PRISM.engine = (function () {
 
   return {
     MODELS, generate, generateLocal, generateNeural, systemPrompt, complete, categoryFor,
-    recordOutcome, weeklySeries, combinedWeekly,
+    inheritsLayer, recordOutcome, weeklySeries, combinedWeekly,
     effectiveStatus, runAudit, applyUpgrade, dateKey, rng, hashStr
   };
 })();

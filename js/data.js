@@ -87,6 +87,21 @@ PRISM.data = (function () {
 
   const LEARNING_SOURCES = ["Use GOD CORE DNA", "Train on Past Performance"];
 
+  /* DNA_LAYERS — the five layers of the operator brain, in the order the Forge
+     shows them. `key` is the field on state.dna that the layer actually
+     controls, so a toggle can never claim to inherit something the engine
+     ignores. `binding` marks a layer no clone may opt out of: the Decision
+     Framework binds every PRISM-X intelligence regardless of learning source
+     (see engine.js buildPrompt), so the Forge renders it locked rather than
+     offering a toggle that would silently do nothing. */
+  const DNA_LAYERS = [
+    { key: "tone",     name: "IDENTITY",           blurb: "The operator voice every clone speaks in." },
+    { key: "mindset",  name: "MINDSET",            blurb: "How the operator thinks before acting." },
+    { key: "logic",    name: "OFFER LOGIC",        blurb: "Value stack, positioning, risk reversal." },
+    { key: "decision", name: "DECISION FRAMEWORK", blurb: "Non-negotiable operating laws.", binding: true },
+    { key: "cta",      name: "SIGNATURE CTA",      blurb: "The close the operator always returns to." }
+  ];
+
   const STATUS_META = {
     active:       { label: "ACTIVE",       cls: "st-active" },
     learning:     { label: "LEARNING",     cls: "st-learning" },
@@ -144,5 +159,5 @@ PRISM.data = (function () {
     low:    "Evergreen framing: no fake timers — lead with proof and fit."
   };
 
-  return { TONES, ROLES, LEARNING_SOURCES, STATUS_META, VAULT_TYPES, TASK_VAULT, BENEFITS, PROOFS, OBJECTION_FLIPS, URGENCY_LINES };
+  return { TONES, ROLES, LEARNING_SOURCES, DNA_LAYERS, STATUS_META, VAULT_TYPES, TASK_VAULT, BENEFITS, PROOFS, OBJECTION_FLIPS, URGENCY_LINES };
 })();

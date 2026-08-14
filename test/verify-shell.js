@@ -1,6 +1,12 @@
 const { chromium } = require('playwright-core');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
-const OUT = '/tmp/claude-0/-home-user-PRISM-X/a426672d-e8c8-552b-aef5-645e725d9aae/scratchpad';
+// Screenshots are debugging aids, not artifacts to keep. Default to a temp
+// directory so the run works on any machine; VERIFY_OUT overrides it when you
+// do want to keep the images.
+const OUT = process.env.VERIFY_OUT || fs.mkdtempSync(path.join(os.tmpdir(), 'prismx-shell-'));
 const WIDTHS = [
   { name: 'iphone-se', w: 375, h: 812 },
   { name: 'android', w: 412, h: 892 },
@@ -275,5 +281,6 @@ const WIDTHS = [
 
   await browser.close();
   console.log(failures ? `\n${failures} problem(s)` : '\nall checks passed');
+  console.log(`screenshots: ${OUT}`);
   process.exit(failures ? 1 : 0);
 })();

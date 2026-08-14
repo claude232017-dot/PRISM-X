@@ -19,7 +19,7 @@
     main.innerHTML = "";
     if (view === "forge") renderForge(main);
     else if (view === "clone" && parts[1]) renderClone(main, parts[1]);
-    else if (view === "queue") renderQueue(main);
+    else if (view === "queue") renderQueue(main, parts[1]);
     else if (view === "ghosts") renderGhostDeck(main);
     else if (view === "ghost-forge") renderGhostForge(main);
     else if (view === "ghost" && parts[1]) renderGhostView(main, parts[1]);
@@ -43,10 +43,22 @@
     else if (view === "worker" && parts[1]) renderWorkerInspector(main, parts[1]);
     else if (view === "memory") renderMemory(main);
     else if (view === "academy") renderAcademy(main, parts[1]);
-    else if (view === "settings") renderSettings(main);
+    else if (view === "settings") renderSettings(main, parts[1]);
     else renderDashboard(main);
     window.scrollTo(0, 0);
     syncHelpFab(view);
+    syncActionBar(main);
+  }
+
+  /* Below 1100 a .split-aside becomes a fixed action bar across the foot of
+     the screen. Anything else fixed down there — the page's own bottom
+     padding, the Academy button — has to move out of its way. Detected from
+     the rendered view rather than from a list of view names, so a view that
+     grows or loses an aside cannot forget to update the list. */
+  function syncActionBar(main) {
+    const has = Boolean(main.querySelector(".split-aside"));
+    main.classList.toggle("has-action-bar", has);
+    document.body.classList.toggle("has-action-bar", has);
   }
 
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
@@ -81,9 +93,12 @@
     if (bv) bv.textContent = "BRAIN v" + S.state.godBrainVersion;
     const qb = $("#queue-badge");
     if (qb) {
-      const due = S.dueQueue().length;
-      qb.textContent = due;
-      qb.hidden = due === 0;
+      /* Two different asks: something is due to fire, or something is waiting
+         on an OK. Both are the operator's move, so the badge counts both. */
+      const n = S.dueQueue().length + S.pendingApproval().length;
+      qb.textContent = n;
+      qb.hidden = n === 0;
+      qb.title = `${S.dueQueue().length} due · ${S.pendingApproval().length} awaiting approval`;
     }
   }
 
@@ -493,61 +508,257 @@
   }
 
   /* =============================== forge =============================== */
+  /* Forging is the one ceremonial act in the product, so the view is built
+     around a live preview of the thing being made rather than around a form.
+     The four steps are a tab strip, not a wizard: every field stays mounted,
+     so switching steps never discards typing and the preview can read the
+     whole form at any moment. */
   function renderForge(main) {
-    const wrap = el("div", { class: "page narrow" });
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `CLONE FORGE <span class="dim">// deploy a new agent</span>` }),
-        el("p", { class: "page-sub", text: "Define its mission, style and strategy. It inherits GOD CORE DNA the moment it wakes." })
-      ])
-    ]));
-
+    const wrap = el("div", { class: "page" });
     const f = {};
-    const form = el("div", { class: "panel form-panel" });
+    const dnaState = S.state.dna || {};
 
-    form.appendChild(field("Clone name", f, "name", el("input", { class: "input", placeholder: "e.g. APEX, QUILL, VULCAN…", maxlength: 24 })));
+    /* Which DNA layers the new clone will inherit. A layer with nothing stored
+       cannot be inherited — offering the toggle would promise a transfer of
+       something that does not exist, and counting it would inflate the
+       preview. Layers that do have content start on; a binding layer is one
+       that cannot then be turned off. */
+    const hasLayer = k => Boolean((dnaState[k] || "").trim());
+    const layerOn = {};
+    D.DNA_LAYERS.forEach(L => { layerOn[L.key] = hasLayer(L.key); });
 
+    const STEPS = [
+      { key: "role",   label: "Role" },
+      { key: "tone",   label: "Tone" },
+      { key: "dna",    label: "DNA" },
+      { key: "review", label: "Review" }
+    ];
+    let step = "role";
+
+    /* ---- fields, built once and kept mounted ---- */
+    f.name = el("input", { class: "input", placeholder: "e.g. APEX, QUILL, VULCAN…", maxlength: 24 });
     const roleSel = el("select", { class: "input" });
     Object.keys(D.ROLES).forEach(r => roleSel.appendChild(el("option", { value: r, text: `${D.ROLES[r].icon}  ${r} — ${D.ROLES[r].blurb}` })));
-    form.appendChild(field("Role", f, "role", roleSel));
-
-    form.appendChild(field("Target output", f, "target", el("input", { class: "input", placeholder: "e.g. $3k/month · 50 leads/week · 1k followers/month" })));
-
+    f.role = roleSel;
+    f.target = el("input", { class: "input", placeholder: "e.g. $3k/month · 50 leads/week · 1k followers/month" });
     const toneSel = el("select", { class: "input" });
     Object.entries(D.TONES).forEach(([t, meta]) => toneSel.appendChild(el("option", { value: t, text: `${t} — ${meta.desc}` })));
-    form.appendChild(field("Tone", f, "tone", toneSel));
+    f.tone = toneSel;
+    f.mindset = el("textarea", { class: "input", rows: 3, placeholder: "Custom behavior, one rule per line.\ne.g. Never discount. Always ask one question before pitching." });
+    f.skills = el("input", { class: "input", placeholder: "e.g. Twitter DMs, Gumroad, Uniswap, Notion" });
 
-    form.appendChild(field("Mindset rules", f, "mindset", el("textarea", { class: "input", rows: 3, placeholder: "Custom behavior, one rule per line.\ne.g. Never discount. Always ask one question before pitching." })));
+    const panels = {};
 
-    form.appendChild(field("Skill / tool focus", f, "skills", el("input", { class: "input", placeholder: "e.g. Twitter DMs, Gumroad, Uniswap, Notion" })));
+    panels.role = el("div", {}, [
+      el("div", { class: "section-label", text: "ROLE & TARGET" }),
+      el("p", { class: "section-note", text: "What this clone is for. The role sets which task types it can take off the Matrix; the target is the standing instruction it measures itself against." }),
+      el("div", { class: "form-stack" }, [
+        labelled("Clone name", f.name),
+        labelled("Role", f.role),
+        labelled("Target output", f.target),
+        labelled("Skill / tool focus", f.skills),
+        providerField(f)
+      ])
+    ]);
 
-    const srcSel = el("select", { class: "input" });
-    D.LEARNING_SOURCES.forEach(s => srcSel.appendChild(el("option", { value: s, text: s })));
-    form.appendChild(field("Learning source", f, "learningSource", srcSel));
+    panels.tone = el("div", {}, [
+      el("div", { class: "section-label", text: "VOICE & MINDSET" }),
+      el("p", { class: "section-note", text: "How it sounds and what it refuses to do. Mindset rules are this clone's alone — they sit on top of whatever it inherits from GOD CORE DNA." }),
+      el("div", { class: "form-stack" }, [
+        labelled("Tone", f.tone),
+        labelled("Mindset rules", f.mindset)
+      ])
+    ]);
 
-    form.appendChild(providerField(f));
+    const dnaList = el("div", { class: "dna-list" });
+    panels.dna = el("div", {}, [
+      el("div", { class: "section-label", text: "GOD CORE DNA" }),
+      el("p", { class: "section-note", text: "Five layers of the operator brain. Toggle what this clone inherits — the review step restates it in plain language before anything is forged." }),
+      dnaList
+    ]);
 
-    form.appendChild(el("div", { class: "form-actions" }, [
-      el("button", { class: "btn ghost", text: "Cancel", onclick: () => go("#/dashboard") }),
-      el("button", {
-        class: "btn primary big", text: "⚡ Launch Clone", onclick: () => {
-          const name = f.name.value.trim();
-          if (!name) { toast("Name your clone.", "err"); f.name.focus(); return; }
-          if (S.state.clones.some(c => c.name.toLowerCase() === name.toLowerCase())) { toast("A clone with that name already exists.", "err"); return; }
-          const clone = S.addClone({
-            name: name.toUpperCase(), role: f.role.value, target: f.target.value.trim(),
-            tone: f.tone.value, mindset: f.mindset.value.trim(), skills: f.skills.value.trim(),
-            learningSource: f.learningSource.value, provider: f.provider.value
-          });
-          U.sfx("spawn"); U.evolveFlash();
-          toast(`"${clone.name}" is online — ready for tasks.`, "ok");
-          go("#/clone/" + clone.id);
-        }
-      })
-    ]));
+    const reviewBody = el("div", { class: "form-stack" });
+    panels.review = el("div", {}, [
+      el("div", { class: "section-label", text: "REVIEW" }),
+      el("p", { class: "section-note", text: "In plain language, what you are about to forge. Nothing is written until you press the forge button." }),
+      reviewBody
+    ]);
 
-    wrap.appendChild(form);
+    function drawDna() {
+      dnaList.innerHTML = "";
+      D.DNA_LAYERS.forEach(L => {
+        const stored = (dnaState[L.key] || "").trim();
+        const has = Boolean(stored);
+        const on = layerOn[L.key];
+        /* Binding only bites once the layer has something in it: an empty
+           Decision Framework is nothing to be bound by. */
+        const locked = Boolean(L.binding) && has;
+        const cls = ["dna-row"];
+        if (on) cls.push("on");
+        if (locked) cls.push("locked");
+        if (!has) cls.push("empty-layer");
+        const row = el("button", {
+          class: cls.join(" "),
+          type: "button",
+          "aria-pressed": on ? "true" : "false",
+          disabled: locked || !has ? "" : null,
+          title: locked
+            ? "The Decision Framework binds every PRISM-X intelligence — it cannot be opted out of."
+            : has ? "" : "Nothing stored for this layer yet — set it in Settings → GOD CORE DNA.",
+          onclick: () => {
+            if (locked || !has) return;
+            layerOn[L.key] = !layerOn[L.key];
+            U.sfx("click");
+            drawDna(); syncPreview();
+          }
+        }, [
+          el("span", { class: "dna-glyph", text: on ? "◆" : "◇" }),
+          el("span", { class: "dna-body" }, [
+            el("span", { class: "dna-name", text: L.name }),
+            /* With content, the row shows the actual text that will transfer —
+               the operator should see what is being inherited, not a
+               description of it. Empty, it falls back to what the layer is
+               for, so "NOT SET" is actionable rather than just blank. */
+            el("span", { class: "dna-desc", text: has ? firstLineOf(stored) : L.blurb,
+              title: has ? stored : L.blurb })
+          ]),
+          el("span", { class: "dna-state", text: !has ? "NOT SET" : locked ? "BINDING" : on ? "INHERITED" : "OPT-IN" })
+        ]);
+        dnaList.appendChild(row);
+      });
+    }
+
+    function inheritedKeys() {
+      return D.DNA_LAYERS.filter(L => layerOn[L.key]).map(L => L.key);
+    }
+
+    function drawReview() {
+      const inherited = D.DNA_LAYERS.filter(L => layerOn[L.key]);
+      const name = f.name.value.trim().toUpperCase() || "—";
+      const role = f.role.value;
+      reviewBody.innerHTML = "";
+      reviewBody.appendChild(el("p", { class: "section-note", style: "max-width:60ch",
+        text: `${name} will wake as a ${role} speaking in a ${f.tone.value} voice`
+          + (f.target.value.trim() ? `, working toward ${f.target.value.trim()}` : "")
+          + (inherited.length
+              ? `. It inherits ${inherited.length} of ${D.DNA_LAYERS.length} DNA layers: `
+                + `${inherited.map(L => L.name.toLowerCase()).join(", ")}`
+              : `. It inherits no GOD CORE DNA — nothing is recorded yet — so it trains on its own past performance`)
+          + `. It starts in LEARNING and takes no work until you place it on the Matrix.`
+      }));
+      if (f.mindset.value.trim()) {
+        reviewBody.appendChild(el("p", { class: "section-note", style: "max-width:60ch",
+          text: `Its own mindset rules override anything inherited: ${firstLineOf(f.mindset.value)}` }));
+      }
+      reviewBody.appendChild(el("p", { class: "section-note", style: "max-width:60ch",
+        text: "Everything is written to this browser only — no network call, no backend." }));
+    }
+
+    /* ---- live preview ---- */
+    const pvAvatar = el("span", { class: "preview-avatar", text: "◈" });
+    const pvName = el("div", { class: "preview-name", text: "UNNAMED" });
+    const pvSub = el("div", { class: "preview-sub", text: "" });
+    const pvChip = el("span", { class: "badge st-learning preview-status", text: "WILL FORGE AS LEARNING" });
+    const pvSummary = el("p", { class: "preview-summary" });
+    const forgeBtn = el("button", { class: "btn forge", onclick: doForge }, [
+      el("span", { text: "◈" }), el("span", { class: "forge-label", text: "Forge clone" })
+    ]);
+
+    function syncPreview() {
+      const name = f.name.value.trim().toUpperCase();
+      const role = D.ROLES[f.role.value] || { icon: "◈" };
+      pvAvatar.textContent = role.icon || "◈";
+      pvName.textContent = name || "UNNAMED";
+      pvSub.textContent = `${f.role.value} · ${f.tone.value}`;
+      const n = inheritedKeys().length;
+      pvSummary.textContent = n
+        ? `Inherits ${n} of ${D.DNA_LAYERS.length} DNA layers. Assigned to no Shell yet — `
+          + `it will sit dormant until you place it on the Matrix.`
+        : `No GOD CORE DNA recorded yet, so this clone trains on its own past `
+          + `performance instead. Fill the DNA in Settings to pass it on.`;
+      forgeBtn.querySelector(".forge-label").textContent = name ? `Forge ${name}` : "Forge clone";
+      forgeBtn.disabled = !name;
+      if (step === "review") drawReview();
+    }
+
+    const aside = el("div", { class: "split-aside" }, [
+      el("div", { class: "aside-label", text: "LIVE PREVIEW" }),
+      el("div", { class: "preview-card" }, [
+        el("div", { class: "preview-id" }, [
+          pvAvatar,
+          el("div", { class: "preview-id-text" }, [pvName, pvSub])
+        ]),
+        pvChip,
+        pvSummary
+      ]),
+      el("div", { class: "preview-foot" }, [
+        el("p", { class: "preview-foot-note", text: "Forging writes to this browser only. No network call, no backend." }),
+        forgeBtn
+      ])
+    ]);
+
+    function doForge() {
+      const name = f.name.value.trim();
+      if (!name) { toast("Name your clone.", "err"); showStep("role"); f.name.focus(); return; }
+      if (S.state.clones.some(c => c.name.toLowerCase() === name.toLowerCase())) { toast("A clone with that name already exists.", "err"); showStep("role"); f.name.focus(); return; }
+      const keys = inheritedKeys();
+      const clone = S.addClone({
+        name: name.toUpperCase(), role: f.role.value, target: f.target.value.trim(),
+        tone: f.tone.value, mindset: f.mindset.value.trim(), skills: f.skills.value.trim(),
+        /* The layer toggles are the learning source now. A clone that inherits
+           nothing is by definition training on its own past performance. */
+        learningSource: keys.length ? "Use GOD CORE DNA" : "Train on Past Performance",
+        dnaLayers: keys,
+        provider: f.provider.value
+      });
+      U.sfx("spawn"); U.evolveFlash();
+      toast(`"${clone.name}" is online — ready for tasks.`, "ok");
+      go("#/clone/" + clone.id);
+    }
+
+    const stepHost = el("div", { class: "forge-steps" });
+    Object.keys(panels).forEach(k => stepHost.appendChild(panels[k]));
+
+    let strip = U.tabStrip(STEPS, step, showStep);
+
+    function showStep(k) {
+      step = k;
+      Object.keys(panels).forEach(p => { panels[p].hidden = p !== k; });
+      const next = U.tabStrip(STEPS, step, showStep);
+      strip.replaceWith(next);
+      strip = next;
+      if (k === "review") drawReview();
+    }
+
+    const head = U.viewHead({ title: "Forge Clone", crumb: "AGENTS / FORGE", actions: [strip] });
+
+    wrap.appendChild(head);
+    wrap.appendChild(el("div", { class: "split" }, [stepHost, aside]));
     main.appendChild(wrap);
+
+    /* Any edit anywhere re-reads the whole form — cheaper than tracking which
+       field feeds which line of the preview, and it cannot fall out of sync. */
+    [f.name, f.role, f.target, f.tone, f.mindset, f.skills].forEach(inp => {
+      inp.addEventListener("input", syncPreview);
+      inp.addEventListener("change", syncPreview);
+    });
+
+    drawDna();
+    showStep("role");
+    syncPreview();
+  }
+
+  /* A field with its label, in the redesign's stacked form rhythm. */
+  function labelled(label, input) {
+    return el("label", { class: "field" }, [
+      el("span", { class: "field-label", text: label }),
+      input
+    ]);
+  }
+
+  function firstLineOf(s) {
+    const line = String(s || "").split("\n").find(l => l.trim()) || "";
+    return line.trim().length > 72 ? line.trim().slice(0, 71) + "…" : line.trim();
   }
 
   function field(label, refs, key, input) {
@@ -945,91 +1156,203 @@
     });
   }
 
-  function renderQueue(main) {
+  /* Approval is the whole design here, so it owns the top of the view and
+     stays there while the days scroll underneath. Items are grouped by the
+     day they are due rather than listed flat: "what goes out today" is the
+     question this screen exists to answer. */
+  function renderQueue(main, tab) {
     const st = S.state;
-    const wrap = el("div", { class: "page narrow" });
+    const wrap = el("div", { class: "page" });
     const queued = st.queue.filter(q => q.status === "queued").sort((a, b) => a.dueAt - b.dueAt);
-    const posted = st.queue.filter(q => q.status === "posted").sort((a, b) => b.postedAt - a.postedAt).slice(0, 10);
+    const posted = st.queue.filter(q => q.status === "posted").sort((a, b) => b.postedAt - a.postedAt).slice(0, 20);
+    const pending = queued.filter(q => !S.isApproved(q));
+    const view = tab === "sent" ? "sent" : tab === "held" ? "held" : "scheduled";
 
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `BROADCAST QUEUE <span class="dim">// scheduled posts</span>` }),
-        el("p", { class: "page-sub", text: `${queued.length} queued · ${posted.length} recently posted. Due posts fire to X in one click — this app is serverless, so nothing posts without you.` })
-      ])
-    ]));
+    const TABS = [
+      { key: "scheduled", label: `Scheduled${queued.length ? ` · ${queued.length}` : ""}` },
+      { key: "held", label: `Needs OK${pending.length ? ` · ${pending.length}` : ""}` },
+      { key: "sent", label: "Sent" }
+    ];
+    wrap.appendChild(U.viewHead({
+      title: "Broadcast Queue", crumb: "COMMAND / QUEUE",
+      actions: [U.tabStrip(TABS, view, k => go("#/queue/" + k))]
+    }));
 
-    const qPanel = el("div", { class: "panel" });
-    qPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⌁ Queued" })]));
-    if (!queued.length) {
-      qPanel.appendChild(el("p", { class: "empty-note", text: "Nothing scheduled. Use “Schedule ↗” on any task output or vault item." }));
+    /* The approval bar states the count out loud and never disappears while
+       anything is waiting — a silent queue is how things go out unread. */
+    if (view !== "sent") {
+      wrap.appendChild(pending.length
+        ? el("div", { class: "approve-bar" }, [
+            el("span", { class: "approve-glyph", text: "◐" }),
+            el("span", { class: "approve-count", text: `${pending.length} item${pending.length > 1 ? "s need" : " needs"} your approval before ${pending.length > 1 ? "they go" : "it goes"} out` }),
+            el("span", { class: "approve-note", text: "Nothing publishes without an explicit click." }),
+            el("button", {
+              class: "btn gold-btn", text: `Approve all ${pending.length}`,
+              onclick: () => {
+                U.modal({
+                  title: "Approve every held item?",
+                  body: `<p>${pending.length} scheduled item${pending.length > 1 ? "s" : ""} will be cleared to publish. They still fire only when you press <b>Post to X</b> on each one — approving does not send anything.</p>`,
+                  actions: [
+                    { label: "Cancel", cls: "ghost" },
+                    { label: `Approve ${pending.length}`, cls: "gold-btn", onClick: () => {
+                        pending.forEach(q => S.approveQueueItem(q.id, true));
+                        U.sfx("rate");
+                        toast(`${pending.length} item${pending.length > 1 ? "s" : ""} approved — still nothing sent.`, "ok");
+                        route();
+                      } }
+                  ]
+                });
+              }
+            })
+          ])
+        : el("div", { class: "approve-bar" }, [
+            el("span", { class: "approve-glyph", text: "●" }),
+            el("span", { class: "approve-count", text: queued.length ? "Everything queued is approved" : "Nothing is queued" }),
+            el("span", { class: "approve-note", text: "Nothing publishes without an explicit click." })
+          ]));
     }
-    queued.forEach(q => {
-      const isDue = q.dueAt <= Date.now();
-      const clone = st.clones.find(c => c.id === q.cloneId);
-      qPanel.appendChild(el("div", { class: "queue-row" + (isDue ? " due" : "") }, [
-        el("div", { class: "q-when" }, [
-          el("span", { class: "q-due" + (isDue ? " hot" : ""), text: isDue ? "DUE NOW" : fmtDue(q.dueAt) })
+
+    if (view === "sent") {
+      wrap.appendChild(posted.length
+        ? queueDayColumns(posted, "postedAt", renderPostedItem)
+        : emptyState("Nothing sent yet", "Approved items stay here after you fire them, so you can repost without rewriting.", null));
+      main.appendChild(wrap);
+      return;
+    }
+
+    const list = view === "held" ? pending : queued;
+    if (!list.length) {
+      wrap.appendChild(view === "held"
+        ? emptyState("Nothing is waiting on you", "Every queued broadcast has been approved. New items land here for an OK before they can fire.", null)
+        : emptyState("Nothing scheduled", "Use “Schedule ↗” on any task output or vault item to line up a broadcast.", null));
+      main.appendChild(wrap);
+      return;
+    }
+    wrap.appendChild(queueDayColumns(list, "dueAt", renderQueuedItem));
+    main.appendChild(wrap);
+  }
+
+  /* Groups items into day columns — TODAY / TOMORROW / weekday, then date.
+     Two columns at 768+, one at 375; items never reflow between days. */
+  function queueDayColumns(items, stampKey, renderItem) {
+    const groups = [];
+    const byDay = new Map();
+    items.forEach(q => {
+      const d = new Date(q[stampKey]);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      if (!byDay.has(key)) { byDay.set(key, { label: dayLabel(d), date: dayDate(d), items: [] }); groups.push(byDay.get(key)); }
+      byDay.get(key).items.push(q);
+    });
+    const cols = el("div", { class: "q-cols" });
+    groups.forEach(g => {
+      cols.appendChild(el("div", {}, [
+        el("div", { class: "q-col-head" }, [
+          el("span", { class: "q-col-label", text: g.label }),
+          el("span", { class: "q-col-date", text: g.date })
         ]),
-        el("div", { class: "q-main" }, [
-          el("div", { class: "q-title", text: q.title + (clone ? ` · ${clone.name}` : "") }),
-          el("div", { class: "q-snippet", text: q.text })
-        ]),
-        el("div", { class: "q-actions" }, [
-          el("button", {
-            class: "btn tiny" + (isDue ? " gold-btn" : ""), text: "Post to X ↗", onclick: () => {
-              U.shareToX(q.text);
-              S.markPosted(q.id);
-              U.sfx("evolve");
-              toast("Fired — marked as posted.", "ok");
-              route();
-            }
-          }),
-          el("button", {
-            class: "btn tiny ghost", text: "Reschedule", onclick: () => {
-              const when = el("input", { class: "input", type: "datetime-local", value: dtLocalValue(q.dueAt) });
-              U.modal({
-                title: "Reschedule",
-                body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(when); return b; })(),
-                actions: [
-                  { label: "Cancel", cls: "ghost" },
-                  {
-                    label: "Save", cls: "gold-btn", keepOpen: true, onClick: () => {
-                      const t2 = when.value ? new Date(when.value).getTime() : NaN;
-                      if (!isFinite(t2)) { toast("Pick a valid date and time.", "err"); return; }
-                      U.closeModal();
-                      q.dueAt = t2; S.save(); route();
-                    }
-                  }
-                ]
-              });
-            }
-          }),
-          el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { S.deleteQueueItem(q.id); route(); } })
-        ])
+        el("div", { class: "q-items" }, g.items.map(renderItem))
       ]));
     });
-    wrap.appendChild(qPanel);
+    return cols;
+  }
 
-    if (posted.length) {
-      const pPanel = el("div", { class: "panel" });
-      pPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Posted" })]));
-      posted.forEach(q => {
-        pPanel.appendChild(el("div", { class: "queue-row posted" }, [
-          el("div", { class: "q-when" }, [el("span", { class: "q-due", text: fmtDue(q.postedAt) })]),
-          el("div", { class: "q-main" }, [
-            el("div", { class: "q-title", text: q.title }),
-            el("div", { class: "q-snippet", text: q.text })
-          ]),
-          el("div", { class: "q-actions" }, [
-            el("button", { class: "btn tiny ghost", text: "Repost ↗", onclick: () => U.shareToX(q.text) }),
-            el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { S.deleteQueueItem(q.id); route(); } })
-          ])
-        ]));
-      });
-      wrap.appendChild(pPanel);
-    }
+  function dayLabel(d) {
+    const now = new Date();
+    const midnight = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days = Math.round((midnight(d) - midnight(now)) / 86400000);
+    if (days === 0) return "TODAY";
+    if (days === 1) return "TOMORROW";
+    if (days === -1) return "YESTERDAY";
+    return d.toLocaleDateString(undefined, { weekday: "long" }).toUpperCase();
+  }
+  function dayDate(d) {
+    return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }).toUpperCase();
+  }
 
-    main.appendChild(wrap);
+  function renderQueuedItem(q) {
+    const st = S.state;
+    const approved = S.isApproved(q);
+    const clone = st.clones.find(c => c.id === q.cloneId);
+    const isDue = q.dueAt <= Date.now();
+    const time = new Date(q.dueAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+    return el("div", { class: "q-item" + (approved ? "" : " needs-ok") }, [
+      el("div", { class: "q-item-top" }, [
+        el("span", { class: "q-time", text: isDue ? "DUE" : time }),
+        el("span", { class: "q-title", text: q.title })
+      ]),
+      el("p", { class: "q-snippet", text: q.text }),
+      el("div", { class: "q-item-foot" }, [
+        el("span", { class: "q-shell", text: clone ? clone.name : "unassigned" }),
+        approved
+          ? el("span", { class: "badge st-active", text: "APPROVED" })
+          : el("span", { class: "badge st-learning", text: "NEEDS OK" })
+      ]),
+      el("div", { class: "q-item-actions" }, [
+        approved
+          ? el("button", {
+              class: "btn tiny" + (isDue ? " gold-btn" : ""), text: "Post to X ↗", onclick: () => {
+                U.shareToX(q.text); S.markPosted(q.id); U.sfx("evolve");
+                toast("Fired — marked as posted.", "ok"); route();
+              }
+            })
+          : el("button", {
+              class: "btn tiny gold-btn", text: "✓ Approve", onclick: () => {
+                S.approveQueueItem(q.id, true); U.sfx("rate");
+                toast("Approved — it still fires only when you post it.", "ok"); route();
+              }
+            }),
+        approved ? el("button", {
+          class: "btn tiny ghost", text: "Hold", title: "Withdraw approval — it cannot fire until you approve it again.",
+          onclick: () => { S.approveQueueItem(q.id, false); route(); }
+        }) : null,
+        el("button", { class: "btn tiny ghost", text: "Reschedule", onclick: () => rescheduleModal(q) }),
+        el("button", { class: "btn tiny danger ghost", text: "✕", title: "Remove from queue", onclick: () => { S.deleteQueueItem(q.id); route(); } })
+      ])
+    ]);
+  }
+
+  function renderPostedItem(q) {
+    return el("div", { class: "q-item posted" }, [
+      el("div", { class: "q-item-top" }, [
+        el("span", { class: "q-time", text: new Date(q.postedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) }),
+        el("span", { class: "q-title", text: q.title })
+      ]),
+      el("p", { class: "q-snippet", text: q.text }),
+      el("div", { class: "q-item-actions" }, [
+        el("button", { class: "btn tiny ghost", text: "Repost ↗", onclick: () => U.shareToX(q.text) }),
+        el("button", { class: "btn tiny danger ghost", text: "✕", onclick: () => { S.deleteQueueItem(q.id); route(); } })
+      ])
+    ]);
+  }
+
+  function rescheduleModal(q) {
+    const when = el("input", { class: "input", type: "datetime-local", value: dtLocalValue(q.dueAt) });
+    U.modal({
+      title: "Reschedule",
+      body: (() => { const b = el("div", { class: "modal-body" }); b.appendChild(when); return b; })(),
+      actions: [
+        { label: "Cancel", cls: "ghost" },
+        {
+          label: "Save", cls: "gold-btn", keepOpen: true, onClick: () => {
+            const t2 = when.value ? new Date(when.value).getTime() : NaN;
+            if (!isFinite(t2)) { toast("Pick a valid date and time.", "err"); return; }
+            U.closeModal();
+            q.dueAt = t2; S.save(); route();
+          }
+        }
+      ]
+    });
+  }
+
+  /* The empty state names the verb that fills it — never an illustration. */
+  function emptyState(title, body, action) {
+    return el("div", { class: "empty" }, [
+      el("span", { class: "empty-glyph", text: "◈" }),
+      el("span", { class: "empty-title", text: title }),
+      el("span", { class: "empty-body", text: body }),
+      action || null
+    ]);
   }
 
   /* =============================== PHASE 2: PRODUCT GHOSTS =============================== */
@@ -1482,17 +1805,16 @@
     const stats = SH.stats();
     const offDays = Math.round((st.ghostSimOffset || 0) / 86400000);
 
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `OUTER SHELLS <span class="dim">// phase 3 — faceless content brands</span>` }),
-        el("p", { class: "page-sub", text: `${stats.shells} shell(s) · ${U.fmtNum(stats.followers)} total followers · ${SH.money(stats.income)} attributed income · ${U.fmtNum(stats.emails)} emails collected` })
-      ]),
-      el("div", { class: "head-actions" }, [
-        el("button", { class: "btn cyan-btn", text: "🎭 Deploy Outer Shell", onclick: () => go("#/shell-forge") }),
-        el("button", { class: "btn", text: "🧱 Shell Builder AI", onclick: shellBuilderModal }),
-        el("button", { class: "btn", text: "🔁 Cross-Pollinate", onclick: crossPollinateModal })
-      ])
-    ]));
+    wrap.appendChild(U.viewHead({
+      title: "Outer Shells", crumb: "AGENTS / SHELLS",
+      actions: [
+        el("button", { class: "btn", text: "Shell Builder AI", onclick: shellBuilderModal }),
+        el("button", { class: "btn", text: "Cross-Pollinate", onclick: crossPollinateModal }),
+        el("button", { class: "btn gold-btn", text: "🎭 Forge Shell", onclick: () => go("#/shell-forge") })
+      ]
+    }));
+    wrap.appendChild(el("p", { class: "section-note", style: "max-width:78ch;margin:-6px 0 16px",
+      text: `${stats.shells} shell(s) · ${U.fmtNum(stats.followers)} total followers · ${SH.money(stats.income)} attributed income · ${U.fmtNum(stats.emails)} emails collected` }));
 
     /* mission banner */
     wrap.appendChild(el("div", { class: "directive-banner cyan-banner" }, [
@@ -1519,12 +1841,11 @@
     ]));
 
     if (!st.shells.length) {
-      wrap.appendChild(el("div", { class: "hero-empty cyan-hero" }, [
-        el("div", { class: "hero-glyph cyan-glyph", text: "🎭" }),
-        el("h2", { text: "No shells in orbit." }),
-        el("p", { text: "Outer Shells are faceless AI content brands: they research their niche daily, drop platform-native content with one CTA per post, grow their following, and evolve their persona on engagement — feeding traffic back to your ghosts, affiliates and clones." }),
-        el("button", { class: "btn cyan-btn big", text: "🎭 Deploy First Outer Shell", onclick: () => go("#/shell-forge") })
-      ]));
+      /* The empty state names the forge verb and offers one action — the
+         shared vocabulary, not a bespoke hero per view. */
+      wrap.appendChild(emptyState("No Shells in orbit",
+        "An Outer Shell is a faceless content brand: it researches its niche daily, drops platform-native content with one CTA per post, grows its following and evolves its persona on engagement — feeding traffic back to your ghosts and clones.",
+        el("button", { class: "btn gold-btn", text: "Forge a Shell", onclick: () => go("#/shell-forge") })));
     } else {
       const grid = el("div", { class: "clone-grid" });
       st.shells.forEach(s3 => grid.appendChild(shellCard(s3)));
@@ -1949,23 +2270,22 @@
     const stats = M.stats();
     const wrap = el("div", { class: "page" });
 
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `THE MATRIX MERGE <span class="dim">// phase 4 — human executor bridge</span>` }),
-        el("p", { class: "page-sub", text: `${stats.executors} executor(s) in the network · ${stats.inFlight} task(s) in flight · ${stats.funnels} SuperFunnel(s) live` })
-      ]),
-      el("div", { class: "head-actions" }, [
-        el("button", { class: "btn blue-btn", text: "👤 Auto-Onboard Freelancer", onclick: onboardModal }),
-        el("button", { class: "btn", text: "⚡ Auto-Assign Work", onclick: () => {
+    wrap.appendChild(U.viewHead({
+      title: "Task Matrix", crumb: "AGENTS / MATRIX",
+      actions: [
+        el("button", { class: "btn", text: "👤 Onboard Freelancer", onclick: onboardModal }),
+        el("button", { class: "btn", text: "🔗 SuperFunnel", onclick: superFunnelModal }),
+        el("button", { class: "btn gold-btn", text: "⚡ Dispatch", title: "Auto-assign assignable work to executors with capacity", onclick: () => {
           if (!st.executors.length) { toast("Onboard an executor first.", "err"); return; }
           const out = M.autoAssign();
           if (!out.length) { toast("No assignable ops right now (or executors are at capacity).", "err"); return; }
           out.forEach((e2, i) => setTimeout(() => toast(e2, "ok"), i * 400));
           route();
-        } }),
-        el("button", { class: "btn", text: "🔗 Create SuperFunnel", onclick: superFunnelModal })
-      ])
-    ]));
+        } })
+      ]
+    }));
+    wrap.appendChild(el("p", { class: "section-note", style: "margin:-6px 0 16px",
+      text: `${stats.executors} executor(s) in the network · ${stats.inFlight} task(s) in flight · ${stats.funnels} SuperFunnel(s) live` }));
 
     /* KPIs */
     wrap.appendChild(el("div", { class: "kpi-row" }, [
@@ -1989,8 +2309,20 @@
       el("span", { class: "leg human", text: "■ Human tasks" }),
       el("span", { class: "leg joint", text: "■ Joint (hybrid)" })
     ]));
-    const gridBox = el("div", { class: "task-grid" });
+    const gridBox = el("div", {});
     gridPanel.appendChild(gridBox);
+
+    /* Every task has exactly one owner, so the grid is sparse by nature: one
+       marked cell per row, and the column it lands in is the answer to "who
+       has this". That is the question a roster of tiles could not answer at
+       a glance. Below 1100 the same rows render as cards — a table that
+       scrolls sideways on a phone is a table nobody reads. */
+    const CELL = {
+      live:   { label: "RUN",    cls: "run",    status: "active" },
+      review: { label: "HOLD",   cls: "hold",   status: "needs_update" },
+      done:   { label: "DONE",   cls: "queued", status: "dormant" }
+    };
+
     function drawGrid() {
       gridBox.innerHTML = "";
       let tiles = M.taskGrid();
@@ -1999,24 +2331,67 @@
       else if (sortSel.value === "roi") tiles.sort((a, b) => b.value - a.value);
       else if (sortSel.value === "member") tiles.sort((a, b) => a.who.localeCompare(b.who));
       else tiles.sort((a, b) => a.kind.localeCompare(b.kind) || a.who.localeCompare(b.who));
-      if (!tiles.length) gridBox.appendChild(el("p", { class: "empty-note", text: "The grid is dark — run tasks, launch ghosts, deploy shells, assign humans." }));
-      tiles.slice(0, 30).forEach(t => {
-        gridBox.appendChild(el("div", {
-          class: `grid-tile ${t.kind}` + (t.status === "review" ? " needs-review" : t.status === "done" ? " tile-done" : ""),
-          onclick: t.taskId ? () => reviewTaskModal(t.taskId) : null,
-          title: t.title
+      tiles = tiles.slice(0, 30);
+
+      if (!tiles.length) {
+        gridBox.appendChild(emptyState("The grid is dark",
+          "Run tasks, launch ghosts, deploy shells or assign humans — every assignment shows up here as a row.", null));
+        return;
+      }
+
+      /* Columns are the agents that actually own something, busiest first. */
+      const counts = new Map();
+      tiles.forEach(t => counts.set(t.who, (counts.get(t.who) || 0) + 1));
+      const agents = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+
+      const table = el("div", { class: "mx-wrap", style: `--mx-cols:${agents.length}` });
+      table.appendChild(el("div", { class: "mx-head" }, [
+        el("span", { class: "mx-th", text: "TASK" })
+      ].concat(agents.map(a => el("span", { class: "mx-th col", text: a })))));
+
+      tiles.forEach(t => {
+        const c = CELL[t.status] || CELL.done;
+        const meta = D.STATUS_META[c.status];
+        const row = el("div", { class: "mx-row" }, [
+          el("span", { class: "mx-task" }, [
+            el("span", { class: "badge " + meta.cls, "aria-label": meta.label, title: meta.label }),
+            el("span", { class: "mx-kind " + t.kind, text: t.tag, title: t.kind }),
+            el("span", { class: "mx-task-name", text: t.title, title: t.title })
+          ])
+        ]);
+        agents.forEach(a => {
+          const mine = a === t.who;
+          row.appendChild(el("span", {
+            class: "mx-cell " + (mine ? c.cls : "none"),
+            text: mine ? c.label : "—",
+            title: mine ? `${t.title} — ${c.label} · ${a}` : ""
+          }));
+        });
+        if (t.taskId) { row.style.cursor = "pointer"; row.addEventListener("click", () => reviewTaskModal(t.taskId)); }
+        table.appendChild(row);
+      });
+      gridBox.appendChild(table);
+
+      const cards = el("div", { class: "mx-cards" });
+      tiles.forEach(t => {
+        const c = CELL[t.status] || CELL.done;
+        const meta = D.STATUS_META[c.status];
+        cards.appendChild(el("div", {
+          class: "mx-card",
+          onclick: t.taskId ? () => reviewTaskModal(t.taskId) : null
         }, [
-          el("div", { class: "tile-top" }, [
-            el("span", { class: "tile-tag", text: t.tag }),
-            el("span", { class: "tile-status", text: t.status.toUpperCase() })
+          el("div", { class: "mx-card-top" }, [
+            el("span", { class: "mx-kind " + t.kind, text: t.tag }),
+            el("span", { class: "mx-task-name", text: t.title }),
+            el("span", { class: "badge " + meta.cls, text: c.label })
           ]),
-          el("div", { class: "tile-title", text: t.title }),
-          el("div", { class: "tile-meta" }, [
-            el("span", { text: t.who }),
-            el("span", { class: "tile-val", text: t.value ? M.money(t.value) : "—" })
+          el("dl", { class: "mx-card-assign" }, [
+            el("dt", { text: "ASSIGNED" }),
+            el("dd", { text: t.who })
           ])
         ]));
       });
+      gridBox.appendChild(cards);
     }
     sortSel.addEventListener("change", drawGrid);
     drawGrid();
@@ -2778,32 +3153,33 @@
   }
 
   /* =============================== intelligence center (PHASE H0) =============================== */
+  /* Plain labels: the tab strip is one shared component across every view, and
+     a strip that is emoji here and words everywhere else is the per-phase
+     drift the redesign exists to remove. Academy keeps its 📚 in the rail as
+     the sole emoji, because that one is part of the existing navigation. */
   const INT_TABS = [
-    ["providers", "🧠 Providers"],
-    ["manager", "🔀 Manager"],
-    ["capabilities", "⚡ Capabilities"],
-    ["analytics", "📊 Analytics"],
-    ["health", "🩺 Health"],
-    ["registry", "🗂 Registry"],
-    ["future", "🔌 Future"]
+    ["providers", "Providers"],
+    ["manager", "Manager"],
+    ["capabilities", "Capabilities"],
+    ["analytics", "Analytics"],
+    ["health", "Health"],
+    ["registry", "Registry"],
+    ["future", "Future"]
   ];
 
   function renderIntelligence(main, tab) {
     tab = tab || "providers";
     P.ensure();
     const wrap = el("div", { class: "page" });
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `INTELLIGENCE CENTER <span class="dim">// phase h0 — provider layer</span>` }),
-        el("p", { class: "page-sub", text: "Every intelligence request flows Worker → Bridge → Provider Manager → provider. Workers never know which provider answered. No live third-party APIs in Phase H0 — Claude (Neural Link) and the Local Cortex execute; everything else is provisioned." })
-      ])
-    ]));
-
-    const tabs = el("div", { class: "bridge-tabs" });
-    INT_TABS.forEach(([k, label]) => tabs.appendChild(el("a", {
-      class: "bridge-tab" + (k === tab ? " on" : ""), href: "#/intelligence/" + k, text: label
-    })));
-    wrap.appendChild(tabs);
+    wrap.appendChild(U.viewHead({
+      title: "Intelligence", crumb: "INTELLIGENCE / PROVIDERS",
+      actions: [U.tabStrip(
+        INT_TABS.map(([k, label]) => ({ key: k, label })),
+        tab, k => go("#/intelligence/" + k)
+      )]
+    }));
+    wrap.appendChild(el("p", { class: "section-note", style: "max-width:78ch;margin:-6px 0 16px",
+      text: "Every intelligence request flows Worker → Bridge → Provider Manager → provider. Workers never know which provider answered. Claude (Neural Link) and the Local Cortex execute; everything else is provisioned and reports simulated figures." }));
 
     const body = el("div", { class: "bridge-body" });
     ({
@@ -2954,27 +3330,54 @@
   }
 
   /* ---- MODULE 6 — provider analytics ---- */
+  /* This is the table the SIM rule was written for. A provider that has never
+     served a request is not reporting a measured zero — it is reporting a
+     placeholder, and placed in the same unlabelled column as Claude's real
+     counters it reads as fact. Every such row carries the hatch, a SIM chip
+     and an explicit SOURCE cell, and the banner states the count out loud, so
+     a screenshot of one row out of context still says what it is. */
   function intAnalytics(body) {
-    body.appendChild(el("p", { class: "dim small-note", text: "Live counters for Claude and the Local Cortex (requests, timings, token/cost estimates); unconnected providers hold their placeholder zeros until their APIs arrive." }));
-    const panel = el("div", { class: "panel", style: "overflow-x:auto" });
-    const table = el("div", { class: "pa-table" });
-    table.appendChild(el("div", { class: "pa-row pa-head" }, ["PROVIDER", "REQUESTS", "SUCCESS", "FAILURE", "AVG RESPONSE", "AVG TASK", "TOKENS (EST)", "COST (EST)", "LAST ERROR"].map(h => el("span", { text: h }))));
-    P.list().forEach(p => {
+    const rows = P.list().map(p => {
       const a = P.analyticsOf(p.id);
-      table.appendChild(el("div", { class: "pa-row" }, [
-        el("span", { class: "pa-name", text: a.name }),
-        el("span", { text: String(a.requests) }),
-        el("span", { text: a.successRate == null ? "—" : a.successRate + "%" }),
-        el("span", { text: a.failureRate == null ? "—" : a.failureRate + "%" }),
-        el("span", { text: a.requests ? (a.avgMs < 50 ? "instant" : (a.avgMs / 1000).toFixed(1) + "s") : "—" }),
-        el("span", { text: a.requests ? (a.avgTaskMs < 50 ? "instant" : (a.avgTaskMs / 1000).toFixed(1) + "s") : "—" }),
-        el("span", { text: fmtNum(a.tokensEst) }),
-        el("span", { text: a.costEst ? "$" + a.costEst.toFixed(4) : "$0" }),
-        el("span", { class: "dim pa-err", text: a.lastError ? a.lastError.slice(0, 60) : "—" })
+      /* Having served a request is the only proof a figure was measured. */
+      return { p, a, measured: a.requests > 0 };
+    });
+    const simCount = rows.filter(r => !r.measured).length;
+
+    body.appendChild(simCount
+      ? el("div", { class: "sim-banner" }, [
+          el("span", { class: "sim-chip" }),
+          el("span", { class: "sim-banner-text",
+            text: `${simCount} of ${rows.length} providers below have never served a request. Hatched rows are placeholder figures, not observed traffic — the SOURCE column is never mixed silently.` })
+        ])
+      : el("p", { class: "section-note", text: "Every provider listed has served at least one request — all figures below are measured." }));
+
+    const COLS = ["PROVIDER", "SOURCE", "REQUESTS", "SUCCESS", "FAILURE", "AVG RESPONSE", "AVG TASK", "TOKENS (EST)", "COST (EST)", "LAST ERROR"];
+    const table = el("table", { class: "dt" });
+    table.appendChild(el("thead", {}, [el("tr", {}, COLS.map(h => el("th", { text: h })))]));
+    const tbody = el("tbody");
+    rows.forEach(({ p, a, measured }) => {
+      const cell = (label, value, cls) => el("td", { class: cls || null, "data-label": label, text: value });
+      tbody.appendChild(el("tr", { class: measured ? "" : "sim" }, [
+        el("td", { "data-label": "PROVIDER" }, [
+          el("span", { text: a.name }),
+          measured ? null : el("span", { class: "sim-chip", style: "margin-left:7px" })
+        ]),
+        el("td", { "data-label": "SOURCE" }, [
+          el("span", { class: "src-tag" + (measured ? "" : " simulated"), text: measured ? "MEASURED" : "SIMULATED" })
+        ]),
+        cell("REQUESTS", String(a.requests), "num"),
+        cell("SUCCESS", a.successRate == null ? "—" : a.successRate + "%", "num"),
+        cell("FAILURE", a.failureRate == null ? "—" : a.failureRate + "%", "num"),
+        cell("AVG RESPONSE", a.requests ? (a.avgMs < 50 ? "instant" : (a.avgMs / 1000).toFixed(1) + "s") : "—", "num"),
+        cell("AVG TASK", a.requests ? (a.avgTaskMs < 50 ? "instant" : (a.avgTaskMs / 1000).toFixed(1) + "s") : "—", "num"),
+        cell("TOKENS (EST)", fmtNum(a.tokensEst), "num"),
+        cell("COST (EST)", a.costEst ? "$" + a.costEst.toFixed(4) : "$0", "num"),
+        cell("LAST ERROR", a.lastError ? a.lastError.slice(0, 60) : "—")
       ]));
     });
-    panel.appendChild(table);
-    body.appendChild(panel);
+    table.appendChild(tbody);
+    body.appendChild(el("div", { class: "panel", style: "overflow-x:auto" }, [table]));
   }
 
   /* ---- MODULE 7 — health monitor ---- */
@@ -3051,15 +3454,143 @@
   }
 
   /* =============================== worker runtime (PHASE BETA) =============================== */
+  /* Cortex health, latency and the live log — the three things you look at
+     when you want to know whether the runtime is actually working. A live
+     cortex and a deliberately-disabled remote provider are different kinds of
+     nothing, so they get different border styles rather than the same grey. */
+  function runtimeCortexPanel() {
+    const s = S.state.settings;
+    const st8 = RT.stats();
+    const neural = s.engine === "neural" && !!s.apiKey;
+
+    const tiles = el("div", { class: "cortex-grid" }, [
+      el("div", { class: "cortex live" }, [
+        el("div", { class: "cortex-head" }, [
+          el("span", { class: "cortex-glyph", text: "●" }),
+          el("span", { class: "cortex-label", text: "LOCAL CORTEX LIVE" })
+        ]),
+        el("div", { class: "cortex-value" }, [
+          el("span", { text: st8.executions ? String(st8.avgMs) : "—" }),
+          st8.executions ? el("small", { text: "ms" }) : null
+        ]),
+        el("div", { class: "cortex-note", text: st8.executions
+          ? `avg round trip over ${st8.executions} dispatch${st8.executions > 1 ? "es" : ""} · in-browser`
+          : "no dispatches yet · in-browser" })
+      ]),
+      el("div", { class: "cortex " + (neural ? "live" : "off") }, [
+        el("div", { class: "cortex-head" }, [
+          el("span", { class: "cortex-glyph", text: neural ? "●" : "○" }),
+          el("span", { class: "cortex-label", text: neural ? "NEURAL LINK ON" : "REMOTE PROVIDER OFF" })
+        ]),
+        el("div", { class: "cortex-value", text: neural ? s.model : "—" }),
+        el("div", { class: "cortex-note", text: neural
+          ? "Claude answers dispatches · key stored in this browser"
+          : "disabled in Settings · by design" })
+      ])
+    ]);
+
+    /* Latency — last 12 dispatches against the slow-dispatch budget. */
+    const lat = RT.recentLatency(12);
+    const chartCard = el("div", { class: "card", style: "margin-top:14px" });
+    const spikes = lat.filter(l => l.slow).length;
+    chartCard.appendChild(el("div", { style: "display:flex;align-items:baseline;gap:10px;flex-wrap:wrap" }, [
+      el("span", { class: "card-title", text: "Latency" }),
+      el("span", { class: "card-meta", text: `LAST ${lat.length || 12} DISPATCHES · MS` }),
+      el("span", {
+        class: "chart-flag" + (spikes ? "" : " calm"),
+        style: "margin-left:auto",
+        text: spikes ? `${spikes} SPIKE${spikes > 1 ? "S" : ""}` : "WITHIN BUDGET",
+        title: `A dispatch over ${RT.SLOW_MS}ms is drawn as a spike.`
+      })
+    ]));
+    chartCard.appendChild(lat.length ? latencyChart(lat) : el("p", { class: "cortex-note", style: "margin-top:12px",
+      text: "No dispatches recorded yet — run the Worker and each round trip lands here." }));
+
+    /* The log. System memory is the app's real event stream, so the runtime
+       log reads from it rather than inventing a second history. */
+    const logCard = el("div", { class: "card", style: "margin-top:14px" });
+    logCard.appendChild(el("div", { style: "display:flex;align-items:baseline;gap:9px" }, [
+      el("span", { class: "card-title", text: "Log" }),
+      el("span", { class: "chart-flag calm", style: "margin-left:auto", text: "STREAMING" })
+    ]));
+    const entries = (S.state.systemMemory || []).slice(-8).reverse();
+    logCard.appendChild(entries.length
+      ? el("div", { class: "stream", style: "margin-top:10px" }, entries.map(m => {
+          const kind = MEM_KIND[m.kind] || MEM_KIND._;
+          return el("div", { class: "stream-row" }, [
+            el("span", { class: "stream-time", text: new Date(m.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }),
+            el("span", { class: "stream-glyph " + kind.cls, text: kind.glyph }),
+            el("span", { class: "stream-msg", text: m.text })
+          ]);
+        }))
+      : el("p", { class: "cortex-note", style: "margin-top:12px", text: "Nothing logged yet." }));
+
+    return el("div", { class: "split", style: "--split-aside:400px;margin-bottom:16px" }, [
+      el("div", { style: "min-width:0" }, [tiles, chartCard]),
+      logCard
+    ]);
+  }
+
+  /* Bars against a hairline budget line. Spikes are red *and* taller — the
+     colour is reinforcement, the height is the actual signal. */
+  function latencyChart(lat) {
+    const NS = "http://www.w3.org/2000/svg";
+    const mk = (t, a) => { const n = document.createElementNS(NS, t); for (const k in a) n.setAttribute(k, a[k]); return n; };
+    const W = 540, H = 110, base = 96, top = 14;
+    const peak = Math.max(RT.SLOW_MS, ...lat.map(l => l.ms)) * 1.05;
+    const budgetY = base - (RT.SLOW_MS / peak) * (base - top);
+    const svg = mk("svg", { viewBox: `0 0 ${W} ${H}`, style: "margin-top:12px;width:100%;height:108px;display:block",
+      role: "img", "aria-label": `Latency of the last ${lat.length} dispatches in milliseconds` });
+    svg.appendChild(mk("line", { x1: 0, x2: W, y1: base, y2: base, stroke: "rgba(255,255,255,.14)" }));
+    svg.appendChild(mk("line", { x1: 0, x2: W, y1: budgetY, y2: budgetY, stroke: "rgba(255,255,255,.10)", "stroke-dasharray": "3 4" }));
+    const label = mk("text", { x: 4, y: Math.max(10, budgetY - 5), fill: "#5f5e58", "font-family": "ui-monospace,Menlo,monospace", "font-size": 9 });
+    label.textContent = `${RT.SLOW_MS} budget`;
+    svg.appendChild(label);
+    const slot = W / Math.max(lat.length, 1);
+    const barW = Math.min(32, slot - 12);
+    lat.forEach((l, i) => {
+      const h = Math.max(2, (l.ms / peak) * (base - top));
+      const bar = mk("rect", { x: i * slot + (slot - barW) / 2, y: base - h, width: barW, height: h, rx: 4,
+        fill: l.slow ? "#e66767" : "#c98500" });
+      const t = mk("title"); t.textContent = `${l.label} · ${l.provider} · ${l.ms}ms`;
+      bar.appendChild(t);
+      svg.appendChild(bar);
+    });
+    return svg;
+  }
+
+  /* System-memory kinds mapped onto the event-stream vocabulary. The glyph
+     repeats the status alphabet — filled for routine, half for learning,
+     triangle for something that needs the operator — so the stream is
+     scannable in the same way a badge column is. */
+  const MEM_KIND = {
+    spawn:     { glyph: "◆", cls: "stream-warn", label: "FORGE" },
+    replicate: { glyph: "◆", cls: "stream-warn", label: "FORGE" },
+    dna:       { glyph: "◐", cls: "stream-warn", label: "DNA" },
+    audit:     { glyph: "◐", cls: "stream-warn", label: "AUDIT" },
+    upgrade:   { glyph: "◐", cls: "stream-warn", label: "LEARN" },
+    queue:     { glyph: "●", cls: "stream-ok",   label: "QUEUE" },
+    task:      { glyph: "●", cls: "stream-ok",   label: "TASK"  },
+    vault:     { glyph: "●", cls: "stream-ok",   label: "VAULT" },
+    share:     { glyph: "●", cls: "stream-ok",   label: "SHARE" },
+    repeat:    { glyph: "●", cls: "stream-ok",   label: "REPEAT" },
+    ghost:     { glyph: "●", cls: "stream-ok",   label: "GHOST" },
+    shell:     { glyph: "●", cls: "stream-ok",   label: "SHELL" },
+    matrix:    { glyph: "●", cls: "stream-ok",   label: "MATRIX" },
+    retire:    { glyph: "▲", cls: "stream-err",  label: "RETIRE" },
+    "delete":  { glyph: "▲", cls: "stream-err",  label: "RETIRE" },
+    error:     { glyph: "▲", cls: "stream-err",  label: "ERROR" },
+    _:         { glyph: "●", cls: "stream-ok",   label: "EVENT" }
+  };
+
   function renderRuntime(main) {
     RT.ensure();
     const wrap = el("div", { class: "page" });
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `FIRST INTELLIGENCE <span class="dim">// phase beta — worker runtime</span>` }),
-        el("p", { class: "page-sub", text: "One Worker, fully operational: every run loads memory, routes through the Bridge + Provider Manager, executes its registered workflow, updates Shared Memory, logs events and reports back for evaluation. One task at a time — reliability before expansion." })
-      ])
-    ]));
+    wrap.appendChild(U.viewHead({ title: "Runtime", crumb: "INFRASTRUCTURE / RUNTIME" }));
+    wrap.appendChild(el("p", { class: "section-note", style: "max-width:78ch;margin:-6px 0 16px",
+      text: "One Worker, fully operational: every run loads memory, routes through the Bridge + Provider Manager, executes its registered workflow, updates Shared Memory, logs events and reports back for evaluation. One task at a time — reliability before expansion." }));
+
+    wrap.appendChild(runtimeCortexPanel());
 
     const c = RT.worker();
     if (!c) { wrap.appendChild(runtimeActivation()); main.appendChild(wrap); return; }
@@ -3880,26 +4411,32 @@
 
   /* =============================== mission control (PHASE EPSILON) =============================== */
   const MS_TABS = [
-    ["control", "🎯 Mission Control"],
-    ["templates", "🧩 Templates"],
-    ["analytics", "📊 Mission Analytics"]
+    ["control", "Control"],
+    ["templates", "Templates"],
+    ["analytics", "Analytics"]
   ];
+
+  /* Mission health mapped onto the shared status vocabulary, so a mission
+     phase and a clone state are read the same way — glyph and border style
+     first, colour second. */
+  const MISSION_PHASE = {
+    "on track":  { status: "active",       label: "ON TRACK" },
+    "at risk":   { status: "needs_update", label: "AT RISK" },
+    "delayed":   { status: "needs_update", label: "DELAYED" },
+    "paused":    { status: "dormant",      label: "PAUSED" },
+    "completed": { status: "active",       label: "COMPLETE" }
+  };
 
   function renderMissions(main, tab) {
     tab = tab || "control";
     MS.ensure();
     const wrap = el("div", { class: "page" });
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `MISSION CONTROL <span class="dim">// phase epsilon — autonomous orchestration</span>` }),
-        el("p", { class: "page-sub", text: "A high-level objective becomes a dependency graph of tasks executed by collaborating Workers under GOD CORE supervision. Each Worker builds on the previous one's output; failures recover (retry → reassign → escalate) from checkpoints — completed work is never redone." })
-      ])
-    ]));
-    const tabs = el("div", { class: "bridge-tabs" });
-    MS_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
-      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/missions/" + k2, text: label
-    })));
-    wrap.appendChild(tabs);
+    wrap.appendChild(U.viewHead({
+      title: "Missions", crumb: "COMMAND / MISSIONS",
+      actions: [U.tabStrip(MS_TABS.map(([k2, label]) => ({ key: k2, label })), tab, k2 => go("#/missions/" + k2))]
+    }));
+    wrap.appendChild(el("p", { class: "section-note", style: "max-width:78ch;margin:-6px 0 16px",
+      text: "A high-level objective becomes a dependency graph of tasks executed by collaborating Workers under GOD CORE supervision. Each Worker builds on the previous one's output; failures recover (retry → reassign → escalate) from checkpoints — completed work is never redone." }));
     const body = el("div", { class: "bridge-body" });
     ({ control: msControl, templates: msTemplates, analytics: msAnalytics }[tab] || msControl)(body);
     wrap.appendChild(body);
@@ -3950,27 +4487,43 @@
     body.appendChild(form);
 
     /* live mission board */
+    /* The phase badge carries the state, the bar carries the amount. Both are
+       needed: "62%" alone does not say whether the mission is in trouble. */
     const panel = el("div", { class: "panel" });
     panel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: `Missions (${MS.missions().length})` })]));
-    if (!MS.missions().length) panel.appendChild(el("p", { class: "empty-note", text: "No missions yet — launch one above." }));
+    if (!MS.missions().length) {
+      panel.appendChild(emptyState("No missions running",
+        "A mission turns one objective into a dependency graph of tasks that Workers execute in order. Launch one above.", null));
+    }
+    const list = el("div", { class: "mission-list" });
     MS.missions().slice().reverse().forEach(m => {
       const h = MS.health(m);
+      const phase = MISSION_PHASE[h] || MISSION_PHASE["on track"];
+      const meta = D.STATUS_META[phase.status];
       const bn = MS.bottleneck(m);
-      panel.appendChild(el("div", { class: "ms-row", onclick: () => go("#/mission/" + m.id) }, [
-        el("div", { class: "ms-top" }, [
-          el("b", { text: `${m.icon} ${m.name}` }),
-          el("span", { class: "ms-health h-" + h.replace(/\s+/g, "-"), text: h }),
-          el("span", { class: "dim tiny-note", text: `${m.priority} · due ${new Date(m.deadline).toLocaleDateString()}` })
+      const pct = MS.progress(m);
+      const who = Array.from(new Set(m.tasks.map(t => t.assignedWorkerName).filter(Boolean))).join(" · ") || "unassigned";
+      list.appendChild(el("div", { class: "mission-card", onclick: () => go("#/mission/" + m.id) }, [
+        el("div", { class: "mission-top" }, [
+          el("span", { class: "mission-name", text: `${m.icon} ${m.name}` }),
+          el("span", { class: "badge " + meta.cls, text: phase.label })
         ]),
-        el("div", { class: "rt-bar ms-bar" }, [el("div", { class: "rt-bar-fill", style: `width:${MS.progress(m)}%` })]),
-        el("div", { class: "dim tiny-note", text: [
-          `${MS.progress(m)}% · ${m.tasks.filter(t => t.status === "done").length}/${m.tasks.length} tasks`,
-          `workers: ${Array.from(new Set(m.tasks.map(t => t.assignedWorkerName).filter(Boolean))).join(", ") || "unassigned"}`,
+        el("div", { class: "mission-bar" }, [
+          el("div", { class: "mission-fill", style: `width:${pct}%` })
+        ]),
+        el("div", { class: "mission-foot" }, [
+          el("span", { class: "mission-who", text: who }),
+          el("span", { class: "mission-pct", text: pct + "%" })
+        ]),
+        el("p", { class: "mission-sub", text: [
+          `${m.tasks.filter(t => t.status === "done").length}/${m.tasks.length} tasks`,
+          `${m.priority} priority · due ${new Date(m.deadline).toLocaleDateString()}`,
           bn ? "next: " + bn : null,
-          m.status === "active" ? `est ${Math.ceil(MS.estCompletion(m) / 1000)}s remaining` : m.status
+          m.status === "active" ? `est ${Math.ceil(MS.estCompletion(m) / 1000)}s remaining` : null
         ].filter(Boolean).join(" · ") })
       ]));
     });
+    panel.appendChild(list);
     body.appendChild(panel);
   }
 
@@ -4172,36 +4725,104 @@
 
   /* =============================== evolution engine (PHASE ZETA) =============================== */
   const EV_TABS = [
-    ["center", "🧬 Evolution Center"],
-    ["analyzer", "📐 Analyzer"],
-    ["suggestions", "✅ Suggestions"],
-    ["experiments", "⚗ Experiments"],
-    ["prompts", "📝 Prompt Versions"],
-    ["timeline", "🕰 Timeline"]
+    ["center", "Center"],
+    ["lineage", "Lineage"],
+    ["analyzer", "Analyzer"],
+    ["suggestions", "Suggestions"],
+    ["experiments", "Experiments"],
+    ["prompts", "Prompt Versions"],
+    ["timeline", "Timeline"]
   ];
 
   function renderEvolution(main, tab) {
     tab = tab || "center";
     EV.ensure();
     const wrap = el("div", { class: "page" });
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `EVOLUTION ENGINE <span class="dim">// phase zeta — safe continuous improvement</span>` }),
-        el("p", { class: "page-sub", text: "The system measures itself, proposes improvements and runs controlled experiments — but deploys nothing without your approval. suggested → pending → approved → applied → monitored → accepted or rolled back." })
-      ])
-    ]));
-    const tabs = el("div", { class: "bridge-tabs" });
-    EV_TABS.forEach(([k2, label]) => tabs.appendChild(el("a", {
-      class: "bridge-tab" + (k2 === tab ? " on" : ""), href: "#/evolution/" + k2, text: label
-    })));
-    wrap.appendChild(tabs);
+    wrap.appendChild(U.viewHead({
+      title: "Evolution", crumb: "INTELLIGENCE / EVOLUTION",
+      actions: [U.tabStrip(EV_TABS.map(([k2, label]) => ({ key: k2, label })), tab, k2 => go("#/evolution/" + k2))]
+    }));
+    wrap.appendChild(el("p", { class: "section-note", style: "max-width:78ch;margin:-6px 0 16px",
+      text: "The system measures itself, proposes improvements and runs controlled experiments — but deploys nothing without your approval. suggested → pending → approved → applied → monitored → accepted or rolled back." }));
     const body = el("div", { class: "bridge-body" });
     ({
-      center: evCenter, analyzer: evAnalyzer, suggestions: evSuggestions,
+      center: evCenter, lineage: evLineage, analyzer: evAnalyzer, suggestions: evSuggestions,
       experiments: evExperiments, prompts: evPrompts, timeline: evTimeline
     }[tab] || evCenter)(body);
     wrap.appendChild(body);
     main.appendChild(wrap);
+  }
+
+  /* ---- lineage ----
+     Indentation, not a graph. A node-and-edge diagram needs pan and zoom to
+     be readable and collapses entirely at 375px; an indented list carries the
+     same parentage, survives every width unchanged, and can be read by a
+     screen reader in order. */
+  function evLineage(body) {
+    const clones = S.state.clones;
+    if (!clones.length) {
+      body.appendChild(emptyState("No lineage yet",
+        "Forge a clone, then replicate your top performer — each replica records its parent and appears here one level in.", null));
+      return;
+    }
+
+    /* Fitness is the clone's average rating against the fleet average: the
+       question lineage answers is "did replicating actually help". */
+    const scoreOf = c => (c.stats.ratingCount ? c.stats.ratingSum / c.stats.ratingCount : null);
+    const rated = clones.map(scoreOf).filter(v => v != null);
+    const fleet = rated.length ? rated.reduce((a, b) => a + b, 0) / rated.length : null;
+
+    const byParent = new Map();
+    clones.forEach(c => {
+      /* Replicas made before parentId was recorded fall back to no parent —
+         they render as roots rather than being attached to a guess. */
+      const key = c.parentId && clones.some(x => x.id === c.parentId) ? c.parentId : null;
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(c);
+    });
+
+    const list = el("div", { class: "lineage" });
+    (function walk(parentId, depth) {
+      (byParent.get(parentId) || [])
+        .slice()
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .forEach(c => {
+          const status = E.effectiveStatus(c);
+          const meta = D.STATUS_META[status];
+          const mine = scoreOf(c);
+          let fit = "—", fitCls = "fit-flat";
+          if (mine != null && fleet) {
+            const pct = Math.round(((mine - fleet) / fleet) * 100);
+            fit = (pct > 0 ? "+" : "") + pct + "%";
+            fitCls = pct > 0 ? "fit-up" : pct < 0 ? "fit-down" : "fit-flat";
+          }
+          const kids = (byParent.get(c.id) || []).length;
+          list.appendChild(el("div", { class: "lineage-row", style: `--depth:${depth}`,
+            onclick: () => go("#/clone/" + c.id) }, [
+            el("span", { class: "badge " + meta.cls, "aria-label": meta.label, title: meta.label }),
+            el("div", { class: "lineage-body" }, [
+              el("div", { class: "lineage-id" }, [
+                el("span", { class: "lineage-name", text: c.name }),
+                el("span", { class: "lineage-gen", text: "GEN " + (c.generation || 1) })
+              ]),
+              el("div", { class: "lineage-note", text: [
+                c.role,
+                kids ? `${kids} replica${kids > 1 ? "s" : ""}` : null,
+                c.stats.tasks ? `${c.stats.tasks} task${c.stats.tasks > 1 ? "s" : ""}` : "no tasks yet"
+              ].filter(Boolean).join(" · ") })
+            ]),
+            el("span", { class: "lineage-fit " + fitCls, text: fit,
+              title: mine == null ? "Not rated yet" : "Average rating vs the fleet average" })
+          ]));
+          walk(c.id, depth + 1);
+        });
+    })(null, 0);
+
+    body.appendChild(list);
+    body.appendChild(el("p", { class: "section-note", style: "margin-top:12px",
+      text: fleet
+        ? "Fitness is each clone's average rating measured against the fleet average — indentation is parentage, not ranking."
+        : "Rate a few task outputs and each clone's fitness against the fleet average appears here." }));
   }
 
   /* ---- MODULES 1 + 10 — center + dashboard ---- */
@@ -5690,13 +6311,13 @@
   /* =============================== system memory =============================== */
   function renderMemory(main) {
     const st = S.state;
-    const wrap = el("div", { class: "page narrow" });
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `SYSTEM MEMORY <span class="dim">// brain v${st.godBrainVersion}</span>` }),
-        el("p", { class: "page-sub", text: "GOD CORE DNA + the permanent log of every evolution." })
-      ])
-    ]));
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(U.viewHead({
+      title: "System Memory", crumb: "INTELLIGENCE / MEMORY",
+      actions: [el("span", { class: "card-meta", text: `${st.systemMemory.length} ENTRIES · BRAIN v${st.godBrainVersion}` })]
+    }));
+    wrap.appendChild(el("p", { class: "section-note", style: "margin:-6px 0 16px",
+      text: "GOD CORE DNA plus the permanent log of every evolution." }));
 
     /* DNA trainer */
     const dnaPanel = el("div", { class: "panel form-panel" });
@@ -5720,35 +6341,112 @@
     ]));
     wrap.appendChild(dnaPanel);
 
-    /* log */
+    /* Evolution log. Density is the point here — mono timestamps, a
+       fixed-width kind column, one line per event at every width. This is the
+       one screen where packing more in is the right call. */
     const logPanel = el("div", { class: "panel" });
     logPanel.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "Evolution log" })]));
-    const icons = { spawn: "◈", replicate: "⧉", delete: "✕", audit: "◉", upgrade: "⇪", dna: "🧬", share: "⇪", repeat: "⟲", queue: "⌁", ghost: "👻", shell: "🎭", matrix: "🧩" };
-    const list = el("div", { class: "log-list" });
     const entries = st.systemMemory.slice().reverse();
-    if (!entries.length) list.appendChild(el("p", { class: "empty-note", text: "Nothing logged yet." }));
-    entries.forEach(e2 => {
-      list.appendChild(el("div", { class: "log-row" }, [
-        el("span", { class: "log-ico", text: icons[e2.kind] || "·" }),
-        el("span", { class: "log-text", text: e2.text }),
-        el("span", { class: "log-time", text: timeAgo(e2.at) })
-      ]));
-    });
-    logPanel.appendChild(list);
+    if (!entries.length) {
+      logPanel.appendChild(emptyState("Nothing logged yet",
+        "Every forge, replication, audit and brain push is written here permanently.", null));
+    } else {
+      const list = el("div", { class: "stream" });
+      entries.forEach(e2 => {
+        const kind = MEM_KIND[e2.kind] || MEM_KIND._;
+        const at = new Date(e2.at);
+        list.appendChild(el("div", { class: "stream-row" }, [
+          el("span", { class: "stream-time", text: at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }), title: at.toLocaleString() }),
+          el("span", { class: "stream-kind " + kind.cls, text: kind.label }),
+          el("span", { class: "stream-msg", text: e2.text }),
+          el("span", { class: "stream-time", text: timeAgo(e2.at) })
+        ]));
+      });
+      logPanel.appendChild(list);
+    }
     wrap.appendChild(logPanel);
     main.appendChild(wrap);
   }
 
   /* =============================== settings =============================== */
-  function renderSettings(main) {
-    const st = S.state;
-    const wrap = el("div", { class: "page narrow" });
-    wrap.appendChild(el("div", { class: "page-head" }, [
-      el("div", {}, [
-        el("h1", { class: "page-title", html: `SETTINGS <span class="dim">// engine & data</span>` }),
-        el("p", { class: "page-sub", text: "Everything lives in this browser. No accounts, no servers." })
+  /* A 56px row with a real checkbox behind a drawn switch: keyboard focus,
+     screen-reader state and the space bar all keep working, and only the
+     rendering is bespoke. The value word ("ON" / "OFF") is stated as text as
+     well as position, so the state does not depend on reading a knob. */
+  function toggleRow(opts) {
+    const box = el("input", { type: "checkbox", role: "switch", "aria-label": opts.name });
+    box.checked = !!opts.checked;
+    const val = el("span", { class: "set-val", text: opts.checked ? (opts.on || "ON") : (opts.off || "OFF") });
+    const row = el("div", { class: "set-row" + (opts.checked ? " on" : "") }, [
+      el("div", { class: "set-body" }, [
+        el("div", { class: "set-name", text: opts.name }),
+        el("div", { class: "set-desc", text: opts.desc })
+      ]),
+      val,
+      el("label", { class: "switch" }, [
+        box,
+        el("span", { class: "switch-track" }, [el("span", { class: "switch-knob" })])
       ])
-    ]));
+    ]);
+    box.addEventListener("change", () => {
+      row.classList.toggle("on", box.checked);
+      val.textContent = box.checked ? (opts.on || "ON") : (opts.off || "OFF");
+      opts.onChange(box.checked);
+    });
+    return row;
+  }
+
+  function renderSettings(main, tab) {
+    const st = S.state;
+    const view = ["engine", "data"].indexOf(tab) >= 0 ? tab : "general";
+    const wrap = el("div", { class: "page" });
+    wrap.appendChild(U.viewHead({
+      title: "Settings", crumb: "PLATFORM / SETTINGS",
+      actions: [U.tabStrip(
+        [{ key: "general", label: "General" }, { key: "engine", label: "Engine" }, { key: "data", label: "Data" }],
+        view, k => go("#/settings/" + k)
+      )]
+    }));
+    wrap.appendChild(el("p", { class: "section-note", style: "margin:-6px 0 16px",
+      text: "Everything lives in this browser. No accounts, no servers." }));
+
+    if (view === "general") {
+      const panel = el("div", { class: "panel" });
+      panel.appendChild(toggleRow({
+        name: "Sound FX", desc: "Confirmation tones on forge, evolution and dispatch.",
+        checked: st.settings.sound,
+        onChange: v => { S.setSettings({ sound: v }); if (v) U.sfx("spawn"); }
+      }));
+      panel.appendChild(toggleRow({
+        name: "Compact density", desc: "Tighter vertical rhythm across every view.",
+        checked: st.settings.compact,
+        onChange: v => { S.setSettings({ compact: v }); document.documentElement.classList.toggle("compact", v); }
+      }));
+      panel.appendChild(toggleRow({
+        name: "Weekly digests", desc: "Surface the weekly audit prompt when performance data is unanalysed.",
+        checked: st.settings.digests,
+        onChange: v => S.setSettings({ digests: v })
+      }));
+      /* Stated, not toggled: the SIM treatment is not a preference. A build
+         that could hide the hatch would let a simulated figure be screenshot
+         as a real one, which is the exact failure the rule exists to stop. */
+      panel.appendChild(el("div", { class: "set-row on" }, [
+        el("div", { class: "set-body" }, [
+          el("div", { class: "set-name", text: "Simulated data marking" }),
+          el("div", { class: "set-desc", text: "Hatch and SIM badge on every simulated figure. Always on by design — a figure that cannot be told apart from a measured one is worse than no figure." })
+        ]),
+        el("span", { class: "set-val", text: "ALWAYS" })
+      ]));
+      wrap.appendChild(panel);
+      main.appendChild(wrap);
+      return;
+    }
+
+    if (view === "data") {
+      wrap.appendChild(settingsDataPanel());
+      main.appendChild(wrap);
+      return;
+    }
 
     /* engine panel */
     const eng = el("div", { class: "panel form-panel" });
@@ -5812,17 +6510,10 @@
       })
     ]));
     wrap.appendChild(eng);
+    main.appendChild(wrap);
+  }
 
-    /* experience panel */
-    const xp = el("div", { class: "panel form-panel" });
-    xp.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "◈ Experience" })]));
-    const soundChk = el("input", { type: "checkbox" });
-    soundChk.checked = st.settings.sound;
-    soundChk.addEventListener("change", () => { S.setSettings({ sound: soundChk.checked }); if (soundChk.checked) U.sfx("spawn"); });
-    xp.appendChild(el("label", { class: "check-row" }, [soundChk, el("span", { text: "Sound FX on clone spawn / evolution" })]));
-    wrap.appendChild(xp);
-
-    /* data panel */
+  function settingsDataPanel() {
     const data = el("div", { class: "panel form-panel" });
     data.appendChild(el("div", { class: "panel-head" }, [el("h2", { class: "panel-title", text: "⛃ Data" })]));
     data.appendChild(el("div", { class: "form-actions wrap" }, [
@@ -5851,11 +6542,24 @@
       }),
       el("button", {
         class: "btn", text: "Deploy demo squadron", onclick: () => { S.seedDemoClones(); toast("APEX, QUILL and VULCAN deployed.", "ok"); U.sfx("spawn"); }
-      }),
+      })
+    ]));
+
+    /* The destructive action is stated plainly rather than hidden behind a
+       disclosure — and it names what is actually lost, counted from state,
+       not a generic "all data" that the operator has to translate. */
+    const st = S.state;
+    data.appendChild(el("div", { class: "danger-block" }, [
+      el("div", { class: "danger-label", text: "DANGER" }),
+      el("p", { class: "danger-body", text:
+        `Everything lives in this browser. Clearing storage permanently retires `
+        + `${st.clones.length} clone${st.clones.length === 1 ? "" : "s"}, `
+        + `${st.tasks.length} task${st.tasks.length === 1 ? "" : "s"} and your GOD CORE DNA. `
+        + `Export a backup first if you want any of it back.` }),
       el("button", {
-        class: "btn danger ghost", text: "⚠ Factory reset", onclick: () => U.modal({
+        class: "btn danger", text: "Clear localStorage", onclick: () => U.modal({
           title: "Factory reset?",
-          body: "<p>Deletes every clone, task, vault item and your GOD CORE DNA from this browser. This cannot be undone.</p>",
+          body: `<p>Deletes every clone, task, vault item and your GOD CORE DNA from this browser. This cannot be undone.</p>`,
           actions: [
             { label: "Cancel", cls: "ghost" },
             { label: "Erase Everything", cls: "danger", onClick: () => { S.reset(); location.hash = "#/dashboard"; location.reload(); } }
@@ -5863,8 +6567,7 @@
         })
       })
     ]));
-    wrap.appendChild(data);
-    main.appendChild(wrap);
+    return data;
   }
 
   /* =============================== onboarding =============================== */

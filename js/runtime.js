@@ -313,6 +313,23 @@ PRISM.runtime = (function () {
     return { ok: true, exec, outcome };
   }
 
+  /* ---------------- latency ----------------
+     An execution slower than this is a spike worth drawing in red rather than
+     an ordinary dispatch. The Local Cortex answers in single-digit
+     milliseconds, so in practice only a Neural Link round trip crosses it —
+     which is exactly the case the operator wants to see on the chart. */
+  const SLOW_MS = 3000;
+
+  /* The last N dispatches, oldest first, for the latency chart. */
+  function recentLatency(n) {
+    return rt().executions.slice(-(n || 12)).map(x => ({
+      ms: x.ms,
+      slow: x.ms > SLOW_MS,
+      label: x.taskType || "dispatch",
+      provider: x.provider || "—"
+    }));
+  }
+
   /* ---------------- stats ---------------- */
   function stats() {
     const r = rt();
@@ -335,6 +352,7 @@ PRISM.runtime = (function () {
     TASK_STATES, STATE_HELP, MISSION_WF_NAME, DEFAULT_WF_STEPS,
     ensure, rt, worker, designate, setObjective,
     addTask, cancelTask, queue, nextTask, waitingTasks, isRunning,
-    missionWorkflow, gatherMemory, run, evaluate, autoQuality, stats
+    missionWorkflow, gatherMemory, run, evaluate, autoQuality, stats,
+    SLOW_MS, recentLatency
   };
 })();

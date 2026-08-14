@@ -1,0 +1,4 @@
+# The verification harnesses in test/ require playwright-core, which is
+# provided by the environment rather than vendored — there is no build step
+# and no package.json, and the app itself has no dependencies at all.
+node_modules/

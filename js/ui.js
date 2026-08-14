@@ -47,6 +47,50 @@ PRISM.ui = (function () {
     return Math.floor(s / 86400) + "d ago";
   }
 
+  /* ---------------- view chrome (turn-2 vocabulary) ----------------
+     Every redesigned view opens with the same three things: a title, the
+     rail group it belongs to, and its tab strip. Built here once so a new
+     view cannot invent a fourth header shape. */
+
+  /* viewHead — title + breadcrumb + optional right-hand actions.
+     `crumb` is the rail group and view, e.g. "AGENTS / FORGE"; a
+     deep-linked screen still says where it sits in the navigation. */
+  function viewHead(opts) {
+    const titles = el("div", { class: "view-head-titles" }, [
+      el("h1", { class: "view-title", text: opts.title }),
+      opts.crumb ? el("p", { class: "view-crumb", text: opts.crumb }) : null
+    ]);
+    const head = el("div", { class: "view-head" }, [titles]);
+    const actions = (opts.actions || []).filter(Boolean);
+    if (actions.length) head.appendChild(el("div", { class: "view-head-actions" }, actions));
+    return head;
+  }
+
+  /* tabStrip — 6–9 pills, horizontally scrollable at 375, wrapping at 768.
+     Never a <select>: a dropdown hides how many destinations exist. */
+  function tabStrip(items, currentKey, onPick) {
+    const strip = el("div", { class: "tabs", role: "tablist" });
+    items.forEach(it => {
+      const on = it.key === currentKey;
+      strip.appendChild(el("button", {
+        class: "tab" + (on ? " active" : ""),
+        role: "tab", "aria-selected": on ? "true" : "false",
+        text: it.label,
+        onclick: () => { if (!on && onPick) onPick(it.key); }
+      }));
+    });
+    return strip;
+  }
+
+  /* badge — the status vocabulary. Colour is reinforcement only: the glyph
+     comes from the ::before rule and the border style (solid / dashed /
+     dotted / double) is what survives greyscale, so never pass a bare
+     colour where a status key belongs. */
+  function badge(statusKey, labelOverride) {
+    const meta = PRISM.data.STATUS_META[statusKey] || PRISM.data.STATUS_META.dormant;
+    return el("span", { class: "badge " + meta.cls, text: labelOverride || meta.label });
+  }
+
   /* ---------------- toasts ---------------- */
   function toast(msg, kind) {
     const root = $("#toast-root");
@@ -285,6 +329,7 @@ PRISM.ui = (function () {
 
   return {
     $, $$, el, esc, fmtMoney, fmtNum, fmtCompact, timeAgo,
+    viewHead, tabStrip, badge,
     toast, modal, closeModal, sfx, evolveFlash,
     barChart, sparkline, stars,
     copyText, emailExport, pdfExport, shareToX, showTip, hideTip
