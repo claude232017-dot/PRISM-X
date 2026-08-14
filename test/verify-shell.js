@@ -120,8 +120,38 @@ const WIDTHS = [
         };
       });
       await page.screenshot({ path: `${OUT}/shot-${size.name}-sheet.png` });
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(300);
+
+      // Pick a destination and confirm the whole round trip. The previous
+      // version pressed Escape and screenshotted, which is why it missed a
+      // closed sheet still swallowing every tap on the page.
+      await page.locator('#nav-sheet .sheet-link').first().click();
+      await page.waitForTimeout(700);
+      reach.navigated = await page.evaluate(() => location.hash);
+      reach.stillOpen = await page.evaluate(
+        () => { const s = document.querySelector('#nav-sheet'); return !!s && !s.hidden; },
+      );
+
+      // The killer: a hidden overlay that still intercepts pointer events.
+      // `hidden` is only display:none from the UA sheet, and any author
+      // `display` beats it — so the page looks fine and nothing is tappable.
+      reach.blocksTaps = await page.evaluate(() => {
+        const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 3);
+        return !!(hit && hit.closest('#nav-sheet'));
+      });
+
+      // The tab bar must stay usable while a group is open, or switching
+      // groups costs two taps and the close-by-tapping-again toggle is dead.
+      await page.locator('#tabbar .tab-btn').nth(0).click();
+      await page.waitForTimeout(350);
+      const opened = await page.evaluate(
+        () => { const s = document.querySelector('#nav-sheet'); return !!s && !s.hidden; },
+      );
+      await page.locator('#tabbar .tab-btn').nth(0).click();
+      await page.waitForTimeout(350);
+      const closed = await page.evaluate(
+        () => { const s = document.querySelector('#nav-sheet'); return !!s && !s.hidden; },
+      );
+      reach.toggles = opened && !closed;
     }
 
     await page.screenshot({ path: `${OUT}/shot-${size.name}.png`, fullPage: false });
@@ -146,6 +176,10 @@ const WIDTHS = [
       if (cut.length) bad.push(`truncated tab labels: ${cut.join(', ')}`);
       if (r.fabOverlapsTabbar) bad.push('help FAB overlaps the tab bar');
       if (reach && reach.covered) bad.push('help FAB floats above the open sheet');
+      if (reach && !/#\//.test(reach.navigated || '')) bad.push('choosing a sheet link did not navigate');
+      if (reach && reach.stillOpen) bad.push('sheet stayed open after choosing a destination');
+      if (reach && reach.blocksTaps) bad.push('closed sheet still intercepts taps');
+      if (reach && !reach.toggles) bad.push('tab bar unusable while the sheet is open');
     } else {
       if (!r.railShown) bad.push('rail hidden on desktop/tablet');
       if (r.tabbarShown) bad.push('tab bar visible on desktop/tablet');

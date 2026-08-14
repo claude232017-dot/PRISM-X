@@ -63,6 +63,12 @@ PRISM.shell = (function () {
     const sheet = $("#nav-sheet");
     if (!sheet) return;
     sheet.hidden = true;
+    // Belt as well as braces. `.sheet[hidden]{display:none}` in the stylesheet
+    // is the real fix, but a full-screen overlay that fails to disappear
+    // swallows every tap on the page and leaves no visible trace of why — so
+    // the class comes off here too, and neither mechanism is load-bearing
+    // alone.
+    sheet.className = "";
     sheet.innerHTML = "";
     openGroup = null;
     syncTabs();
@@ -90,9 +96,11 @@ PRISM.shell = (function () {
     openGroup = group.name;
 
     // A tap on the scrim dismisses; a tap inside the panel must not.
-    sheet.addEventListener("click", (e) => {
+    // Assigned rather than added: `addEventListener` here would stack another
+    // handler on every open, since the element itself is never replaced.
+    sheet.onclick = (e) => {
       if (e.target === sheet) closeSheet();
-    });
+    };
     $$(".sheet-link", sheet).forEach((a) =>
       a.addEventListener("click", () => {
         // Let the hash change first, then tear the sheet down, so the router
