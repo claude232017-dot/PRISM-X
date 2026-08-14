@@ -129,7 +129,39 @@ PRISM.shell = (function () {
     });
   }
 
+  /**
+   * Gets the tab bar out of the way while a field is being typed into.
+   *
+   * Driven by focus rather than by `visualViewport`, because focus is what
+   * actually matters here and it behaves the same everywhere. A hardware
+   * keyboard on a tablet raises no software keyboard, but the bar is equally
+   * unwanted over the field being edited, and `visualViewport` would report
+   * nothing in that case.
+   *
+   * `focusin`/`focusout` rather than `focus`/`blur`: those two do not bubble,
+   * and every field in this app is created after load by a view render, so
+   * there is nothing to bind to at mount time.
+   */
+  function mountKeyboardAvoidance() {
+    const typing = (el) =>
+      !!el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && el.type !== "checkbox" &&
+      el.type !== "radio";
+
+    document.addEventListener("focusin", (e) => {
+      if (typing(e.target)) document.body.classList.add("kb-open");
+    });
+    document.addEventListener("focusout", () => {
+      // Deferred one tick: moving between two fields fires focusout before
+      // the next focusin, and hiding then showing the bar between them would
+      // flicker it on every tab through a form.
+      setTimeout(() => {
+        if (!typing(document.activeElement)) document.body.classList.remove("kb-open");
+      }, 0);
+    });
+  }
+
   function mount() {
+    mountKeyboardAvoidance();
     const bar = $("#tabbar");
     if (!bar) return;
     const list = groups();

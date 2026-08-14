@@ -46,6 +46,19 @@ const WIDTHS = [
         tabCount: document.querySelectorAll('#tabbar .tab-btn').length,
         railLinks: document.querySelectorAll('.rail-link').length,
         hScroll: document.documentElement.scrollWidth > window.innerWidth + 1,
+        // Element-level, because `html,body{overflow-x:hidden}` clips the
+        // overflow and clamps scrollWidth — the document check reported a
+        // clean page while Settings was cut off by 32px.
+        clipped: (() => {
+          const W = document.documentElement.clientWidth;
+          return Array.from(document.querySelectorAll('#view *'))
+            .filter((e) => { const r = e.getBoundingClientRect();
+                             return r.width > 0 && r.right > W + 1; })
+            .slice(0, 3)
+            .map((e) => e.tagName.toLowerCase() +
+              (typeof e.className === 'string' && e.className
+                ? '.' + e.className.trim().split(/\s+/)[0] : ''));
+        })(),
         scrollW: document.documentElement.scrollWidth,
         innerW: window.innerWidth,
         labelShown: (() => {
@@ -154,6 +167,49 @@ const WIDTHS = [
       reach.toggles = opened && !closed;
     }
 
+    // Form fields must stay visible while being typed into. The tab bar is
+    // position:fixed and overlays the viewport, and the browser's
+    // scroll-into-view has no idea it is there — the last field on Settings
+    // sat 46px underneath it.
+    let form = null;
+    if (size.w < 768) {
+      await page.goto('http://127.0.0.1:8899/index.html#/settings');
+      await page.waitForTimeout(1000);
+      // Shrink the viewport the way a software keyboard does, so the field
+      // is judged against the space actually left for it.
+      await page.setViewportSize({ width: size.w, height: 420 });
+      await page.waitForTimeout(200);
+      const TEXT_FIELD =
+        'input[type=text]:visible, input[type=password]:visible, input[type=email]:visible, ' +
+        'input[type=number]:visible, input[type=search]:visible, input[type=url]:visible, ' +
+        'input:not([type]):visible, textarea:visible';
+      const n = await page.locator(TEXT_FIELD).count();
+      if (n) {
+        const last = page.locator(TEXT_FIELD).nth(n - 1);
+        await last.scrollIntoViewIfNeeded().catch(() => {});
+        await last.focus().catch(() => {});
+        await page.waitForTimeout(400);
+        form = await page.evaluate(() => {
+          const el = document.activeElement;
+          if (!el || el === document.body) return { focused: false };
+          const bar = document.querySelector('#tabbar');
+          const shown = bar && getComputedStyle(bar).display !== 'none';
+          const barTop = shown ? bar.getBoundingClientRect().top : Infinity;
+          const f = el.getBoundingClientRect();
+          return {
+            focused: true,
+            barHidden: !shown,
+            underBar: f.bottom > barTop,
+            offscreen: f.bottom > window.innerHeight || f.top < 0,
+          };
+        });
+      }
+      await page.screenshot({ path: `${OUT}/shot-${size.name}-typing.png` });
+      await page.setViewportSize({ width: size.w, height: size.h });
+      await page.goto('http://127.0.0.1:8899/index.html#/dashboard');
+      await page.waitForTimeout(800);
+    }
+
     await page.screenshot({ path: `${OUT}/shot-${size.name}.png`, fullPage: false });
 
     const bad = [];
@@ -162,6 +218,9 @@ const WIDTHS = [
       bad.push(`metric grid has ${r.kpiCols} columns, expected ${wantCols}`);
     }
     if (r.hScroll) bad.push(`horizontal scroll (${r.scrollW} > ${r.innerW})`);
+    if (r.clipped && r.clipped.length) {
+      bad.push(`content clipped past the viewport: ${r.clipped.join(', ')}`);
+    }
     if (r.railLinks !== 20) bad.push(`rail has ${r.railLinks} links, expected 20`);
     if (size.w < 768) {
       if (r.railShown) bad.push('rail visible on mobile');
@@ -180,6 +239,11 @@ const WIDTHS = [
       if (reach && reach.stillOpen) bad.push('sheet stayed open after choosing a destination');
       if (reach && reach.blocksTaps) bad.push('closed sheet still intercepts taps');
       if (reach && !reach.toggles) bad.push('tab bar unusable while the sheet is open');
+      if (form && form.focused) {
+        if (!form.barHidden) bad.push('tab bar still shown while typing');
+        if (form.underBar) bad.push('focused field sits under the tab bar');
+        if (form.offscreen) bad.push('focused field scrolled off screen');
+      }
     } else {
       if (!r.railShown) bad.push('rail hidden on desktop/tablet');
       if (r.tabbarShown) bad.push('tab bar visible on desktop/tablet');

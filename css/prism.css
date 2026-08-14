@@ -1669,3 +1669,42 @@ html,body{ overflow-x:hidden; max-width:100% }
       A tab bar whose whole job is switching between groups has to keep
       working while a group is showing. */
 #tabbar{ z-index: 96 }
+
+/* 8. Form fields disappearing behind the tab bar.
+      Focusing the last input on Settings at 375px left it 46px under the
+      bar, and scrollIntoView could not save it: `body{padding-bottom:68px}`
+      reserves space at the end of the *document*, while the bar overlays the
+      bottom of the *viewport*. The browser scrolls an element to the
+      viewport edge and considers the job done — it has no idea something is
+      painted on top.
+
+      `scroll-padding-bottom` is the property for exactly this: it tells the
+      scroll machinery which strip of the viewport is occluded, so focus
+      scrolling, anchor jumps and scrollIntoView all stop short of it. */
+html{ scroll-padding-bottom: 0 }
+@media (max-width:767px){
+  html{ scroll-padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)) }
+}
+
+/* 9. The tab bar while the keyboard is up.
+      A software keyboard can take half the screen, and the bar then costs 68
+      of the few remaining pixels to show navigation nobody can use mid-entry.
+      It hides on focus and returns on blur. The body padding deliberately
+      stays put: reclaiming those 68px would reflow the page under the user's
+      thumb while they are typing in it. */
+body.kb-open #tabbar{ display: none }
+
+/* 10. Settings overflowed the viewport by 32px at 375.
+       `#view` became a flex child when the rail was introduced, and a flex
+       item defaults to `min-width:auto` — it refuses to shrink below its
+       content's intrinsic width, so a wide child pushed the whole column
+       past the screen. The delivered layer sets `min-width:0` on cards,
+       grids, tables and `pre`, but not on the container holding them.
+
+       `html,body{overflow-x:hidden}` in that layer is why this was invisible:
+       it clips the overflow and clamps scrollWidth, so the page neither
+       scrolls sideways nor reports that anything is wrong. The content was
+       simply cut off. Worth keeping in mind — that rule hides this class of
+       bug rather than preventing it. */
+#view{ min-width: 0 }
+.shell > *{ min-width: 0 }
